@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from "../types";
 
@@ -199,7 +198,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext?: string, 
       model: model,
       contents: { parts: [{ text: prompt }] },
       config: {
-        ...(isDeep ? { thinkingConfig: { thinkingBudget: 16384 } } : {}),
+        ...(isDeep ? { thinkingConfig: { thinkingBudget: 16384 }, maxOutputTokens: 32000 } : {}),
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,

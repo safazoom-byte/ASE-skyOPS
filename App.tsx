@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
-import { DAYS_OF_WEEK } from './constants';
 import { FlightManager } from './components/FlightManager';
 import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
-import { ProgramDisplay } from './components/RosterDisplay';
+import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramScanner } from './components/ProgramScanner';
 import { ProgramChat } from './components/ProgramChat';
 import { generateAIProgram } from './services/geminiService';
@@ -16,8 +15,6 @@ const STORAGE_KEYS = {
   PROGRAMS: 'skyops_programs_v2',
   START_DATE: 'skyops_start_date',
   END_DATE: 'skyops_end_date',
-  NUM_DAYS: 'skyops_num_days',
-  CUSTOM_RULES: 'skyops_custom_rules',
   TEMPLATE: 'skyops_template_binary'
 };
 
