@@ -198,7 +198,10 @@ export async function generateAIProgram(data: ProgramData, qmsContext?: string, 
       model: model,
       contents: { parts: [{ text: prompt }] },
       config: {
-        ...(isDeep ? { thinkingConfig: { thinkingBudget: 16384 }, maxOutputTokens: 32000 } : {}),
+        ...(isDeep ? { 
+          thinkingConfig: { thinkingBudget: 16384 }, 
+          maxOutputTokens: 25000 
+        } : {}),
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -234,9 +237,6 @@ export async function generateAIProgram(data: ProgramData, qmsContext?: string, 
   }
 }
 
-/**
- * Updates an existing program based on natural language instructions.
- */
 export async function modifyProgramWithAI(
   instruction: string, 
   data: ProgramData
@@ -244,24 +244,19 @@ export async function modifyProgramWithAI(
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    Act as an Expert Station Scheduler. You are given a user instruction to modify a weekly flight handling program.
+    Act as an Expert Station Scheduler. Modify the current weekly program based on the instruction.
     
     USER INSTRUCTION: "${instruction}"
 
-    CURRENT CONTEXT:
+    CONTEXT:
     - Staff: ${JSON.stringify(data.staff.map(s => ({ id: s.id, name: s.name, initials: s.initials })))}
     - Flights: ${JSON.stringify(data.flights.map(f => ({ id: f.id, flightNumber: f.flightNumber, day: f.day })))}
-    - Current Programs: ${JSON.stringify(data.programs)}
+    - Programs: ${JSON.stringify(data.programs)}
 
     TASK:
-    - Apply the change requested by the user.
-    - If the user wants to swap people, swap them.
-    - If the user wants to remove someone, remove them.
-    - If the user wants to add someone to a flight, create a new assignment object with a unique 'id'.
-    - Ensure IDs for staff, flights, and shifts remain consistent with the provided data.
-    - RETURN THE ENTIRE UPDATED DailyProgram[] ARRAY.
-
-    STRICT: Return ONLY valid JSON representing the full DailyProgram[] array. No conversational text.
+    - Return the FULL array of DailyProgram objects after modifications.
+    - If someone is swapped, swap their staffId in the relevant assignment.
+    - Ensure all assignment IDs remain unique.
   `;
 
   try {
