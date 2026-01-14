@@ -8,9 +8,9 @@ export interface ExtractionMedia {
 
 const getApiKey = () => {
   const key = process.env.API_KEY;
-  // Handle various states of missing/undefined keys in production
-  if (!key || key === 'undefined' || key === 'API_KEY' || key === '') {
-    throw new Error("Missing API Key. Please add 'API_KEY' to your Vercel Environment Variables and redeploy.");
+  // If the key is missing, throw a helpful error that guides the user to the fix
+  if (!key || key === 'undefined' || key === '') {
+    throw new Error("API_KEY not found. 1. Ensure it is added to Vercel Environment Variables. 2. You MUST click 'Redeploy' in Vercel to apply changes.");
   }
   return key;
 };
@@ -31,7 +31,8 @@ export async function extractDataFromContent(content: {
   media?: ExtractionMedia[], 
   textData?: string 
 }): Promise<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] }> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const modelName = 'gemini-3-flash-preview';
   
   const prompt = `
@@ -132,7 +133,8 @@ export async function extractDataFromContent(content: {
 }
 
 export async function extractStaffOnly(content: { media?: ExtractionMedia[], textData?: string }): Promise<Staff[]> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Extract staff names and initials from the provided personnel list. Ignore any group or department info.`;
   try {
     const parts: any[] = [{ text: prompt }];
@@ -170,7 +172,8 @@ export async function extractStaffOnly(content: { media?: ExtractionMedia[], tex
 }
 
 export async function generateAIProgram(data: ProgramData, qmsContext?: string, options?: { minHours?: number, customRules?: string, numDays?: number, mode?: 'standard' | 'deep', fairRotation?: boolean }): Promise<DailyProgram[]> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const isDeep = options?.mode === 'deep';
   const model = isDeep ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
   
@@ -250,7 +253,8 @@ export async function modifyProgramWithAI(
   instruction: string, 
   data: ProgramData
 ): Promise<DailyProgram[]> {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   
   const prompt = `
     Act as an Expert Station Scheduler. Modify the current weekly program based on the instruction.
