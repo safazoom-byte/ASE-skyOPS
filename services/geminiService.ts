@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from "../types";
 
@@ -7,12 +8,12 @@ export interface ExtractionMedia {
 }
 
 const getApiKey = () => {
+  // Try to get the key from the injected process.env
   const key = process.env.API_KEY;
   
-  // Diagnostic log for debugging in production browser console
   if (!key || key === 'undefined' || key === '' || key === 'null') {
-    console.error("SkyOPS AI Error: API Key is missing or incorrectly injected.");
-    throw new Error("API_KEY MISSING. Fix: 1. Add API_KEY to Vercel Environment Variables. 2. IMPORTANT: Click 'REDEPLOY' in Vercel to bake the key into the app.");
+    console.error("SkyOPS AI Error: API Key missing in browser context.");
+    throw new Error("API KEY MISSING: The variable GOOGLE_API_KEY was not found during the build. ACTION: 1. Check Vercel Env Vars. 2. Click 'REDEPLOY' in Vercel.");
   }
   return key;
 };
