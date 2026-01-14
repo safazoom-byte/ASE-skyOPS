@@ -7,17 +7,6 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
-const getApiKey = () => {
-  // Try to get the key from the injected process.env
-  const key = process.env.API_KEY;
-  
-  if (!key || key === 'undefined' || key === '' || key === 'null') {
-    console.error("SkyOPS AI Error: API Key missing in browser context.");
-    throw new Error("API KEY MISSING: The variable GOOGLE_API_KEY was not found during the build. ACTION: 1. Check Vercel Env Vars. 2. Click 'REDEPLOY' in Vercel.");
-  }
-  return key;
-};
-
 const parseAIError = (error: any): string => {
   console.error("AI Service Error:", error);
   if (error?.message) return error.message;
@@ -34,8 +23,8 @@ export async function extractDataFromContent(content: {
   media?: ExtractionMedia[], 
   textData?: string 
 }): Promise<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] }> {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  // Directly initialize GoogleGenAI with environment variable
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const modelName = 'gemini-3-flash-preview';
   
   const prompt = `
@@ -58,7 +47,7 @@ export async function extractDataFromContent(content: {
 
     const response = await ai.models.generateContent({
       model: modelName,
-      contents: { parts },
+      contents: { parts: parts },
       config: { 
         responseMimeType: "application/json",
         responseSchema: {
@@ -109,6 +98,7 @@ export async function extractDataFromContent(content: {
       }
     });
 
+    // Use .text property directly
     const result = JSON.parse(response.text || "{}");
     const flights = (result.flights || []).map((f: any) => ({
       ...f,
@@ -136,8 +126,7 @@ export async function extractDataFromContent(content: {
 }
 
 export async function extractStaffOnly(content: { media?: ExtractionMedia[], textData?: string }): Promise<Staff[]> {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `Extract staff names and initials from the provided personnel list. Ignore any group or department info.`;
   try {
     const parts: any[] = [{ text: prompt }];
@@ -146,7 +135,7 @@ export async function extractStaffOnly(content: { media?: ExtractionMedia[], tex
     
     const response = await ai.models.generateContent({ 
       model: 'gemini-3-flash-preview', 
-      contents: { parts }, 
+      contents: { parts: parts }, 
       config: { 
         responseMimeType: "application/json",
         responseSchema: {
@@ -175,8 +164,7 @@ export async function extractStaffOnly(content: { media?: ExtractionMedia[], tex
 }
 
 export async function generateAIProgram(data: ProgramData, qmsContext?: string, options?: { minHours?: number, customRules?: string, numDays?: number, mode?: 'standard' | 'deep', fairRotation?: boolean }): Promise<DailyProgram[]> {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const isDeep = options?.mode === 'deep';
   const model = isDeep ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
   
@@ -256,8 +244,7 @@ export async function modifyProgramWithAI(
   instruction: string, 
   data: ProgramData
 ): Promise<DailyProgram[]> {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
     Act as an Expert Station Scheduler. Modify the current weekly program based on the instruction.
