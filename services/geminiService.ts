@@ -8,9 +8,9 @@ export interface ExtractionMedia {
 
 const getApiKey = () => {
   const key = process.env.API_KEY;
-  // If the key is missing, throw a helpful error that guides the user to the fix
-  if (!key || key === 'undefined' || key === '') {
-    throw new Error("API_KEY not found. 1. Ensure it is added to Vercel Environment Variables. 2. You MUST click 'Redeploy' in Vercel to apply changes.");
+  // Handle various falsy states that can occur during build/runtime
+  if (!key || key === 'undefined' || key === '' || key === 'null') {
+    throw new Error("API_KEY MISSING: 1. Ensure the key is in Vercel Environment Variables. 2. You MUST click 'REDEPLOY' in Vercel after adding the key.");
   }
   return key;
 };
