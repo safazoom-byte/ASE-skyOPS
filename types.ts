@@ -54,3 +54,22 @@ export interface ProgramData {
   shifts: ShiftConfig[];
   programs: DailyProgram[];
 }
+
+// Global Type Declarations for Environment Variables and Custom Window Objects
+/* Define the AIStudio interface to ensure identical property types across declarations */
+export interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    /* Use the named AIStudio interface instead of an inline type to resolve modifier and type conflicts */
+    aistudio: AIStudio;
+  }
+  namespace NodeJS {
+    interface ProcessEnv {
+      API_KEY: string;
+    }
+  }
+}

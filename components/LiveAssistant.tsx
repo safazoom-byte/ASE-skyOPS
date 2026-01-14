@@ -98,7 +98,7 @@ export const LiveAssistant: React.FC<Props> = ({ programs, staff, flights }) => 
               setTranscription({ user: '', ai: '' });
             }
 
-            const audioData = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData) {
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outCtx.currentTime);
               const buffer = await decodeAudioData(decode(audioData), outCtx, 24000, 1);
