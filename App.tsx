@@ -77,10 +77,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const checkKey = async () => {
+      // Robust check for injected API key
+      const key = process.env.API_KEY;
+      const isKeyPresent = key && key !== 'undefined' && key !== '';
+
       if (window.aistudio?.hasSelectedApiKey) {
         const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected);
-      } else { setHasApiKey(true); }
+        setHasApiKey(selected && isKeyPresent);
+      } else { 
+        setHasApiKey(isKeyPresent); 
+      }
     };
     checkKey();
   }, []);
@@ -112,7 +118,7 @@ const App: React.FC = () => {
       setPrograms(newPrograms);
       setActiveTab('program');
     } catch (err: any) {
-      if (err.message?.includes("entity was not found")) setHasApiKey(false);
+      if (err.message?.includes("entity was not found") || err.message?.includes("API Key")) setHasApiKey(false);
       setError(err.message || "Intelligence Build Error.");
     } finally { setIsGenerating(false); }
   };

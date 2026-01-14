@@ -6,6 +6,14 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
+const getApiKey = () => {
+  const key = process.env.API_KEY;
+  if (!key || key === 'undefined' || key === 'API_KEY') {
+    throw new Error("API Key is missing or invalid. Please select a valid API key through the Activation Engine on the dashboard.");
+  }
+  return key;
+};
+
 const parseAIError = (error: any): string => {
   console.error("AI Service Error:", error);
   if (error?.message) return error.message;
@@ -22,7 +30,7 @@ export async function extractDataFromContent(content: {
   media?: ExtractionMedia[], 
   textData?: string 
 }): Promise<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] }> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const modelName = 'gemini-3-flash-preview';
   
   const prompt = `
@@ -123,7 +131,7 @@ export async function extractDataFromContent(content: {
 }
 
 export async function extractStaffOnly(content: { media?: ExtractionMedia[], textData?: string }): Promise<Staff[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const prompt = `Extract staff names and initials from the provided personnel list. Ignore any group or department info.`;
   try {
     const parts: any[] = [{ text: prompt }];
@@ -161,7 +169,7 @@ export async function extractStaffOnly(content: { media?: ExtractionMedia[], tex
 }
 
 export async function generateAIProgram(data: ProgramData, qmsContext?: string, options?: { minHours?: number, customRules?: string, numDays?: number, mode?: 'standard' | 'deep', fairRotation?: boolean }): Promise<DailyProgram[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const isDeep = options?.mode === 'deep';
   const model = isDeep ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
   
@@ -241,7 +249,7 @@ export async function modifyProgramWithAI(
   instruction: string, 
   data: ProgramData
 ): Promise<DailyProgram[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   
   const prompt = `
     Act as an Expert Station Scheduler. Modify the current weekly program based on the instruction.
