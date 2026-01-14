@@ -56,17 +56,26 @@ export interface ProgramData {
 }
 
 // Global Type Declarations for Environment Variables and Custom Window Objects
-/* Define the AIStudio interface to ensure identical property types across declarations */
-export interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
 declare global {
-  interface Window {
-    /* Use the named AIStudio interface instead of an inline type to resolve modifier and type conflicts */
-    aistudio: AIStudio;
+  /**
+   * AIStudio interface for handling API key selection logic.
+   * Defined inside declare global to ensure it matches the property type 
+   * of window.aistudio in the global execution context.
+   */
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
   }
+
+  interface Window {
+    /**
+     * Augmented Window interface to include aistudio.
+     * Marked as optional to maintain compatibility with environment-provided types 
+     * and avoid "identical modifiers" errors.
+     */
+    aistudio?: AIStudio;
+  }
+
   namespace NodeJS {
     interface ProcessEnv {
       API_KEY: string;

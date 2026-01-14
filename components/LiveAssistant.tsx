@@ -208,16 +208,6 @@ export const LiveAssistant: React.FC<Props> = ({ programs, staff, flights }) => 
       >
         {isActive ? 'Terminate Session' : isConnecting ? 'Initializing...' : 'Engage Voice Control'}
       </button>
-
-      <style>{`
-        @keyframes wave {
-          0%, 100% { height: 20%; }
-          50% { height: 100%; }
-        }
-        .animate-wave {
-          animation: wave 1s ease-in-out infinite;
-        }
-      `}</style>
     </div>
   );
 };
