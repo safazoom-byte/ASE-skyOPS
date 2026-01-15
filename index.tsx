@@ -6,18 +6,14 @@ import {
   Users, 
   Clock, 
   Calendar, 
-  Plus, 
   LayoutDashboard,
   BrainCircuit,
   Settings,
-  MessageSquare,
-  FileSearch,
   Menu,
   X,
   ChevronRight,
   ShieldAlert,
   AlertTriangle,
-  Info,
   Moon,
   AlertCircle,
   CalendarDays
@@ -107,13 +103,6 @@ const App: React.FC = () => {
   const [shortageReport, setShortageReport] = useState<ShortageWarning[]>([]);
   const [showWaiverDialog, setShowWaiverDialog] = useState(false);
 
-  const getDayDate = (dayIndex: number) => {
-    const start = new Date(startDate);
-    const result = new Date(start);
-    result.setDate(start.getDate() + dayIndex);
-    return result.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   const numDays = useMemo(() => {
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -122,13 +111,19 @@ const App: React.FC = () => {
     return Math.min(Math.max(diffDays, 1), 14); 
   }, [startDate, endDate]);
 
+  const getDayDate = (dayIndex: number) => {
+    const start = new Date(startDate);
+    const result = new Date(start);
+    result.setDate(start.getDate() + dayIndex);
+    return result.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
   const outOfRangeFlights = useMemo(() => {
     return flights.filter(f => f.day < 0 || f.day >= numDays);
   }, [flights, numDays]);
 
   const unlinkedFlights = useMemo(() => {
     const linkedIds = new Set(shifts.flatMap(s => s.flightIds || []));
-    // Only check flights within range for unlinked warnings
     return flights.filter(f => f.day >= 0 && f.day < numDays && !linkedIds.has(f.id));
   }, [flights, shifts, numDays]);
 
@@ -334,7 +329,6 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto scroll-smooth">
           <div className="max-w-7xl mx-auto px-4 lg:px-10 py-6 lg:py-12">
             
-            {/* Out of Range Flights Warning Banner */}
             {outOfRangeFlights.length > 0 && (
               <div className="mb-6 p-4 lg:p-6 bg-amber-50 border border-amber-200 rounded-2xl lg:rounded-3xl flex items-center justify-between group animate-in slide-in-from-top duration-500">
                 <div className="flex items-center gap-3 lg:gap-4">
