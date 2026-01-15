@@ -1,8 +1,11 @@
+
 export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
+export type ProficiencyLevel = 'Yes' | 'No';
+export type StaffCategory = 'Local' | 'Roster';
 
 export interface StaffSkill {
   skill: Skill;
-  qualified: boolean;
+  level: ProficiencyLevel;
 }
 
 export interface Flight {
@@ -20,18 +23,24 @@ export interface Staff {
   id: string;
   name: string;
   initials?: string;
-  skillRatings: Partial<Record<Skill, boolean>>;
+  type: StaffCategory;
+  skillRatings: Partial<Record<Skill, ProficiencyLevel>>;
+  powerRate: number; // 50-100
   maxShiftsPerWeek: number;
+  workFromDate?: string;
+  workToDate?: string;
 }
 
 export interface ShiftConfig {
   id: string;
   day: number; // 0-6
   pickupTime: string; // HH:mm
+  endTime?: string; // HH:mm
   minStaff: number;
   maxStaff: number;
-  roleCounts?: Partial<Record<Skill, number>>; // New: specific counts per role
-  flightIds?: string[]; // Manually selected flights for this shift
+  targetPower?: number; // Combined power sum of assigned staff
+  roleCounts?: Partial<Record<Skill, number>>; 
+  flightIds?: string[]; 
 }
 
 export interface Assignment {
@@ -39,7 +48,7 @@ export interface Assignment {
   staffId: string;
   flightId: string;
   role: Skill;
-  shiftId?: string; // Link to the defined shift
+  shiftId?: string; 
 }
 
 export interface DailyProgram {
@@ -55,24 +64,13 @@ export interface ProgramData {
   programs: DailyProgram[];
 }
 
-// Global Type Declarations for Environment Variables and Custom Window Objects
 declare global {
-  /**
-   * AIStudio interface for handling API key selection logic.
-   * Defined inside declare global to ensure it matches the property type 
-   * of window.aistudio in the global execution context.
-   */
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
   }
 
   interface Window {
-    /**
-     * Augmented Window interface to include aistudio.
-     * Marked as optional to maintain compatibility with environment-provided types 
-     * and avoid "identical modifiers" errors.
-     */
     aistudio?: AIStudio;
   }
 

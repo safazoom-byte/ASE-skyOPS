@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
 import { FlightManager } from './components/FlightManager';
@@ -288,7 +289,7 @@ const App: React.FC = () => {
       </main>
       
       <footer className="py-6 text-center border-t border-slate-200 bg-white">
-        <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">HMB SkyOPS © 2026 • Mostafa Zaghloul • Station Operations Interface</p>
+        <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">AI Weekly Engine • Mostafa Zaghloul • Station Operations Interface</p>
       </footer>
     </div>
   );
