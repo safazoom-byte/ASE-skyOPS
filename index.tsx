@@ -180,17 +180,20 @@ const App: React.FC = () => {
       const data: ProgramData = { flights, staff, shifts, programs };
       const result = await generateAIProgram(data, '', { customRules, numDays, minRestHours });
       
-      setProposedPrograms(result.programs);
-      setShortageReport(result.shortageReport);
+      const newPrograms = result.programs || [];
+      const newShortage = result.shortageReport || [];
+      
+      setProposedPrograms(newPrograms);
+      setShortageReport(newShortage);
       
       if (result.recommendations) {
         setRecommendations(result.recommendations);
       }
 
-      if (result.shortageReport.length > 0) {
+      if (newShortage.length > 0) {
         setShowWaiverDialog(true);
       } else {
-        setPrograms(result.programs);
+        setPrograms(newPrograms);
         setActiveTab('program');
       }
     } catch (err: any) {

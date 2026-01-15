@@ -4,16 +4,12 @@ import { Staff, Skill, ProficiencyLevel } from '../types';
 import { AVAILABLE_SKILLS } from '../constants';
 import { extractStaffOnly } from '../services/geminiService';
 import * as XLSX from 'xlsx';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { 
   UserPlus, 
   FileUp, 
   Edit2, 
   Trash2, 
   GraduationCap, 
-  CheckCircle2,
-  XCircle,
   FileSpreadsheet,
   Globe,
   MapPin,

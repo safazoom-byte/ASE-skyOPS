@@ -117,7 +117,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
   };
 
   const toggleDaySelection = (dayIdx: number) => {
-    if (editingId) return; // Edit mode only supports 1 day
+    if (editingId) return; 
     setSelectedDays(prev => prev.includes(dayIdx) ? prev.filter(d => d !== dayIdx) : [...prev, dayIdx]);
   };
 
@@ -264,7 +264,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
              </div>
            ) : (
              sortedShifts.map((shift) => {
-               const isExpanded = expandedShiftIds[shift.id];
+               const isExpanded = !!expandedShiftIds[shift.id];
                const linkedFlightsCount = shift.flightIds?.length || 0;
 
                return (
@@ -339,12 +339,9 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
   );
 };
 
-interface CheckCircle2Props {
-  size?: number;
-}
-const CheckCircle2: React.FC<CheckCircle2Props> = ({ size = 24 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-    <polyline points="22 4 12 14.01 9 11.01" />
-  </svg>
+const ChevronUp: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+);
+const ChevronDown: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
 );

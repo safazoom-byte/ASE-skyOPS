@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
-import { Loader2, Search, FileUp, Sparkles, CheckCircle, Database, AlertCircle, CalendarRange, Info } from 'lucide-react';
+import { Loader2, FileUp, Sparkles, Database, AlertCircle, Info } from 'lucide-react';
 
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[], templateBinary?: string }) => void;
@@ -230,7 +230,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
               </div>
 
               {outOfRangeFlights.length > 0 && (
-                <div className="mb-10 p-6 bg-amber-50 border border-amber-200 rounded-[2rem] text-left flex items-start gap-4 animate-pulse">
+                <div className="mb-10 p-6 bg-amber-50 border border-amber-200 rounded-[2rem] text-left flex items-start gap-4">
                   <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0">
                     <AlertCircle size={20} />
                   </div>
@@ -239,14 +239,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
                     <p className="text-[9px] text-amber-700 font-medium leading-relaxed">
                       AI identified <span className="font-black">{outOfRangeFlights.length} flight(s)</span> outside your {numDays}-day program window starting {startDate}.
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {outOfRangeFlights.slice(0, 5).map(f => (
-                        <span key={f.id} className="px-2 py-0.5 bg-white border border-amber-200 rounded text-[7px] font-black text-amber-600">
-                          {f.flightNumber}
-                        </span>
-                      ))}
-                      {outOfRangeFlights.length > 5 && <span className="text-[7px] font-black text-amber-400">+{outOfRangeFlights.length - 5} more</span>}
-                    </div>
                   </div>
                 </div>
               )}
