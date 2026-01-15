@@ -140,7 +140,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
 
   return (
     <div className="space-y-8 lg:space-y-12 animate-in fade-in duration-500 pb-20">
-      {/* Header section */}
       <div className="bg-slate-950 text-white p-6 lg:p-12 rounded-[2.5rem] lg:rounded-[4rem] shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6 lg:gap-8">
         <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/10 blur-[100px] pointer-events-none"></div>
         <div className="relative z-10 text-center md:text-left space-y-2">
@@ -159,7 +158,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 items-start">
-        {/* Creation Form */}
         <div className="xl:col-span-2">
           <div className={`bg-white p-6 lg:p-16 rounded-[2.5rem] lg:rounded-[5rem] shadow-sm border-2 transition-all duration-500 ${editingId ? 'border-indigo-500 ring-4 lg:ring-[20px] ring-indigo-50 shadow-2xl' : 'border-slate-100'}`}>
             <div className="flex items-center gap-4 mb-10 lg:mb-14">
@@ -204,14 +202,12 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {dayFlights.map(flight => {
                       const conflictingShiftId = flightAssignmentsOnDay[flight.id];
-                      // Fixed the TS error here by explicitly casting to boolean
-                      const taken = !!(conflictingShiftId && conflictingShiftId !== editingId);
+                      const taken = Boolean(conflictingShiftId && conflictingShiftId !== editingId);
                       const active = !!formData.flightIds?.includes(flight.id);
                       return (
                         <button key={flight.id} type="button" disabled={taken} onClick={() => toggleFlight(flight.id)} className={`p-5 rounded-[1.5rem] border-2 text-left transition-all group ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-600/20' : taken ? 'bg-slate-50 border-slate-100 opacity-40 cursor-not-allowed' : 'bg-white border-slate-100 hover:border-indigo-400 hover:bg-slate-50'}`}>
                           <div className="flex justify-between items-start mb-1">
                             <span className="font-black italic text-sm tracking-tighter uppercase">{flight.flightNumber}</span>
-                            {active && <CheckCircle2 size={12} />}
                           </div>
                           <div className="text-[10px] font-bold opacity-60 uppercase tracking-widest">{flight.from} → {flight.to}</div>
                         </button>
@@ -260,7 +256,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAd
           </div>
         </div>
 
-        {/* Shift List Dashboard */}
         <div className="space-y-6">
            {sortedShifts.length === 0 ? (
              <div className="bg-white p-12 rounded-[3rem] border-2 border-dashed border-slate-200 text-center space-y-4">

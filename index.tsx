@@ -131,9 +131,9 @@ const App: React.FC = () => {
     const checkKey = async () => {
       if (window.aistudio?.hasSelectedApiKey) {
         const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected);
+        setHasApiKey(Boolean(selected));
       } else {
-        setHasApiKey(!!process.env.API_KEY);
+        setHasApiKey(Boolean(process.env.API_KEY));
       }
     };
     checkKey();

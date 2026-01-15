@@ -17,8 +17,6 @@ import {
   FileSpreadsheet,
   Globe,
   MapPin,
-  LogIn,
-  LogOut,
   Zap
 } from 'lucide-react';
 
@@ -153,7 +151,6 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
     }
   };
 
-  // Explicitly check for strings and cast to boolean to avoid TS error TS2322
   const isInvalidDateRange = Boolean(
     formData.type === 'Roster' && 
     formData.workFromDate && 
