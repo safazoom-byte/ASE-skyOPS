@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types';
+import { Staff, Skill, ProficiencyLevel } from '../types';
 import { AVAILABLE_SKILLS } from '../constants';
 import { extractStaffOnly } from '../services/geminiService';
 import * as XLSX from 'xlsx';
@@ -15,11 +15,8 @@ import {
   CheckCircle2,
   XCircle,
   FileSpreadsheet,
-  Calendar,
   Globe,
   MapPin,
-  AlertTriangle,
-  ArrowRight,
   LogIn,
   LogOut,
   Zap
@@ -33,11 +30,6 @@ interface Props {
   programStartDate: string;
   programEndDate: string;
 }
-
-const PROFICIENCY_META: Record<ProficiencyLevel, { label: string, color: string, icon: any }> = {
-  'Yes': { label: 'Qualified', color: 'text-emerald-500 bg-emerald-50 border-emerald-100', icon: CheckCircle2 },
-  'No': { label: 'Not Qualified', color: 'text-slate-400 bg-slate-50 border-slate-100', icon: XCircle }
-};
 
 export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultMaxShifts, programStartDate, programEndDate }) => {
   const [isScanning, setIsScanning] = useState(false);
@@ -76,23 +68,6 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
     const worksheet = XLSX.utils.json_to_sheet(dataRows);
     XLSX.utils.book_append_sheet(workbook, worksheet, "PersonnelRegistry");
     XLSX.writeFile(workbook, `SkyOPS_Personnel_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
-
-  const exportToPDF = () => {
-    if (staff.length === 0) return;
-    const doc = new jsPDF('l', 'mm', 'a4');
-    doc.text("STATION PERSONNEL REGISTRY", 14, 15);
-    const head = [['Name', 'Initials', 'Type', 'Power', 'Work Pattern', ...AVAILABLE_SKILLS]];
-    const body = staff.map(person => [
-      person.name,
-      person.initials || '--',
-      person.type,
-      person.powerRate,
-      person.type === 'Roster' ? `${person.workFromDate} to ${person.workToDate}` : '5 on / 2 off',
-      ...AVAILABLE_SKILLS.map(skill => person.skillRatings[skill] === 'Yes' ? '✓' : '-')
-    ]);
-    autoTable(doc, { startY: 25, head: head, body: body, theme: 'grid', styles: { fontSize: 7 } });
-    doc.save(`SkyOPS_Personnel_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   const handleLevelChange = (skill: Skill, level: ProficiencyLevel) => {
@@ -178,7 +153,7 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
     }
   };
 
-  const isInvalidDateRange = formData.type === 'Roster' && formData.workFromDate && formData.workToDate && (
+  const isInvalidDateRange = formData.type === 'Roster' && !!formData.workFromDate && !!formData.workToDate && (
     new Date(formData.workToDate) < new Date(formData.workFromDate)
   );
 
@@ -243,10 +218,6 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
                   value={formData.powerRate} 
                   onChange={e => setFormData({ ...formData, powerRate: parseInt(e.target.value) })}
                 />
-                <div className="flex justify-between mt-4">
-                   <span className="text-[9px] font-black text-slate-400 uppercase">Standard (50%)</span>
-                   <span className="text-[9px] font-black text-slate-400 uppercase">Expert (100%)</span>
-                </div>
               </div>
             </div>
             
@@ -300,32 +271,29 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
               <GraduationCap size={20} className="text-slate-300" /> Operational Qualification Matrix
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-              {AVAILABLE_SKILLS.map(skill => {
-                const isQualified = formData.skillRatings?.[skill] === 'Yes';
-                return (
-                  <div key={skill} className="bg-slate-50 p-8 rounded-[3rem] border border-slate-100 hover:border-blue-200 transition-all group/skill shadow-sm flex items-center justify-between">
-                    <span className="text-xs font-black uppercase text-slate-800 tracking-widest group-hover/skill:text-blue-600 transition-colors">{skill}</span>
-                    <div className="flex bg-white p-1 rounded-xl border border-slate-200">
-                      {(['Yes', 'No'] as ProficiencyLevel[]).map(lvl => (
-                        <button 
-                          key={lvl} 
-                          type="button" 
-                          onClick={() => handleLevelChange(skill, lvl)} 
-                          className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${formData.skillRatings?.[skill] === lvl ? (lvl === 'Yes' ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white') : 'text-slate-300 hover:text-slate-500'}`}
-                        >
-                          {lvl}
-                        </button>
-                      ))}
-                    </div>
+              {AVAILABLE_SKILLS.map(skill => (
+                <div key={skill} className="bg-slate-50 p-8 rounded-[3rem] border border-slate-100 hover:border-blue-200 transition-all group/skill shadow-sm flex items-center justify-between">
+                  <span className="text-xs font-black uppercase text-slate-800 tracking-widest group-hover/skill:text-blue-600 transition-colors">{skill}</span>
+                  <div className="flex bg-white p-1 rounded-xl border border-slate-200">
+                    {(['Yes', 'No'] as const).map(lvl => (
+                      <button 
+                        key={lvl} 
+                        type="button" 
+                        onClick={() => handleLevelChange(skill, lvl)} 
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${formData.skillRatings?.[skill] === lvl ? (lvl === 'Yes' ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white') : 'text-slate-300 hover:text-slate-500'}`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
           <button 
             type="submit" 
-            disabled={isInvalidDateRange}
+            disabled={!!isInvalidDateRange}
             className={`w-full py-8 text-white rounded-[2.5rem] font-black text-sm lg:text-base uppercase tracking-[0.5em] shadow-2xl transition-all italic active:scale-95 ${isInvalidDateRange ? 'bg-slate-300 cursor-not-allowed' : 'bg-slate-950 hover:bg-slate-800'}`}
           >
             {editingStaffId ? 'UPDATE RECORD' : 'ENROLL PERSONNEL'}
@@ -349,14 +317,6 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
                   <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{person.powerRate}% POWER</span>
                 </div>
               </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mt-auto pt-6 border-t border-slate-50">
-              {Object.entries(person.skillRatings).map(([skill, lvl]) => lvl === 'Yes' && (
-                <div key={skill} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100 text-[8px] font-black uppercase tracking-widest">
-                  <CheckCircle2 size={10} /> {skill}
-                </div>
-              ))}
             </div>
 
             <div className="absolute bottom-8 right-8 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
