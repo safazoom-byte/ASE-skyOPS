@@ -153,7 +153,11 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
     }
   };
 
-  const isInvalidDateRange = formData.type === 'Roster' && !!formData.workFromDate && !!formData.workToDate && (
+  // Explicitly check for strings and cast to boolean to avoid TS error TS2322
+  const isInvalidDateRange = Boolean(
+    formData.type === 'Roster' && 
+    formData.workFromDate && 
+    formData.workToDate && 
     new Date(formData.workToDate) < new Date(formData.workFromDate)
   );
 
@@ -293,7 +297,7 @@ export const StaffManager: React.FC<Props> = ({ staff, onAdd, onDelete, defaultM
 
           <button 
             type="submit" 
-            disabled={!!isInvalidDateRange}
+            disabled={isInvalidDateRange}
             className={`w-full py-8 text-white rounded-[2.5rem] font-black text-sm lg:text-base uppercase tracking-[0.5em] shadow-2xl transition-all italic active:scale-95 ${isInvalidDateRange ? 'bg-slate-300 cursor-not-allowed' : 'bg-slate-950 hover:bg-slate-800'}`}
           >
             {editingStaffId ? 'UPDATE RECORD' : 'ENROLL PERSONNEL'}
