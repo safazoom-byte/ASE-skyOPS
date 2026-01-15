@@ -84,28 +84,32 @@ export async function extractDataFromContent(content: {
   startDate?: string
 }): Promise<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const modelName = 'gemini-3-flash-preview';
+  // Use pro model for complex extraction logic to ensure date accuracy
+  const modelName = 'gemini-3-pro-preview';
   
   const startDateStr = content.startDate || new Date().toISOString().split('T')[0];
 
   const prompt = `
-    Act as a Station Operations Analyst. Extract structured data from these Aviation documents.
+    Act as a Station Operations Analyst. Extract structured data from these Aviation ground handling documents.
     
-    IMPORTANT CONTEXT:
-    The target period starts on: ${startDateStr}.
+    CRITICAL CONTEXT:
+    The user's current operational program starts on: ${startDateStr}.
     
     1. FLIGHT SCHEDULE: Extract Flight numbers, Route (From/To), STA, and STD.
-       DATES: Calculate the 'day' index (Integer) relative to the start date (${startDateStr} is Day 0).
-       If a specific date is found (e.g. "Oct 24"), calculate its offset from ${startDateStr}.
-       NOTE: Treat "NS" or "N.S" as Night Stop indicator (Arrival or Departure only).
+       DAY INDEX CALCULATION: 
+       - You MUST calculate the 'day' property as an integer.
+       - ${startDateStr} is Day 0.
+       - If you see a specific date (e.g., "Jan 15"), calculate its offset from ${startDateStr}.
+       - If you see weekdays (e.g., "Monday"), find the first "Monday" occurring on or after ${startDateStr} and calculate the offset.
+       - If no date is found, assume Day 0 but try your best to infer sequence.
 
-    2. SHIFT SLOTS (CRITICAL): 
-       Look for "Shift Slot" or "Shift Time" columns. Link every flight in a visual block to its specific shift time.
-       Calculate 'day' index relative to ${startDateStr}.
+    2. SHIFT SLOTS: 
+       Identify Shift times/slots. Link flights visually associated with those shifts.
+       Calculate 'day' index using the same relative logic as above.
 
-    3. PERSONNEL: Names, initials, powerRate (50-100), and skill qualifications.
+    3. PERSONNEL: Names, initials, and qualifications.
     
-    Return the data as a clean JSON object following the schema.
+    Return the data as a clean JSON object following the schema. Ensure all 'day' values are calculated relative to the start date provided.
   `;
 
   try {
@@ -133,7 +137,7 @@ export async function extractDataFromContent(content: {
                   to: { type: Type.STRING },
                   sta: { type: Type.STRING },
                   std: { type: Type.STRING },
-                  day: { type: Type.NUMBER },
+                  day: { type: Type.NUMBER, description: "Relative day index where Day 0 is " + startDateStr },
                   type: { type: Type.STRING }
                 },
                 required: ["flightNumber", "from", "to", "day"]
@@ -156,8 +160,7 @@ export async function extractDataFromContent(content: {
                       'Lost and Found': { type: Type.STRING },
                       'Shift Leader': { type: Type.STRING },
                       'Operations': { type: Type.STRING }
-                    },
-                    description: "Set to 'Yes' if the staff member is qualified, otherwise 'No'."
+                    }
                   }
                 },
                 required: ["name"]
@@ -229,11 +232,10 @@ export async function extractDataFromContent(content: {
 
 export async function generateAIProgram(data: ProgramData, qmsContext?: string, options?: { minHours?: number, customRules?: string, numDays?: number, mode?: 'standard' | 'deep', fairRotation?: boolean, minRestHours?: number }): Promise<BuildResult> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = 'gemini-3-flash-preview';
-  const minRest = options?.minRestHours || 12;
+  const model = 'gemini-3-pro-preview';
 
   const prompt = `
-    Create a ${options?.numDays || 7}-day aviation staff program.
+    Create a ${options?.numDays || 7}-day aviation ground handling staff program.
     
     CORE MANDATE: 
     For every shift, assign staff to satisfy 'roleCounts'. 
@@ -244,10 +246,14 @@ export async function generateAIProgram(data: ProgramData, qmsContext?: string, 
     - Shifts: ${JSON.stringify(data.shifts)}
     - Flights: ${JSON.stringify(data.flights.filter(f => f.day < (options?.numDays || 7)))}
 
+    RULES:
+    - Minimum rest: ${options?.minRestHours || 12} hours.
+    - Custom constraints: ${options?.customRules || "None"}
+
     RETURN JSON:
     - programs: DailyProgram[]
     - shortageReport: { staffName, flightNumber, actualRest, targetRest, reason }[]
-    - recommendations: { idealStaffCount, currentStaffCount, hireAdvice }
+    - recommendations: { idealStaffCount, currentStaffCount, hireAdvice, healthScore }
   `;
 
   try {
@@ -269,7 +275,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext?: string, 
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const contextPrompt = `Modify program based on: "${instruction}". Return JSON with 'programs' and 'explanation'.`;
+  const contextPrompt = `Modify the current ground handling program based on: "${instruction}". Return JSON with 'programs' and 'explanation'.`;
   try {
     const parts: any[] = [{ text: contextPrompt }];
     if (media?.length) media.forEach(m => parts.push({ inlineData: { mimeType: m.mimeType, data: m.data } }));
@@ -279,13 +285,13 @@ export async function modifyProgramWithAI(instruction: string, data: ProgramData
       config: { responseMimeType: "application/json" }
     });
     const parsed = safeParseJson(response.text) || {};
-    return { programs: parsed.programs || data.programs, explanation: parsed.explanation || "Processed." };
+    return { programs: parsed.programs || data.programs, explanation: parsed.explanation || "Processed modification request." };
   } catch (error) { throw new Error(parseAIError(error)); }
 }
 
 export async function extractStaffOnly(content: { media?: ExtractionMedia[], textData?: string }): Promise<Staff[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Extract staff. Return JSON with 'staff' array.`;
+  const prompt = `Extract aviation staff personnel. Return JSON with 'staff' array containing name, initials, and qualifications.`;
   try {
     const parts: any[] = [{ text: prompt }];
     if (content.media) content.media.forEach(m => parts.push({ inlineData: { mimeType: m.mimeType, data: m.data } }));

@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
-import { Loader2, Search, FileUp, Sparkles, CheckCircle, Database, AlertCircle, CalendarRange } from 'lucide-react';
+import { Loader2, Search, FileUp, Sparkles, CheckCircle, Database, AlertCircle, CalendarRange, Info } from 'lucide-react';
 
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[], templateBinary?: string }) => void;
@@ -80,7 +80,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
              const parsed = JSON.parse(text);
              if (parsed.flights && parsed.staff) {
                jsonImportData = parsed;
-               break; // Prioritize full system state JSON
+               break; 
              }
            } catch (e) {
              console.error("JSON parse failed", e);
@@ -103,7 +103,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
       if (useAsTemplate && lastTemplateBase64) {
         setTemplateOnlySuccess(lastTemplateBase64);
       } else if (jsonImportData) {
-        // Handle native JSON import directly
         setExtractedData({
            flights: jsonImportData.flights || [],
            staff: jsonImportData.staff || [],
@@ -120,12 +119,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
         if (data && ((data.flights?.length || 0) > 0 || (data.staff?.length || 0) > 0 || (data.shifts?.length || 0) > 0 || (data.programs?.length || 0) > 0)) {
           setExtractedData(data);
         } else {
-          throw { title: "Extraction Failed", message: "AI could not find operational patterns in these documents." };
+          throw { title: "Extraction Failed", message: "AI Analysis did not yield usable ground handling data from these sources." };
         }
       }
     } catch (error: any) {
       setScanError({
-        title: error.title || "Processing Error",
+        title: error.title || "Extraction Error",
         message: error.message || "An unexpected error occurred during AI analysis."
       });
     } finally {
@@ -134,9 +133,9 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
     }
   };
 
-  const outOfRangeFlightsCount = useMemo(() => {
-    if (!extractedData) return 0;
-    return extractedData.flights.filter(f => f.day < 0 || f.day >= numDays).length;
+  const outOfRangeFlights = useMemo(() => {
+    if (!extractedData) return [];
+    return extractedData.flights.filter(f => f.day < 0 || f.day >= numDays);
   }, [extractedData, numDays]);
 
   return (
@@ -145,17 +144,17 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
         <div className="fixed inset-0 z-[600] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 text-center">
           <div className="space-y-8 max-w-sm">
             <div className="relative inline-block">
-              <div className="w-24 h-24 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
-              <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400" size={32} />
+              <div className="w-24 h-24 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+              <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-blue-400" size={32} />
             </div>
             <div className="space-y-3">
-              <h3 className="text-white text-2xl font-black uppercase italic tracking-tighter">AI Analysis Active</h3>
+              <h3 className="text-white text-2xl font-black uppercase italic tracking-tighter">AI Station Scanner</h3>
               <p className="text-slate-400 text-xs font-medium uppercase tracking-[0.2em] leading-relaxed">
-                Scanning documents for flight schedules, personnel, and existing rosters. This complex logic takes time.
+                Rebuilding operational state from documents. This ensures logical mapping to your Target Window.
               </p>
-              <div className="pt-4 flex items-center justify-center gap-2 text-indigo-500 font-black text-[9px] uppercase tracking-widest">
+              <div className="pt-4 flex items-center justify-center gap-2 text-blue-500 font-black text-[9px] uppercase tracking-widest">
                 <Loader2 size={12} className="animate-spin" />
-                Processing Station Logic...
+                Synchronizing Logistics...
               </div>
             </div>
           </div>
@@ -168,8 +167,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
           <div className="flex-1 text-center lg:text-left">
             <h3 className="text-2xl lg:text-3xl font-black mb-3 tracking-tight italic uppercase">Import Operational Core</h3>
             <p className="text-slate-400 text-xs lg:text-sm max-w-xl font-medium leading-relaxed">
-              Upload existing <span className="text-blue-400 font-black">Excel rosters</span>, <span className="text-blue-400 font-black">flight schedules</span>, or a <span className="text-indigo-400 font-black">SkyOPS System File (.json)</span>. 
-              The system will rebuild your operational state instantly.
+              Scan existing <span className="text-blue-400 font-black">schedules (PDF/Img)</span> or <span className="text-blue-400 font-black">Excel rosters</span>. 
+              The system will map services relative to <span className="text-indigo-400 underline">{startDate}</span>.
             </p>
           </div>
           
@@ -222,39 +221,39 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, templateBinar
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
                   <div className="text-3xl font-black text-blue-600 mb-1">{extractedData.flights?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Flights</div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Flights Found</div>
                 </div>
                 <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
                   <div className="text-3xl font-black text-emerald-600 mb-1">{extractedData.staff?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Personnel</div>
-                </div>
-                <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
-                  <div className="text-3xl font-black text-indigo-600 mb-1">{extractedData.shifts?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Shift Slots</div>
-                </div>
-                <div className="bg-slate-950 p-5 rounded-3xl border border-slate-800">
-                  <div className="text-3xl font-black text-white mb-1">{(extractedData.programs || []).reduce((acc, p) => acc + (p.assignments?.length || 0), 0)}</div>
-                  <div className="text-[8px] font-black text-blue-400 uppercase tracking-widest">Assignments</div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Staff Found</div>
                 </div>
               </div>
 
-              {outOfRangeFlightsCount > 0 && (
-                <div className="mb-10 p-6 bg-amber-50 border border-amber-200 rounded-[2rem] text-left flex items-start gap-4">
+              {outOfRangeFlights.length > 0 && (
+                <div className="mb-10 p-6 bg-amber-50 border border-amber-200 rounded-[2rem] text-left flex items-start gap-4 animate-pulse">
                   <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0">
-                    <CalendarRange size={20} />
+                    <AlertCircle size={20} />
                   </div>
                   <div>
-                    <h4 className="text-[10px] font-black text-amber-900 uppercase tracking-widest mb-1">Out-of-Range Alert</h4>
+                    <h4 className="text-[10px] font-black text-amber-900 uppercase tracking-widest mb-1">Range Alert Detected</h4>
                     <p className="text-[9px] text-amber-700 font-medium leading-relaxed">
-                      Detected <span className="font-black">{outOfRangeFlightsCount} flights</span> that fall outside the current Target Window ({startDate}). They will be added but won't appear in the weekly view until dates are adjusted.
+                      AI identified <span className="font-black">{outOfRangeFlights.length} flight(s)</span> outside your {numDays}-day program window starting {startDate}.
                     </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {outOfRangeFlights.slice(0, 5).map(f => (
+                        <span key={f.id} className="px-2 py-0.5 bg-white border border-amber-200 rounded text-[7px] font-black text-amber-600">
+                          {f.flightNumber}
+                        </span>
+                      ))}
+                      {outOfRangeFlights.length > 5 && <span className="text-[7px] font-black text-amber-400">+{outOfRangeFlights.length - 5} more</span>}
+                    </div>
                   </div>
                 </div>
               )}
 
               <div className="flex flex-col sm:flex-row gap-4">
                 <button onClick={() => setExtractedData(null)} className="flex-1 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Abort</button>
-                <button onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} className="flex-[2] py-5 px-8 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 italic">INTEGRATE STATE</button>
+                <button onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} className="flex-[2] py-5 px-8 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95 italic">INTEGRATE SCHEDULE</button>
               </div>
             </div>
           </div>
