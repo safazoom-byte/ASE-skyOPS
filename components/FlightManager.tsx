@@ -55,10 +55,11 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
     return cleaned.slice(0, 2) + ':' + cleaned.slice(2, 4);
   };
 
+  // Fixed TypeScript error: explicitly cast 'type' to the union of allowed values to avoid string incompatibility
   const handleAddNew = (e: React.FormEvent) => {
     e.preventDefault();
-    const type = newFlight.sta && !newFlight.std ? 'Arrival' : (!newFlight.sta && newFlight.std ? 'Departure' : 'Turnaround');
-    const flightData = {
+    const type: 'Arrival' | 'Departure' | 'Turnaround' = newFlight.sta && !newFlight.std ? 'Arrival' : (!newFlight.sta && newFlight.std ? 'Departure' : 'Turnaround');
+    const flightData: Flight = {
       ...newFlight as Flight,
       type,
       flightNumber: newFlight.flightNumber!.toUpperCase(),
@@ -75,9 +76,10 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
     setInlineFormData({ ...flight });
   };
 
+  // Fixed TypeScript error: explicitly cast 'type' to the union of allowed values to avoid string incompatibility
   const handleInlineSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const type = inlineFormData.sta && !inlineFormData.std ? 'Arrival' : (!inlineFormData.sta && inlineFormData.std ? 'Departure' : 'Turnaround');
+    const type: 'Arrival' | 'Departure' | 'Turnaround' = inlineFormData.sta && !inlineFormData.std ? 'Arrival' : (!inlineFormData.sta && inlineFormData.std ? 'Departure' : 'Turnaround');
     onUpdate({ ...inlineFormData as Flight, type });
     setInlineEditingId(null);
   };
