@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill } from '../types';
-import { DAYS_OF_WEEK, AVAILABLE_SKILLS } from '../constants';
-import { Clock, Trash2, Edit2, ChevronDown, ChevronUp, Zap, Plane, Timer, Settings2, AlertCircle } from 'lucide-react';
+import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
+import * as XLSX from 'xlsx';
+import { Clock, Trash2, Edit2, Users, Award, ShieldCheck, Target, Plus, Minus, FileDown, Calendar, Layers, Zap, Plane } from 'lucide-react';
 
 interface Props {
   shifts: ShiftConfig[];
@@ -14,346 +15,368 @@ interface Props {
 
 export const ShiftManager: React.FC<Props> = ({ shifts, flights, startDate, onAdd, onUpdate, onDelete }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedDays, setSelectedDays] = useState<number[]>([0]);
-  const [expandedShiftIds, setExpandedShiftIds] = useState<Record<string, boolean>>({});
   
-  const [endMode, setEndMode] = useState<'fixed' | 'buffer'>('fixed');
-  const [durationHours, setDurationHours] = useState<number>(8);
-  const [bufferMinutes, setBufferMinutes] = useState<number>(60);
-
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
+    pickupDate: startDate || new Date().toISOString().split('T')[0],
     pickupTime: '06:00',
+    endDate: startDate || new Date().toISOString().split('T')[0],
     endTime: '14:00',
-    minStaff: 5,
+    minStaff: 4,
     maxStaff: 8,
     targetPower: 75,
     flightIds: [],
     roleCounts: {}
   });
 
-  const addTimeToStr = (timeStr: string, minutesToAdd: number) => {
-    if (!timeStr) return '00:00';
-    const [h, m] = timeStr.split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) return '00:00';
-    let totalMins = h * 60 + m + minutesToAdd;
-    totalMins = totalMins % (24 * 60);
-    if (totalMins < 0) totalMins += (24 * 60);
-    const newH = Math.floor(totalMins / 60);
-    const newHStr = newH.toString().padStart(2, '0');
-    const newM = totalMins % 60;
-    const newMStr = newM.toString().padStart(2, '0');
-    return `${newHStr}:${newMStr}`;
+  const getDayLabel = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? 'Invalid Date' : DAYS_OF_WEEK_FULL[date.getDay()];
+  };
+
+  const getDayOffset = (dateStr: string) => {
+    if (!startDate) return 0;
+    const start = new Date(startDate);
+    start.setHours(0,0,0,0);
+    const target = new Date(dateStr);
+    target.setHours(0,0,0,0);
+    const diffTime = target.getTime() - start.getTime();
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const formatTimeInput = (value: string) => {
+    const cleaned = value.replace(/[^0-9]/g, '');
+    if (cleaned.length <= 2) return cleaned;
+    let hh = cleaned.slice(0, 2);
+    let mm = cleaned.slice(2, 4);
+    if (parseInt(hh) > 23) hh = '23';
+    if (parseInt(mm) > 59) mm = '59';
+    return hh + ':' + mm;
   };
 
   const dayFlights = useMemo(() => {
-    if (selectedDays.length !== 1) return [];
-    return flights.filter(f => f.day === selectedDays[0]);
-  }, [flights, selectedDays]);
+    return flights.filter(f => f.date === formData.pickupDate);
+  }, [flights, formData.pickupDate]);
 
-  const flightAssignmentsOnDay = useMemo(() => {
-    const mapping: Record<string, ShiftConfig> = {};
-    if (selectedDays.length !== 1) return mapping;
-    shifts.filter(s => s.day === selectedDays[0]).forEach(s => {
-      s.flightIds?.forEach(fId => { 
-        mapping[fId] = s; 
+  const updateRoleCount = (skill: Skill, delta: number) => {
+    const current = formData.roleCounts || {};
+    const newVal = Math.max(0, (Number(current[skill]) || 0) + delta);
+    setFormData({
+      ...formData,
+      roleCounts: { ...current, [skill]: newVal }
+    });
+  };
+
+  const exportToExcel = () => {
+    // Flatten shifts: Each flight gets its own row with granular label/value pairs
+    const rows = shifts.flatMap(s => {
+      const roleMatrix = Object.entries(s.roleCounts || {})
+        .filter(([_, count]) => Number(count) > 0)
+        .map(([role, count]) => `${role}: ${count}`)
+        .join(', ');
+
+      const baseInfo = {
+        'Day Index': `Day ${getDayOffset(s.pickupDate) + 1}`,
+        'Day Name': getDayLabel(s.pickupDate),
+        'Shift Start Date': s.pickupDate,
+        'Shift Start Time': s.pickupTime,
+        'Shift End Date': s.endDate,
+        'Shift End Time': s.endTime,
+        'Min Staff': s.minStaff,
+        'Max Staff': s.maxStaff,
+        'Target Power %': s.targetPower,
+        'Role Matrix': roleMatrix
+      };
+
+      // If no flights, return one row with placeholders
+      if (!s.flightIds || s.flightIds.length === 0) {
+        return [{
+          ...baseInfo,
+          'Flight No': 'N/A',
+          'LBL_DATE': 'DATE',
+          'Value_Date': '-',
+          'LBL_STA': 'STA',
+          'Value_STA': '-',
+          'LBL_STD': 'STD',
+          'Value_STD': '-',
+          'LBL_FROM': 'FROM',
+          'Value_From': '-',
+          'LBL_TO': 'TO',
+          'Value_To': '-'
+        }];
+      }
+
+      // Return a discrete row for every flight linked to this shift
+      return s.flightIds.map(fId => {
+        const f = flights.find(fl => fl.id === fId);
+        return {
+          ...baseInfo,
+          'Flight No': f?.flightNumber || 'Unknown',
+          'LBL_DATE': 'DATE',
+          'Value_Date': f?.date || '-',
+          'LBL_STA': 'STA',
+          'Value_STA': f?.sta || '--',
+          'LBL_STD': 'STD',
+          'Value_STD': f?.std || '--',
+          'LBL_FROM': 'FROM',
+          'Value_From': f?.from || '-',
+          'LBL_TO': 'TO',
+          'Value_To': f?.to || '-'
+        };
       });
     });
-    return mapping;
-  }, [shifts, selectedDays]);
 
-  useEffect(() => {
-    if (endMode === 'fixed') {
-      const hoursVal = Number(durationHours) || 0;
-      setFormData(prev => ({ ...prev, endTime: addTimeToStr(formData.pickupTime || '06:00', hoursVal * 60) }));
-    } else if (endMode === 'buffer') {
-      const bufferVal = Number(bufferMinutes) || 0;
-      const linkedFlights = flights.filter(f => formData.flightIds?.includes(f.id));
-      const stds = linkedFlights.map(f => f.std).filter(Boolean) as string[];
-      if (stds.length > 0) {
-        const latestStd = [...stds].sort((a, b) => b.localeCompare(a))[0];
-        setFormData(prev => ({ ...prev, endTime: addTimeToStr(latestStd, bufferVal) }));
-      } else {
-        setFormData(prev => ({ ...prev, endTime: prev.pickupTime }));
-      }
-    }
-  }, [endMode, durationHours, bufferMinutes, formData.pickupTime, formData.flightIds, flights]);
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Station_Shift_Report");
+    XLSX.writeFile(workbook, `SkyOPS_Station_Duty_Program_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const validatedFlightIds = (formData.flightIds || []).filter(fid => flights.some(f => f.id === fid));
-    
-    const finalShiftData = {
+    const dayOffset = getDayOffset(formData.pickupDate!);
+    const finalData = {
       ...formData as ShiftConfig,
-      minStaff: typeof formData.minStaff === 'number' ? formData.minStaff : 5,
-      maxStaff: typeof formData.maxStaff === 'number' ? formData.maxStaff : 8,
-      targetPower: typeof formData.targetPower === 'number' ? formData.targetPower : 75,
-      flightIds: validatedFlightIds,
-      roleCounts: formData.roleCounts || {}
+      day: dayOffset,
+      id: editingId || Math.random().toString(36).substr(2, 9)
     };
-
     if (editingId) {
-      onUpdate({ ...finalShiftData, id: editingId, day: selectedDays[0] });
+      onUpdate(finalData);
     } else {
-      selectedDays.forEach(day => {
-        onAdd({ ...finalShiftData, id: Math.random().toString(36).substr(2, 9), day });
-      });
+      onAdd(finalData);
     }
     resetForm();
   };
 
   const resetForm = () => {
     setFormData({ 
+      pickupDate: startDate || new Date().toISOString().split('T')[0], 
       pickupTime: '06:00', 
+      endDate: startDate || new Date().toISOString().split('T')[0], 
       endTime: '14:00', 
-      minStaff: 5, 
+      minStaff: 4, 
       maxStaff: 8, 
       targetPower: 75, 
       flightIds: [], 
       roleCounts: {} 
     });
-    setEndMode('fixed');
-    setDurationHours(8);
-    setBufferMinutes(60);
-    setSelectedDays([0]);
     setEditingId(null);
-  };
-
-  const toggleFlight = (flightId: string) => {
-    const conflictingShift = flightAssignmentsOnDay[flightId];
-    if (conflictingShift && conflictingShift.id !== editingId) return;
-    const current = formData.flightIds || [];
-    setFormData({ ...formData, flightIds: current.includes(flightId) ? current.filter(id => id !== flightId) : [...current, flightId] });
-  };
-
-  const setRoleCount = (role: Skill, count: number) => {
-    const counts = { ...(formData.roleCounts || {}) };
-    if (count <= 0) delete counts[role]; else counts[role] = count;
-    setFormData({ ...formData, roleCounts: counts });
-  };
-
-  const toggleDaySelection = (dayIdx: number) => {
-    if (editingId) return; 
-    setSelectedDays(prev => prev.includes(dayIdx) ? prev.filter(d => d !== dayIdx) : [...prev, dayIdx]);
   };
 
   const startEdit = (shift: ShiftConfig) => {
     setEditingId(shift.id);
-    setSelectedDays([shift.day]);
-    setFormData({ ...shift, flightIds: shift.flightIds || [] });
+    setFormData({ ...shift });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const toggleExpand = (id: string) => {
-    setExpandedShiftIds(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const getDayLabel = (idx: number) => DAYS_OF_WEEK[idx];
-
-  const sortedShifts = useMemo(() => {
-    return [...shifts].sort((a, b) => a.day - b.day || a.pickupTime.localeCompare(b.pickupTime));
+  const groupedShifts = useMemo(() => {
+    const groups: Record<string, ShiftConfig[]> = {};
+    shifts.forEach(s => {
+      if (!groups[s.pickupDate]) groups[s.pickupDate] = [];
+      groups[s.pickupDate].push(s);
+    });
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [shifts]);
 
   return (
-    <div className="space-y-12 pb-20">
-      <div className="bg-slate-950 text-white p-12 rounded-[3rem] shadow-2xl flex items-center justify-between">
+    <div className="space-y-12 pb-24">
+      <div className="bg-slate-950 text-white p-10 lg:p-14 rounded-[3rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
         <div className="flex items-center gap-6">
-          <Clock size={40} className="text-blue-500" />
-          <h3 className="text-3xl font-black uppercase italic tracking-tighter">Duty Master</h3>
+          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+            <Clock size={32} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-black uppercase italic tracking-tighter">Duty Master</h3>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Operational Requirements Mapping</p>
+          </div>
         </div>
-        <div className="bg-white/5 p-6 rounded-2xl text-center">
-          <span className="text-3xl font-black italic">{shifts.length} Slots</span>
-        </div>
+        <button onClick={exportToExcel} className="px-8 py-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl flex items-center gap-3 transition-all">
+          <FileDown size={20} className="text-emerald-400" />
+          <span className="text-[10px] font-black uppercase tracking-widest">Master Export</span>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        <div className="xl:col-span-2 space-y-8">
-          <div className="bg-white p-12 rounded-[3rem] shadow-sm border">
-            <h4 className="text-xl font-black italic uppercase mb-10">{editingId ? 'Modify Slot' : 'Engineer Shift'}</h4>
-            <form onSubmit={handleSubmit} className="space-y-10">
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-4">Pickup Time</label>
-                  <input type="time" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-xl text-center outline-none focus:ring-2 focus:ring-blue-500/20" value={formData.pickupTime} onChange={e => setFormData({ ...formData, pickupTime: e.target.value })} required />
-                </div>
-                
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-4 flex justify-between">
-                    <span>Shift Calculation Mode</span>
-                    <span className="text-blue-500 flex items-center gap-1"><Settings2 size={10} /> Dynamic</span>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-10">
+        <div className="xl:col-span-2 space-y-10">
+          <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-100">
+            <h4 className="text-xl font-black italic uppercase mb-10 flex items-center gap-3 text-slate-900">
+              {editingId ? <Edit2 className="text-indigo-600" /> : <Plus className="text-blue-600" />}
+              {editingId ? 'Refine Active Requirement' : 'Engineer New Shift Slot'}
+            </h4>
+            
+            <form onSubmit={handleSubmit} className="space-y-12">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="space-y-4">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Calendar size={14} className="text-blue-500" /> Pickup (Shift Start)
                   </label>
-                  <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2">
-                    <button type="button" onClick={() => setEndMode('fixed')} className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-black text-[10px] uppercase transition-all ${endMode === 'fixed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>
-                      <Timer size={14} /> Fixed Duration
-                    </button>
-                    <button type="button" onClick={() => setEndMode('buffer')} className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-black text-[10px] uppercase transition-all ${endMode === 'buffer' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>
-                      <Plane size={14} /> Flight Buffer
-                    </button>
+                  <div className="flex gap-3">
+                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
                   </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-8 bg-slate-50/50 rounded-[2rem] border border-dashed">
-                <div>
-                  {endMode === 'fixed' ? (
-                    <>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Duration (Hours)</label>
-                      <div className="flex items-center gap-4">
-                        <input type="range" min="1" max="14" step="0.5" className="flex-1 accent-slate-950" value={durationHours} onChange={e => setDurationHours(parseFloat(e.target.value))} />
-                        <span className="w-16 text-center font-black text-lg">{durationHours}h</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Post-Flight Buffer (Mins)</label>
-                      <div className="flex items-center gap-4">
-                        <input type="range" min="15" max="180" step="5" className="flex-1 accent-blue-600" value={bufferMinutes} onChange={e => setBufferMinutes(parseInt(e.target.value))} />
-                        <span className="w-16 text-center font-black text-lg text-blue-600">+{bufferMinutes}m</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="flex flex-col justify-center text-center">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Calculated End Time</label>
-                  <div className="relative inline-block">
-                    <div className="text-4xl font-black italic text-slate-950">{formData.endTime || '--:--'}</div>
-                    {endMode === 'buffer' && (
-                      <div className="absolute -top-3 -right-6 px-2 py-0.5 bg-blue-500 text-white text-[7px] font-black rounded-full animate-pulse uppercase">Live</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-4">Day of Operations</label>
-                <div className="flex flex-wrap gap-2">
-                  {DAYS_OF_WEEK.map((day, i) => (
-                    <button key={i} type="button" onClick={() => toggleDaySelection(i)} className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase transition-all ${selectedDays.includes(i) ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400'}`}>
-                      {day}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {selectedDays.length === 1 && (
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-4 flex justify-between">
-                    <span>Link Coverage</span>
-                    <span className="text-[8px] font-black text-slate-300 italic uppercase">Flights define shift end in Buffer Mode</span>
+                <div className="space-y-4">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Calendar size={14} className="text-indigo-500" /> Release (Shift End)
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    {dayFlights.length === 0 ? (
-                      <p className="col-span-full text-[10px] font-black text-slate-300 uppercase italic py-4 text-center">No flights registered for {getDayLabel(selectedDays[0])}.</p>
-                    ) : dayFlights.map(flight => {
-                      const conflictingShift = flightAssignmentsOnDay[flight.id];
-                      const taken = !!(conflictingShift && conflictingShift.id !== editingId);
-                      const active = !!formData.flightIds?.includes(flight.id);
-                      return (
-                        <button key={flight.id} type="button" disabled={taken} onClick={() => toggleFlight(flight.id)} className={`p-4 rounded-xl border text-left transition-all relative overflow-hidden group ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : taken ? 'bg-slate-50 border-rose-100 opacity-60 cursor-not-allowed' : 'bg-white hover:border-indigo-400'}`}>
-                          <p className={`font-black italic text-xs uppercase ${taken ? 'text-slate-400' : ''}`}>{flight.flightNumber}</p>
-                          <div className="flex justify-between items-end mt-2">
-                            <p className="text-[9px] font-bold opacity-60 uppercase">{flight.from}-{flight.to}</p>
-                            <p className="text-[9px] font-black italic">{flight.std || '??:??'}</p>
-                          </div>
-                          
-                          {active && <Zap size={12} className="absolute top-2 right-2 opacity-40" />}
-                          {taken && (
-                            <div className="absolute top-0 right-0 p-1.5 bg-rose-50 border-l border-b border-rose-100 text-[6px] font-black uppercase text-rose-500 flex items-center gap-1 rounded-bl-lg">
-                              <AlertCircle size={8} /> Used in {conflictingShift.pickupTime}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
+                  <div className="flex gap-3">
+                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
                   </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-3 gap-8">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Min Staff</label>
-                  <input type="number" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-center" value={formData.minStaff} onChange={e => setFormData({ ...formData, minStaff: parseInt(e.target.value) || 0 })} />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Max Staff</label>
-                  <input type="number" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-center" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Target Power %</label>
-                  <input type="number" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-center" value={formData.targetPower} onChange={e => setFormData({ ...formData, targetPower: parseInt(e.target.value) || 0 })} />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-4">Staffing Matrix</label>
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="pt-10 border-t border-slate-50 space-y-8">
+                <h5 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Award size={14} /> Specific Role Matrix
+                </h5>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {AVAILABLE_SKILLS.map(skill => (
-                    <div key={skill} className="bg-slate-50 p-4 rounded-xl text-center space-y-2 border">
-                      <span className="text-[8px] font-black text-slate-400 uppercase block leading-none">{skill}</span>
-                      <input type="number" className="w-full bg-white border rounded py-1 text-center font-black text-xs" value={formData.roleCounts?.[skill] || 0} onChange={e => setRoleCount(skill, parseInt(e.target.value) || 0)} />
+                    <div key={skill} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl group hover:border-indigo-300 transition-all">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-slate-900">{skill}</span>
+                      <div className="flex items-center gap-4">
+                        <button type="button" onClick={() => updateRoleCount(skill, -1)} className="p-2 bg-slate-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"><Minus size={14} /></button>
+                        <span className="w-8 text-center font-black text-sm">{formData.roleCounts?.[skill] || 0}</span>
+                        <button type="button" onClick={() => updateRoleCount(skill, 1)} className="p-2 bg-slate-50 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors"><Plus size={14} /></button>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="flex gap-4">
-                {editingId && <button type="button" onClick={resetForm} className="px-8 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs">Abort</button>}
-                <button type="submit" className="flex-1 py-5 bg-slate-950 text-white rounded-2xl font-black uppercase shadow-2xl italic text-xs">
-                  {editingId ? 'SYNCHRONIZE SHIFT' : 'ENGINEER SHIFT SLOTS'}
+              <div className="pt-10 border-t border-slate-50 space-y-8">
+                <h5 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] flex items-center gap-2"><ShieldCheck size={14} /> Capacity Targets</h5>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                    <label className="block text-[8px] font-black text-slate-400 uppercase mb-3">Min Staff</label>
+                    <input type="number" min="1" className="w-full bg-transparent font-black text-2xl outline-none" value={formData.minStaff} onChange={e => setFormData({...formData, minStaff: parseInt(e.target.value) || 1})} />
+                  </div>
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                    <label className="block text-[8px] font-black text-slate-400 uppercase mb-3">Max Staff</label>
+                    <input type="number" min="1" className="w-full bg-transparent font-black text-2xl outline-none" value={formData.maxStaff} onChange={e => setFormData({...formData, maxStaff: parseInt(e.target.value) || 1})} />
+                  </div>
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                    <label className="block text-[8px] font-black text-slate-400 uppercase mb-3">Target Power %</label>
+                    <input type="number" min="50" max="1000" className="w-full bg-transparent font-black text-2xl outline-none" value={formData.targetPower} onChange={e => setFormData({...formData, targetPower: parseInt(e.target.value) || 75})} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-10 border-t border-slate-50 space-y-8">
+                <h5 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Target size={14} /> Linked Flights (Operations Link)
+                </h5>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {dayFlights.length === 0 ? (
+                    <p className="col-span-full text-[10px] font-black text-slate-300 uppercase italic py-10 text-center border-2 border-dashed border-slate-100 rounded-3xl">No flights registered for {formData.pickupDate}.</p>
+                  ) : dayFlights.map(flight => {
+                    const active = formData.flightIds?.includes(flight.id);
+                    return (
+                      <button 
+                        key={flight.id} type="button" 
+                        onClick={() => {
+                          const current = formData.flightIds || [];
+                          const updated = active ? current.filter(id => id !== flight.id) : [...current, flight.id];
+                          setFormData({ ...formData, flightIds: updated });
+                        }}
+                        className={`p-4 rounded-xl border text-left transition-all ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-slate-100 hover:border-indigo-200'}`}
+                      >
+                        <p className="font-black italic text-xs uppercase">{flight.flightNumber}</p>
+                        <p className={`text-[8px] font-bold opacity-60 mt-1 uppercase ${active ? 'text-white' : 'text-slate-400'}`}>{flight.sta || '--'}/{flight.std || '--'}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-6">
+                {editingId && <button type="button" onClick={resetForm} className="px-10 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs">Discard Changes</button>}
+                <button type="submit" className="flex-1 py-5 bg-slate-950 text-white rounded-2xl font-black uppercase shadow-2xl italic text-xs tracking-[0.2em] transition-all">
+                  {editingId ? 'SAVE REQUIREMENT' : 'COMMIT DUTY SLOT'}
                 </button>
               </div>
             </form>
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="p-4 bg-slate-900 rounded-3xl text-white mb-2">
-            <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Queue Overview</h5>
-            <p className="text-xs font-black italic">{shifts.length} Active Slots</p>
-          </div>
-          {sortedShifts.length === 0 ? (
-            <div className="bg-white p-12 rounded-[2rem] border-2 border-dashed text-center">
-              <p className="text-[10px] font-black text-slate-300 uppercase italic">No active shift slots engineered.</p>
-            </div>
-          ) : sortedShifts.map((shift) => {
-            const isExpanded = !!expandedShiftIds[shift.id];
-            return (
-              <div key={shift.id} className="bg-white rounded-[2rem] shadow-sm border overflow-hidden transition-all hover:shadow-md">
-                <div className="p-6 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-slate-950 text-white rounded-xl flex items-center justify-center font-black italic text-xs">{getDayLabel(shift.day).substring(0, 3)}</div>
+        <div className="space-y-8">
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-4 flex items-center gap-2">
+            <Layers size={14} /> Station Program Roadmap
+          </h4>
+          
+          <div className="space-y-12">
+            {groupedShifts.map(([date, dayShifts]) => {
+              const dayOffset = getDayOffset(date);
+              return (
+                <div key={date} className="space-y-4">
+                  <div className="flex items-center gap-4 px-4">
+                    <div className="px-3 py-1 bg-slate-950 text-white rounded-lg font-black italic text-[9px] uppercase tracking-widest">Day {dayOffset + 1}</div>
                     <div>
-                      <p className="font-black italic uppercase text-slate-900">{shift.pickupTime}-{shift.endTime}</p>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{shift.flightIds?.length || 0} Flights | {shift.targetPower}% Power</p>
+                      <p className="text-xs font-black uppercase italic text-slate-900 leading-none mb-1">{getDayLabel(date)}</p>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{date}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(shift)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={16} /></button>
-                    <button onClick={() => onDelete(shift.id)} className="p-2 text-slate-300 hover:text-rose-600 transition-colors"><Trash2 size={16} /></button>
-                    <button onClick={() => toggleExpand(shift.id)} className="p-2 text-slate-300 hover:text-slate-950 transition-colors">{isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</button>
+
+                  <div className="space-y-4">
+                    {dayShifts.sort((a,b) => a.pickupTime.localeCompare(b.pickupTime)).map(shift => (
+                      <div key={shift.id} className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 p-8 group transition-all hover:shadow-xl">
+                        <div className="flex justify-between items-start mb-6">
+                          <div>
+                            <p className="font-black italic uppercase text-slate-900 text-lg leading-none mb-2">{shift.pickupTime} — {shift.endTime}</p>
+                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Release: {shift.endDate}</p>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => startEdit(shift)} className="p-2 text-slate-300 hover:text-indigo-600"><Edit2 size={18} /></button>
+                            <button onClick={() => onDelete(shift.id)} className="p-2 text-slate-300 hover:text-rose-600"><Trash2 size={18} /></button>
+                          </div>
+                        </div>
+
+                        <div className="mb-4">
+                          <p className="text-[7px] font-black text-slate-300 uppercase tracking-widest mb-2 flex items-center gap-1"><Award size={10}/> Skill Quotas</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {Object.entries(shift.roleCounts || {}).map(([role, count]) => {
+                              if (Number(count) <= 0) return null;
+                              return (
+                                <div key={role} className="px-2 py-1 bg-slate-900 text-white rounded-lg text-[7px] font-black uppercase border border-slate-800">
+                                  {role.substring(0, 10)}: {count}
+                                </div>
+                              );
+                            })}
+                            {Object.values(shift.roleCounts || {}).every(v => Number(v) === 0) && (
+                              <span className="text-[7px] font-bold text-slate-300 italic">No specific quotas</span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <p className="text-[7px] font-black text-slate-300 uppercase tracking-widest mb-2 flex items-center gap-1"><Plane size={10}/> Linked Services</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {shift.flightIds?.length ? shift.flightIds.map(fId => {
+                              const f = flights.find(fl => fl.id === fId);
+                              return f ? (
+                                <span key={fId} className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase border border-indigo-100">
+                                  {f.flightNumber} ({f.date}) | {f.sta || '--'}/{f.std || '--'}
+                                </span>
+                              ) : null;
+                            }) : <span className="text-[8px] font-bold text-slate-300 italic">No direct links</span>}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-50">
+                          <div className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-xl text-[8px] font-black uppercase flex items-center gap-1.5">
+                            <Users size={12} /> {shift.minStaff}-{shift.maxStaff}
+                          </div>
+                          <div className="px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl text-[8px] font-black uppercase flex items-center gap-1.5">
+                            <Zap size={12} /> {shift.targetPower}%
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                {isExpanded && (
-                  <div className="px-6 pb-6 pt-2 border-t space-y-4 bg-slate-50/50">
-                    <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Logic Breakdown:</div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="text-[10px] font-black uppercase">Staff: {shift.minStaff}-{shift.maxStaff}</div>
-                      <div className="text-[10px] font-black uppercase italic text-indigo-600">Power: {shift.targetPower}%</div>
-                    </div>
-                    {shift.flightIds && shift.flightIds.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {shift.flightIds.map(fid => {
-                          const flt = flights.find(f => f.id === fid);
-                          return flt ? (
-                            <span key={fid} className="px-2 py-1 bg-white border rounded-md text-[8px] font-black uppercase">{flt.flightNumber}</span>
-                          ) : null;
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

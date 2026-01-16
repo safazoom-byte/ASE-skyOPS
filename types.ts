@@ -2,6 +2,7 @@
 export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
+export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'LIEU LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'NIL';
 
 export interface StaffSkill {
   skill: Skill;
@@ -34,9 +35,12 @@ export interface Staff {
 
 export interface ShiftConfig {
   id: string;
-  day: number; // 0-6
+  day: number; // 0-6 (The target operational day offset)
+  pickupDate: string; // YYYY-MM-DD
   pickupTime: string; // HH:mm
-  endTime?: string; // HH:mm
+  endDate: string; // YYYY-MM-DD
+  endTime: string; // HH:mm
+  pickupDayOffset?: number; 
   minStaff: number;
   maxStaff: number;
   targetPower?: number; // Combined power sum of assigned staff
@@ -52,10 +56,16 @@ export interface Assignment {
   shiftId?: string; 
 }
 
+export interface OffDutyRecord {
+  staffId: string;
+  type: LeaveType;
+}
+
 export interface DailyProgram {
   day: number;
   dateString?: string;
   assignments: Assignment[];
+  offDuty?: OffDutyRecord[];
 }
 
 export interface ProgramData {
