@@ -3,7 +3,9 @@ import { DailyProgram, Flight, Staff, ShiftConfig, OffDutyRecord } from '../type
 import { DAYS_OF_WEEK } from '../constants';
 import { ResourceRecommendation } from '../services/geminiService';
 import * as XLSX from 'xlsx';
-import { Sparkles, TrendingUp, FileDown, ShieldCheck, CalendarOff, Shield, Users, Activity } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Sparkles, TrendingUp, FileDown, ShieldCheck, CalendarOff, Shield, Users, Activity, FileText } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -42,6 +44,100 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formattedStartDate = startDate ? new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
   const formattedEndDate = endDate ? new Date(endDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
+
+  const exportPDF = () => {
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const title = `ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`;
+    
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(title, 14, 15);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 20);
+
+    let startY = 25;
+
+    sortedPrograms.forEach((program, pIdx) => {
+      if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
+      if (pIdx > 0) startY = 15;
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, startY);
+      startY += 5;
+
+      const dayAssignments = [...program.assignments];
+      const flightGroups = Array.from(new Set(dayAssignments.map(a => a.flightId)));
+      
+      const tableData = flightGroups.map((fId, idx) => {
+        const f = getFlightById(fId);
+        const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
+        const staffList = flightAssigs.map(a => {
+          const s = getStaffById(a.staffId);
+          return `${s?.initials || '??'} (${a.role.substring(0, 3)})`;
+        }).join(' | ');
+        const sh = getShiftById(flightAssigs[0]?.shiftId);
+
+        return [
+          idx + 1,
+          f?.flightNumber || "-",
+          f ? `${f.from}-${f.to}` : "-",
+          f?.sta || "-",
+          f?.std || "-",
+          sh?.pickupTime || "-",
+          staffList
+        ];
+      });
+
+      autoTable(doc, {
+        startY: startY,
+        head: [['S/N', 'FLIGHT', 'SECTOR', 'STA', 'STD', 'SHIFT', 'ASSIGNED STAFF']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillStyle: 'F', fillColor: [15, 23, 42], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { fontStyle: 'bold' },
+          6: { cellWidth: 'auto' }
+        },
+        margin: { left: 14, right: 14 }
+      });
+
+      // @ts-ignore
+      startY = doc.lastAutoTable.finalY + 10;
+
+      // Leave Section
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text("OFF & LEAVES REGISTRY", 14, startY);
+      startY += 5;
+
+      const leaveCategories = ['DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'];
+      const leaveData = leaveCategories.map(cat => {
+        const inCat = (program.offDuty || [])
+          .filter(off => off.type === cat)
+          .map(off => getStaffById(off.staffId)?.initials)
+          .join(', ');
+        return [cat, inCat || 'NIL'];
+      });
+
+      autoTable(doc, {
+        startY: startY,
+        body: leaveData,
+        theme: 'plain',
+        bodyStyles: { fontSize: 8, cellPadding: 1 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 30 },
+          1: { cellWidth: 'auto' }
+        },
+        margin: { left: 14, right: 14 }
+      });
+    });
+
+    doc.save(`ASE_SDU_Program_${formattedStartDate.replace(/\//g, '-')}.pdf`);
+  };
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
@@ -104,14 +200,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   return (
     <div className="space-y-16 animate-in fade-in duration-700 pb-32">
-      <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-10">
+      <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-10">
         <div>
           <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Weekly Station Program</h2>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{formattedStartDate} — {formattedEndDate}</p>
         </div>
-        <button onClick={exportExcel} className="px-10 py-5 bg-emerald-600 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl shadow-emerald-600/20 active:scale-95 transition-all">
-          <FileDown size={22} /> DOWNLOAD MASTER DOCUMENT
-        </button>
+        <div className="flex flex-wrap items-center gap-4">
+          <button onClick={exportPDF} className="px-8 py-5 bg-slate-900 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
+            <FileText size={20} /> DOWNLOAD PDF
+          </button>
+          <button onClick={exportExcel} className="px-8 py-5 bg-emerald-600 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl shadow-emerald-600/20 active:scale-95 transition-all">
+            <FileDown size={22} /> DOWNLOAD EXCEL
+          </button>
+        </div>
       </div>
 
       <div className="space-y-24">

@@ -70,15 +70,27 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
     INPUT PARAMETERS:
     - WINDOW: ${options.startDate} for ${options.numDays} days.
     - FLIGHTS: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date, from: f.from, to: f.to })))}
-    - STAFF: ${JSON.stringify(data.staff.map(s => ({ id: s.id, name: s.name, initials: s.initials, skills: s.skillRatings })))}
+    - STAFF REGISTRY (CRITICAL AVAILABILITY): ${JSON.stringify(data.staff.map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        initials: s.initials, 
+        type: s.type,
+        skills: s.skillRatings,
+        workFrom: s.workFromDate, 
+        workTo: s.workToDate 
+      })))}
     
-    RULES:
-    1. COMMAND: Every active shift window MUST have at least one 'Shift Leader'.
-    2. SHIFT LEADER PRIORITY: List Shift Leaders first in assignments.
-    3. LEAVE CATEGORIES: Every staff member not assigned to a flight must be in the 'offDuty' array.
-    4. OFF DUTY STATUS: Use EXACTLY these categories: 'DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'. 
-       If no staff are in a category, do not include them, but try to distribute unassigned staff logically.
-    5. REST: Ensure ${options.minRestHours} hours buffer.
+    CONSTRAINTS & BUSINESS LOGIC:
+    1. TEMPORAL AVAILABILITY: A staff member CANNOT be assigned to any duty if the duty date is outside their [workFrom, workTo] range.
+    2. LOCAL STAFF RULE: For staff with type 'Local':
+       - They MUST work exactly 5 days per week.
+       - They MUST have 2 off-days per week.
+       - These 2 off-days DO NOT need to be sequential.
+    3. COMMAND: Every active shift window MUST have at least one 'Shift Leader'.
+    4. SHIFT LEADER PRIORITY: List Shift Leaders first in assignments.
+    5. LEAVE CATEGORIES: Every staff member not assigned to a flight for a specific day MUST be listed in the 'offDuty' array for that day.
+    6. OFF DUTY STATUS: Use EXACTLY: 'DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'. 
+    7. REST: Ensure ${options.minRestHours} hours buffer between duties.
     
     MANDATORY OUTPUT: Return strictly JSON following the defined schema.
   `;
@@ -163,7 +175,17 @@ export async function extractDataFromContent(content: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const startDateStr = content.startDate || new Date().toISOString().split('T')[0];
 
-  const prompt = `ACT AS AN AVIATION DATA EXTRACTOR. Extract Flights and Staff. Return JSON.`;
+  const prompt = `
+    ACT AS AN AVIATION DATA INTELLIGENCE ANALYST. 
+    Extract structured operational data from the provided source. 
+    
+    Target Data:
+    - Flights: Flight number, Origin (From), Destination (To), STA (Arrival Time), STD (Departure Time), and Date.
+    - Staff: Full Name, Initials, Power Rate (if mentioned), Skill Ratings (Ramp, Load Control, etc.), and importantly, their working contract/duration dates (From/To).
+    
+    If dates are found in the format YYYY-MM-DD, use them. Otherwise, try to interpret them.
+    If no dates are found for staff, default workFromDate to ${startDateStr}.
+  `;
 
   try {
     const parts: any[] = [{ text: prompt }];
@@ -177,19 +199,70 @@ export async function extractDataFromContent(content: {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: { parts },
-      config: { responseMimeType: "application/json" }
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            flights: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  flightNumber: { type: Type.STRING },
+                  from: { type: Type.STRING },
+                  to: { type: Type.STRING },
+                  sta: { type: Type.STRING },
+                  std: { type: Type.STRING },
+                  date: { type: Type.STRING }
+                }
+              }
+            },
+            staff: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  initials: { type: Type.STRING },
+                  powerRate: { type: Type.NUMBER },
+                  skillRatings: { type: Type.OBJECT },
+                  workFromDate: { type: Type.STRING },
+                  workToDate: { type: Type.STRING }
+                }
+              }
+            }
+          }
+        }
+      }
     });
 
     const result = safeParseJson(response.text);
     if (!result) throw new Error("Could not parse data.");
     
     return { 
-      flights: (result.flights || []).map((f: any) => ({...f, id: Math.random().toString(36).substr(2, 9), date: f.date || startDateStr, day: 0})), 
-      staff: (result.staff || []).map((s: any) => ({...s, id: Math.random().toString(36).substr(2, 9), initials: (s.initials || generateInitials(s.name)).toUpperCase(), skillRatings: s.skillRatings || {}, powerRate: s.powerRate || 75, type: 'Local', maxShiftsPerWeek: 5})), 
+      flights: (result.flights || []).map((f: any) => ({
+        ...f, 
+        id: Math.random().toString(36).substr(2, 9), 
+        date: f.date || startDateStr, 
+        day: 0,
+        type: 'Turnaround'
+      })), 
+      staff: (result.staff || []).map((s: any) => ({
+        ...s, 
+        id: Math.random().toString(36).substr(2, 9), 
+        initials: (s.initials || generateInitials(s.name)).toUpperCase(), 
+        skillRatings: s.skillRatings || {}, 
+        powerRate: s.powerRate || 75, 
+        type: 'Local', 
+        maxShiftsPerWeek: 5, 
+        workFromDate: s.workFromDate || startDateStr,
+        workToDate: s.workToDate || ''
+      })), 
       shifts: [], 
       programs: [] 
     };
-  } catch (error: any) { throw new Error("Extraction failed."); }
+  } catch (error: any) { throw new Error("Extraction failed: " + error.message); }
 }
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
