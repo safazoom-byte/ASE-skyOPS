@@ -1,8 +1,25 @@
-/* 
-   Tailwind base, components, and utilities are now handled by the CDN 
-   and the internal <style type="text/tailwindcss"> block in index.html 
-   to ensure the design renders correctly in all environments.
-*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-md border border-slate-200/50 shadow-sm;
+  }
+  .sidebar-item-active {
+    @apply bg-primary-600 text-white shadow-lg shadow-primary-600/20;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
 
 .animate-wave {
   animation: wave 1s ease-in-out infinite;
