@@ -70,7 +70,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
     INPUT PARAMETERS:
     - WINDOW: ${options.startDate} for ${options.numDays} days.
     - FLIGHTS: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date, from: f.from, to: f.to })))}
-    - STAFF REGISTRY (CRITICAL AVAILABILITY): ${JSON.stringify(data.staff.map(s => ({ 
+    - STAFF REGISTRY: ${JSON.stringify(data.staff.map(s => ({ 
         id: s.id, 
         name: s.name, 
         initials: s.initials, 
@@ -81,12 +81,13 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
       })))}
     
     CONSTRAINTS & BUSINESS LOGIC:
-    1. TEMPORAL AVAILABILITY: A staff member CANNOT be assigned to any duty if the duty date is outside their [workFrom, workTo] range.
-    2. LOCAL STAFF RULE: For staff with type 'Local':
+    1. LOCAL STAFF (PERMANENT ASSETS): Staff with type 'Local' are ALWAYS available.
        - They MUST work exactly 5 days per week.
        - They MUST have 2 off-days per week.
        - These 2 off-days DO NOT need to be sequential.
-    3. COMMAND: Every active shift window MUST have at least one 'Shift Leader'.
+       - IGNORE contract dates for Local staff.
+    2. ROSTER STAFF (CONTRACT ASSETS): Staff with type 'Roster' CANNOT be assigned if the duty date is outside their [workFrom, workTo] range.
+    3. COMMAND: Every active flight duty MUST have at least one 'Shift Leader'.
     4. SHIFT LEADER PRIORITY: List Shift Leaders first in assignments.
     5. LEAVE CATEGORIES: Every staff member not assigned to a flight for a specific day MUST be listed in the 'offDuty' array for that day.
     6. OFF DUTY STATUS: Use EXACTLY: 'DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'. 
@@ -177,14 +178,16 @@ export async function extractDataFromContent(content: {
 
   const prompt = `
     ACT AS AN AVIATION DATA INTELLIGENCE ANALYST. 
-    Extract structured operational data from the provided source. 
+    Extract flight schedules and personnel registries from the provided source. 
     
     Target Data:
-    - Flights: Flight number, Origin (From), Destination (To), STA (Arrival Time), STD (Departure Time), and Date.
-    - Staff: Full Name, Initials, Power Rate (if mentioned), Skill Ratings (Ramp, Load Control, etc.), and importantly, their working contract/duration dates (From/To).
+    - Flights: Flight number, Origin, Destination, STA, STD, and Date.
+    - Staff: Name, Initials, and Skill Ratings. 
     
-    If dates are found in the format YYYY-MM-DD, use them. Otherwise, try to interpret them.
-    If no dates are found for staff, default workFromDate to ${startDateStr}.
+    Skill Mapping Instructions:
+    Analyze proficiency for: Ramp, Load Control, Lost and Found, Shift Leader, Operations. Return 'Yes' or 'No' for each.
+    
+    IMPORTANT: Local staff are permanent. Only return 'workFromDate'/'workToDate' if specifically mentioned for a contract worker.
   `;
 
   try {
@@ -225,8 +228,17 @@ export async function extractDataFromContent(content: {
                 properties: {
                   name: { type: Type.STRING },
                   initials: { type: Type.STRING },
-                  powerRate: { type: Type.NUMBER },
-                  skillRatings: { type: Type.OBJECT },
+                  skillRatings: { 
+                    type: Type.OBJECT,
+                    properties: {
+                      'Ramp': { type: Type.STRING },
+                      'Load Control': { type: Type.STRING },
+                      'Lost and Found': { type: Type.STRING },
+                      'Shift Leader': { type: Type.STRING },
+                      'Operations': { type: Type.STRING }
+                    },
+                    required: ['Ramp', 'Load Control', 'Lost and Found', 'Shift Leader', 'Operations']
+                  },
                   workFromDate: { type: Type.STRING },
                   workToDate: { type: Type.STRING }
                 }
@@ -253,11 +265,11 @@ export async function extractDataFromContent(content: {
         id: Math.random().toString(36).substr(2, 9), 
         initials: (s.initials || generateInitials(s.name)).toUpperCase(), 
         skillRatings: s.skillRatings || {}, 
-        powerRate: s.powerRate || 75, 
-        type: 'Local', 
-        maxShiftsPerWeek: 5, 
-        workFromDate: s.workFromDate || startDateStr,
-        workToDate: s.workToDate || ''
+        powerRate: 75, 
+        type: s.workFromDate ? 'Roster' : 'Local', // Intelligent type guessing
+        maxShiftsPerWeek: s.workFromDate ? 7 : 5, 
+        workFromDate: s.workFromDate || undefined,
+        workToDate: s.workToDate || undefined
       })), 
       shifts: [], 
       programs: [] 
@@ -267,7 +279,7 @@ export async function extractDataFromContent(content: {
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure SDU OFF AND LEAVES list is updated accordingly.`;
+  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure OFF & LEAVES list is updated accordingly.`;
   try {
     const parts: any[] = [{ text: prompt }, { text: `Data: ${JSON.stringify(data.programs)}` }];
     if (media?.length) media.forEach(m => parts.push({ inlineData: { mimeType: m.mimeType, data: m.data } }));

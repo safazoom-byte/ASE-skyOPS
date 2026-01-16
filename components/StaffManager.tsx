@@ -20,7 +20,8 @@ import {
   AlertTriangle,
   History,
   Clock,
-  Briefcase
+  Briefcase,
+  Infinity
 } from 'lucide-react';
 
 interface Props {
@@ -42,8 +43,8 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
     type: 'Local',
     skillRatings: {},
     powerRate: 75,
-    workFromDate: programStartDate || '',
-    workToDate: programEndDate || ''
+    workFromDate: '',
+    workToDate: ''
   });
 
   const generateInitials = (name: string): string => {
@@ -75,6 +76,7 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const isLocal = formData.type === 'Local';
     const newStaff: Staff = {
       id: editingStaffId || Math.random().toString(36).substr(2, 9),
       name: formData.name || 'Unknown',
@@ -82,9 +84,9 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
       type: formData.type || 'Local',
       skillRatings: formData.skillRatings || {},
       powerRate: formData.powerRate || 75,
-      maxShiftsPerWeek: formData.type === 'Local' ? 5 : 7,
-      workFromDate: formData.workFromDate,
-      workToDate: formData.workToDate,
+      maxShiftsPerWeek: isLocal ? 5 : 7,
+      workFromDate: isLocal ? undefined : formData.workFromDate,
+      workToDate: isLocal ? undefined : formData.workToDate,
     };
     onUpdate(newStaff);
     resetForm();
@@ -97,8 +99,8 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
       type: 'Local', 
       skillRatings: {}, 
       powerRate: 75, 
-      workFromDate: programStartDate || '', 
-      workToDate: programEndDate || '' 
+      workFromDate: '', 
+      workToDate: '' 
     });
     setEditingStaffId(null);
   };
@@ -121,8 +123,7 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
       Name: s.name,
       Initials: s.initials,
       Type: s.type,
-      'Active From': s.workFromDate || 'N/A',
-      'Active To': s.workToDate || 'N/A',
+      'Active Period': s.type === 'Local' ? 'PERMANENT' : `${s.workFromDate || 'N/A'} - ${s.workToDate || 'N/A'}`,
       Power: `${s.powerRate}%`,
       Skills: Object.entries(s.skillRatings)
         .filter(([_, level]) => level === 'Yes')
@@ -180,27 +181,39 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
                   <div className="relative">
                     <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <select name="type" className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none appearance-none" value={formData.type} onChange={handleInputChange}>
-                      <option value="Local">Local (5 on/2 off)</option>
-                      <option value="Roster">Roster (Variable)</option>
+                      <option value="Local">Local (Permanent)</option>
+                      <option value="Roster">Roster (Contract)</option>
                     </select>
                   </div>
                 </div>
 
-                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Calendar size={14} className="text-blue-500" /> Working Duration
-                  </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[8px] font-black text-slate-400 uppercase mb-1 ml-1">From Date</label>
-                      <input type="date" name="workFromDate" className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs" value={formData.workFromDate} onChange={handleInputChange} required />
-                    </div>
-                    <div>
-                      <label className="block text-[8px] font-black text-slate-400 uppercase mb-1 ml-1">To Date</label>
-                      <input type="date" name="workToDate" className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs" value={formData.workToDate} onChange={handleInputChange} required />
+                {formData.type === 'Roster' ? (
+                  <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4 animate-in slide-in-from-top duration-300">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <Calendar size={14} className="text-blue-500" /> Contract Duration
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[8px] font-black text-slate-400 uppercase mb-1 ml-1">From Date</label>
+                        <input type="date" name="workFromDate" className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs" value={formData.workFromDate} onChange={handleInputChange} required />
+                      </div>
+                      <div>
+                        <label className="block text-[8px] font-black text-slate-400 uppercase mb-1 ml-1">To Date</label>
+                        <input type="date" name="workToDate" className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs" value={formData.workToDate} onChange={handleInputChange} required />
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-100 flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                      <Zap size={18} className="text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-blue-900 uppercase tracking-widest">Permanent Availability</p>
+                      <p className="text-[8px] font-bold text-blue-600 uppercase">Scheduled 5-on / 2-off Weekly</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200">
                   <div className="flex justify-between items-center mb-4">
@@ -245,7 +258,7 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
                   <tr>
                     <th className="px-6 py-5 border-b border-slate-100">Personnel</th>
                     <th className="px-6 py-5 border-b border-slate-100">Category</th>
-                    <th className="px-6 py-5 border-b border-slate-100">Working Period</th>
+                    <th className="px-6 py-5 border-b border-slate-100">Operation window</th>
                     <th className="px-6 py-5 border-b border-slate-100">Skillset</th>
                     <th className="px-6 py-5 border-b border-slate-100 text-right">Actions</th>
                   </tr>
@@ -281,10 +294,19 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
                       </td>
                       <td className="px-6 py-6">
                         <div className="flex items-center gap-2 text-slate-400">
-                           <Clock size={12} />
-                           <span className="text-[9px] font-black uppercase">
-                             {s.workFromDate && s.workToDate ? `${s.workFromDate.split('-').slice(1).join('/')} - ${s.workToDate.split('-').slice(1).join('/')}` : 'UNSET'}
-                           </span>
+                           {s.type === 'Local' ? (
+                             <div className="flex items-center gap-2 text-blue-600">
+                               <Clock size={12} />
+                               <span className="text-[9px] font-black uppercase tracking-widest">PERMANENT</span>
+                             </div>
+                           ) : (
+                             <>
+                               <Clock size={12} />
+                               <span className="text-[9px] font-black uppercase">
+                                 {s.workFromDate && s.workToDate ? `${s.workFromDate.split('-').slice(1).join('/')} - ${s.workToDate.split('-').slice(1).join('/')}` : 'UNSET'}
+                               </span>
+                             </>
+                           )}
                         </div>
                       </td>
                       <td className="px-6 py-6">
