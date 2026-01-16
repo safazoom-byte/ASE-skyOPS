@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import { 
@@ -6,16 +7,9 @@ import {
   Clock, 
   Calendar, 
   LayoutDashboard,
-  BrainCircuit,
-  Settings,
   Menu,
   X,
-  ChevronRight,
-  ShieldAlert,
-  AlertTriangle,
-  Moon,
-  AlertCircle,
-  CalendarDays
+  AlertCircle
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -40,7 +34,6 @@ const STORAGE_KEYS = {
 };
 
 const App: React.FC = () => {
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
@@ -102,6 +95,7 @@ const App: React.FC = () => {
   const [showWaiverDialog, setShowWaiverDialog] = useState(false);
 
   const numDays = useMemo(() => {
+    if (!startDate || !endDate) return 7;
     const start = new Date(startDate);
     const end = new Date(endDate);
     const diffTime = Math.abs(end.getTime() - start.getTime());
@@ -109,34 +103,9 @@ const App: React.FC = () => {
     return Math.min(Math.max(diffDays, 1), 14); 
   }, [startDate, endDate]);
 
-  const getDayDate = (dayIndex: number) => {
-    const start = new Date(startDate);
-    const result = new Date(start);
-    result.setDate(start.getDate() + dayIndex);
-    return result.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const outOfRangeFlights = useMemo(() => {
-    return flights.filter(f => f.day < 0 || f.day >= numDays);
-  }, [flights, numDays]);
-
-  const unlinkedFlights = useMemo(() => {
-    const linkedIds = new Set(shifts.flatMap(s => s.flightIds || []));
-    return flights.filter(f => f.day >= 0 && f.day < numDays && !linkedIds.has(f.id));
-  }, [flights, shifts, numDays]);
-
-  useEffect(() => {
-    const checkKey = async () => {
-      if (window.aistudio?.hasSelectedApiKey) {
-        const selected = await window.aistudio.hasSelectedApiKey();
-        // Fixed: Ensure we use the boolean result directly to avoid unintentional string comparison error
-        setHasApiKey(selected ?? false);
-      } else {
-        setHasApiKey(Boolean(process.env.API_KEY));
-      }
-    };
-    checkKey();
-  }, []);
+  const activeFlightsInRange = useMemo(() => {
+    return flights.filter(f => f.date >= startDate && f.date <= endDate);
+  }, [flights, startDate, endDate]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.FLIGHTS, JSON.stringify(flights));
@@ -150,10 +119,54 @@ const App: React.FC = () => {
     if (templateBinary) localStorage.setItem(STORAGE_KEYS.TEMPLATE, templateBinary);
   }, [flights, staff, shifts, programs, startDate, endDate, templateBinary, minRestHours, recommendations]);
 
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+          console.debug('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  }, []);
+
+  const handleStaffUpdate = (updatedStaff: Staff) => {
+    setStaff(prev => {
+      const idMatchIdx = prev.findIndex(s => s.id === updatedStaff.id);
+      if (idMatchIdx !== -1) {
+        const existing = prev[idMatchIdx];
+        const merged = { ...existing, ...updatedStaff };
+        const newList = [...prev];
+        newList[idMatchIdx] = merged;
+        return newList;
+      }
+      return [...prev, updatedStaff];
+    });
+  };
+
   const handleDataExtracted = (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[], templateBinary?: string }) => {
-    if (data.flights?.length > 0) setFlights(prev => [...prev, ...data.flights]);
-    if (data.staff?.length > 0) setStaff(prev => [...prev, ...data.staff]);
-    if (data.shifts && data.shifts.length > 0) setShifts(prev => [...prev, ...data.shifts]);
+    if (data.staff?.length > 0) {
+      data.staff.forEach(s => handleStaffUpdate(s));
+    }
+
+    if (data.flights?.length > 0) {
+      setFlights(prev => {
+        const updated = [...prev];
+        data.flights.forEach(newF => {
+          const idx = updated.findIndex(f => f.flightNumber === newF.flightNumber && f.date === newF.date);
+          if (idx !== -1) {
+            updated[idx] = { ...updated[idx], ...newF };
+          } else {
+            updated.push(newF);
+          }
+        });
+        return updated;
+      });
+    }
+
+    if (data.shifts && data.shifts.length > 0) {
+      setShifts(prev => [...prev, ...data.shifts]);
+    }
+    
     if (data.programs && data.programs.length > 0) {
       setPrograms(data.programs);
       setActiveTab('program');
@@ -161,12 +174,14 @@ const App: React.FC = () => {
     if (data.templateBinary) setTemplateBinary(data.templateBinary);
   };
 
-  const handleFlightDelete = (flightId: string) => {
-    setFlights(prev => prev.filter(f => f.id !== flightId));
-    setPrograms(prev => prev.map(p => ({
-      ...p,
-      assignments: (p.assignments || []).filter(a => a.flightId !== flightId)
-    })));
+  const handleBuildRequest = () => {
+    setError(null);
+    if (activeFlightsInRange.length === 0) {
+      setError(`Critical Error: The current Target Window (${startDate} to ${endDate}) has zero scheduled flights. Assign flights to these dates before building.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setShowConfirmDialog(true);
   };
 
   const confirmGenerateProgram = async () => {
@@ -174,26 +189,26 @@ const App: React.FC = () => {
     setIsGenerating(true);
     setError(null);
     try {
-      const data: ProgramData = { flights, staff, shifts, programs };
-      const result = await generateAIProgram(data, '', { customRules, numDays, minRestHours });
+      const result = await generateAIProgram(
+        { flights, staff, shifts, programs },
+        "", 
+        { numDays, customRules, minRestHours, startDate }
+      );
       
-      setProposedPrograms(result.programs);
-      setShortageReport(result.shortageReport);
-      
-      if (result.recommendations) setRecommendations(result.recommendations);
-
-      if (result.shortageReport.length > 0) {
+      if (result.shortageReport && result.shortageReport.length > 0) {
+        setProposedPrograms(result.programs);
+        setShortageReport(result.shortageReport);
         setShowWaiverDialog(true);
       } else {
         setPrograms(result.programs);
+        if (result.recommendations) setRecommendations(result.recommendations);
         setActiveTab('program');
       }
     } catch (err: any) {
-      if (err.message?.includes("entity was not found") || err.message?.includes("API key")) {
-        setHasApiKey(false);
-      }
-      setError(err.message || "Intelligence Build Error.");
-    } finally { setIsGenerating(false); }
+      setError(err.message || "Failed to generate program");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const finalizeProposedPrograms = () => {
@@ -216,18 +231,39 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
-      {hasApiKey === false && (
-        <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] lg:rounded-[3rem] shadow-2xl max-w-xl w-full p-8 lg:p-12 text-center border border-slate-200">
-            <ShieldAlert size={64} className="text-blue-600 mx-auto mb-8" />
-            <h2 className="text-2xl lg:text-3xl font-black text-slate-900 uppercase italic tracking-tighter mb-4">Activate Station Engine</h2>
-            <p className="text-slate-500 text-sm mb-8">Select an API key from a paid Google Cloud project to proceed.</p>
-            <button 
-              onClick={async () => { await window.aistudio?.openSelectKey?.(); setHasApiKey(true); }} 
-              className="w-full py-5 bg-slate-950 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl active:scale-95"
-            >
-              INITIALIZE AI CORE
-            </button>
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-[3000] lg:hidden animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-950/98 backdrop-blur-2xl" onClick={() => setIsMobileMenuOpen(false)} />
+          <div className="relative h-full flex flex-col p-8 w-[85%] bg-slate-950 border-r border-white/10 shadow-2xl">
+            <div className="flex items-center justify-between mb-12">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold italic text-white">ASE</div>
+                <h1 className="text-xl font-black uppercase tracking-tighter italic text-white">SkyOPS</h1>
+              </div>
+              <button onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-white/50 hover:text-white transition-colors">
+                <X size={32} />
+              </button>
+            </div>
+            
+            <nav className="flex-1 space-y-4">
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setActiveTab(item.id as any);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-6 px-8 py-6 rounded-3xl transition-all ${
+                    activeTab === item.id 
+                      ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/20' 
+                      : 'text-slate-500 hover:text-slate-200'
+                  }`}
+                >
+                  <item.icon size={24} />
+                  <span className="text-lg font-black uppercase tracking-widest">{item.label}</span>
+                </button>
+              ))}
+            </nav>
           </div>
         </div>
       )}
@@ -243,7 +279,7 @@ const App: React.FC = () => {
               key={item.id}
               onClick={() => setActiveTab(item.id as any)}
               className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${
-                activeTab === item.id ? 'bg-blue-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-200'
+                activeTab === item.id ? 'sidebar-item-active' : 'text-slate-500 hover:text-slate-200'
               }`}
             >
               <item.icon size={20} />
@@ -254,13 +290,18 @@ const App: React.FC = () => {
       </aside>
 
       <main className="flex-1 overflow-hidden flex flex-col relative">
-        <header className="lg:hidden flex items-center justify-between px-6 py-4 bg-slate-950 text-white">
-          <h1 className="text-lg font-black uppercase italic">SkyOPS</h1>
-          <button onClick={() => setIsMobileMenuOpen(true)}><Menu size={24} /></button>
+        <header className="lg:hidden flex items-center justify-between px-6 py-4 bg-slate-950 text-white border-b border-white/5 z-[50]">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold italic text-xs">ASE</div>
+            <h1 className="text-base font-black uppercase italic tracking-tighter">SkyOPS</h1>
+          </div>
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 hover:bg-white/5 rounded-lg transition-colors">
+            <Menu size={24} />
+          </button>
         </header>
 
         {isGenerating && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl">
+          <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl">
             <div className="text-center">
               <div className="w-16 h-16 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
               <p className="text-blue-400 font-black uppercase tracking-widest text-xs">Assembling Operational Logic...</p>
@@ -268,9 +309,22 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 lg:p-10">
+        <div className="flex-1 overflow-y-auto p-6 lg:p-10 no-scrollbar">
           {activeTab === 'dashboard' && (
             <div className="space-y-10">
+              {error && (
+                <div className="p-6 bg-rose-50 border border-rose-100 rounded-[2rem] flex items-center gap-4 animate-in slide-in-from-top duration-300">
+                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center shrink-0">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-[10px] font-black text-rose-900 uppercase tracking-widest mb-1">Build Blocked</h4>
+                    <p className="text-[10px] text-rose-700 font-medium leading-relaxed">{error}</p>
+                  </div>
+                  <button onClick={() => setError(null)} className="p-2 text-rose-400 hover:text-rose-600">&times;</button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm space-y-6">
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Target Window</h4>
@@ -308,8 +362,7 @@ const App: React.FC = () => {
                   <p className="text-slate-400 text-sm font-medium">Optimize station logic across {numDays} days.</p>
                 </div>
                 <button 
-                  onClick={() => setShowConfirmDialog(true)}
-                  disabled={flights.length === 0 || staff.length === 0}
+                  onClick={handleBuildRequest}
                   className="px-14 py-6 bg-blue-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl disabled:opacity-20"
                 >
                   EXECUTE BUILD
@@ -318,12 +371,30 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={(f) => setFlights([...flights, f])} onUpdate={(f) => setFlights(flights.map(prev => prev.id === f.id ? f : prev))} onDelete={handleFlightDelete} />}
-          {activeTab === 'staff' && <StaffManager staff={staff} onAdd={(s) => setStaff([...staff, s])} onDelete={(id) => setStaff(staff.filter(s => s.id !== id))} defaultMaxShifts={5} programStartDate={startDate} programEndDate={endDate} />}
-          {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} startDate={startDate} onAdd={(s) => setShifts([...shifts, s])} onUpdate={(s) => setShifts(shifts.map(prev => prev.id === s.id ? s : prev))} onDelete={(id) => setShifts(shifts.filter(s => s.id !== id))} />}
+          {activeTab === 'flights' && (
+            <FlightManager 
+              flights={flights} 
+              startDate={startDate} 
+              endDate={endDate} 
+              onAdd={(f) => setFlights([...flights, f])} 
+              onUpdate={(f) => setFlights(flights.map(prev => prev.id === f.id ? f : prev))} 
+              onDelete={(id) => setFlights(flights.filter(f => f.id !== id))} 
+            />
+          )}
+          {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={handleStaffUpdate} onDelete={(id) => setStaff(staff.filter(s => s.id !== id))} defaultMaxShifts={5} programStartDate={startDate} programEndDate={endDate} />}
+          {activeTab === 'shifts' && (
+            <ShiftManager 
+              shifts={shifts} 
+              flights={flights} 
+              startDate={startDate} 
+              onAdd={(s) => setShifts([...shifts, s])} 
+              onUpdate={(s) => setShifts(shifts.map(prev => prev.id === s.id ? s : prev))} 
+              onDelete={(id) => setShifts(shifts.filter(sh => sh.id !== id))} 
+            />
+          )}
           {activeTab === 'program' && (
             <div className="space-y-12">
-              <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} startDate={startDate} endDate={endDate} templateBinary={templateBinary} aiRecommendations={recommendations} />
+              <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} templateBinary={templateBinary} aiRecommendations={recommendations} />
               <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={setPrograms} />
             </div>
           )}
@@ -331,7 +402,7 @@ const App: React.FC = () => {
       </main>
 
       {showConfirmDialog && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl">
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl">
           <div className="bg-white rounded-[3rem] shadow-2xl max-w-xl w-full p-12">
             <h3 className="text-2xl font-black italic uppercase mb-8">Program Constraints</h3>
             <div className="space-y-8">
@@ -353,7 +424,7 @@ const App: React.FC = () => {
       )}
 
       {showWaiverDialog && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
           <div className="bg-white rounded-[3rem] shadow-2xl max-w-2xl w-full p-12">
             <h3 className="text-2xl font-black italic uppercase mb-4">Operational Waiver</h3>
             <p className="text-slate-500 mb-8">Insufficient primary staff. Rest period violations proposed to meet operational demand.</p>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
@@ -13,8 +12,8 @@ interface Props {
   flights: Flight[];
   staff: Staff[];
   shifts: ShiftConfig[];
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
   onUpdatePrograms?: (updatedPrograms: DailyProgram[]) => void;
   templateBinary: string | null;
   aiRecommendations?: ResourceRecommendation | null;
@@ -31,14 +30,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const getDayDate = (dayIndex: number) => {
+    if (!startDate) return `Day ${dayIndex}`;
     const start = new Date(startDate);
     const result = new Date(start);
     result.setDate(start.getDate() + dayIndex);
     return result.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
   };
 
-  const formattedStartDate = new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const formattedEndDate = new Date(endDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const formattedStartDate = startDate ? new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
+  const formattedEndDate = endDate ? new Date(endDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
@@ -64,7 +64,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     });
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, worksheet, "Weekly Program");
-    XLSX.writeFile(workbook, `SkyOPS_Program_${startDate}.xlsx`);
+    XLSX.writeFile(workbook, `SkyOPS_Program_${startDate || 'export'}.xlsx`);
   };
 
   const isEmpty = !localPrograms || localPrograms.length === 0 || localPrograms.every(p => !p.assignments || p.assignments.length === 0);

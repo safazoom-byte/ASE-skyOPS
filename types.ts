@@ -15,14 +15,15 @@ export interface Flight {
   to: string;
   sta?: string; 
   std?: string; 
-  day: number; 
+  date: string; // Mandatory date string (YYYY-MM-DD)
+  day: number; // Offset for roster logic
   type: 'Arrival' | 'Departure' | 'Turnaround';
 }
 
 export interface Staff {
   id: string;
   name: string;
-  initials?: string;
+  initials: string; 
   type: StaffCategory;
   skillRatings: Partial<Record<Skill, ProficiencyLevel>>;
   powerRate: number; // 50-100
