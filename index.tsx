@@ -125,7 +125,6 @@ const App: React.FC = () => {
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
-      // SMART MERGE: Match by ID first, then by exact Name or Initials to prevent duplicates
       const idMatchIdx = prev.findIndex(s => s.id === updatedStaff.id);
       const nameMatchIdx = prev.findIndex(s => s.name.toLowerCase() === updatedStaff.name.toLowerCase());
       const initialsMatchIdx = prev.findIndex(s => s.initials.toUpperCase() === updatedStaff.initials.toUpperCase());
@@ -134,11 +133,9 @@ const App: React.FC = () => {
 
       if (targetIdx !== -1) {
         const existing = prev[targetIdx];
-        // Merge extracted data into existing, but prioritize existing edited data if the new one is empty
         const merged = { 
           ...existing, 
           ...updatedStaff,
-          // Retain skills if the new import is empty/partial
           skillRatings: { ...existing.skillRatings, ...updatedStaff.skillRatings }
         };
         const newList = [...prev];
@@ -219,6 +216,10 @@ const App: React.FC = () => {
         { numDays, customRules, minRestHours, startDate }
       );
       
+      if (result.recommendations) {
+        setRecommendations(result.recommendations);
+      }
+
       if (result.shortageReport && result.shortageReport.length > 0) {
         setProposedPrograms(result.programs);
         setShortageReport(result.shortageReport);
@@ -339,7 +340,7 @@ const App: React.FC = () => {
                         { label: 'Active Flights', value: activeFlightsInRange.length, icon: Plane, color: 'text-blue-600' },
                         { label: 'Personnel', value: staff.length, icon: Users, color: 'text-emerald-600' },
                         { label: 'Duty Hours', value: activeShiftsInRange.length * 8, icon: Clock, color: 'text-amber-600' },
-                        { label: 'Health Score', value: '98%', icon: ShieldCheck, color: 'text-indigo-600' }
+                        { label: 'Health Score', value: recommendations ? `${recommendations.healthScore}%` : '---', icon: ShieldCheck, color: 'text-indigo-600' }
                       ].map((stat, i) => (
                         <div key={i} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 transition-all hover:scale-[1.02]">
                           <stat.icon size={20} className={`${stat.color} mb-3`} />
@@ -348,6 +349,23 @@ const App: React.FC = () => {
                         </div>
                       ))}
                     </div>
+
+                    {recommendations && (
+                      <div className="mt-10 p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] space-y-6">
+                        <div className="flex items-center gap-4">
+                           <TrendingUp className="text-indigo-600" size={20} />
+                           <h4 className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Resource Recommendations</h4>
+                        </div>
+                        <p className="text-xs font-medium text-indigo-800 leading-relaxed italic">"{recommendations.hireAdvice}"</p>
+                        <div className="flex flex-wrap gap-2">
+                           {recommendations.skillGaps.map((gap, i) => (
+                             <span key={i} className="px-3 py-1 bg-white border border-indigo-200 rounded-xl text-[8px] font-black uppercase text-indigo-600 tracking-widest">
+                               Critical Need: {gap}
+                             </span>
+                           ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ProgramScanner onDataExtracted={handleDataExtracted} startDate={startDate} numDays={numDays} />

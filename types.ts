@@ -56,6 +56,7 @@ export interface Assignment {
   flightId: string;
   role: Skill;
   shiftId?: string; 
+  coveringStaffId?: string; // ID of the person being covered
 }
 
 export interface OffDutyRecord {

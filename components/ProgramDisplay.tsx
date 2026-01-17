@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, OffDutyRecord } from '../types';
+import { DailyProgram, Flight, Staff, ShiftConfig, Assignment } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import { ResourceRecommendation } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Sparkles, TrendingUp, FileDown, ShieldCheck, CalendarOff, Shield, Users, Activity, FileText } from 'lucide-react';
+import { CalendarOff, Users, Activity, FileText, FileDown, Clock, Plane, Shield, Link2 } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -19,7 +19,7 @@ interface Props {
   aiRecommendations?: ResourceRecommendation | null;
 }
 
-export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, startDate, endDate, aiRecommendations }) => {
+export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, startDate, endDate }) => {
   const sortedPrograms = useMemo(() => {
     return [...programs].sort((a, b) => a.day - b.day);
   }, [programs]);
@@ -48,14 +48,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
-    const title = `ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`;
+    const title = `ASE SDU Shift-Centric Program: ${formattedStartDate} - ${formattedEndDate}`;
     
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
     doc.text(title, 14, 15);
     doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 20);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 20);
 
     let startY = 25;
 
@@ -68,56 +67,59 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, startY);
       startY += 5;
 
-      const dayAssignments = [...program.assignments];
-      const flightGroups = Array.from(new Set(dayAssignments.map(a => a.flightId)));
-      
-      const tableData = flightGroups.map((fId, idx) => {
-        const f = getFlightById(fId);
-        const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
-        const staffList = flightAssigs.map(a => {
-          const s = getStaffById(a.staffId);
-          // Requirement: Show initials only, remove role suffix
-          return `${s?.initials || '??'}`;
+      // Group by Shift ID
+      const assignmentsByShift: Record<string, Assignment[]> = {};
+      program.assignments.forEach(a => {
+        const sid = a.shiftId || 'no-shift';
+        if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
+        assignmentsByShift[sid].push(a);
+      });
+
+      const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
+        const sh = getShiftById(sid);
+        const uniqueFlightIds = Array.from(new Set(assigs.map(a => a.flightId)));
+        const flightList = uniqueFlightIds.map(fid => {
+          const f = getFlightById(fid);
+          return f ? `${f.flightNumber} (${f.sta || ''}/${f.std || ''})` : '';
+        }).filter(Boolean).join(', ');
+
+        const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));
+        const staffList = uniqueStaff.map(sid => {
+          const s = getStaffById(sid);
+          const a = assigs.find(assig => assig.staffId === sid);
+          return (s?.initials || '??') + (a?.coveringStaffId ? " (C)" : "");
         }).join(' | ');
-        const sh = getShiftById(flightAssigs[0]?.shiftId);
 
         return [
           idx + 1,
-          f?.flightNumber || "-",
-          f ? `${f.from}-${f.to}` : "-",
-          f?.sta || "-",
-          f?.std || "-",
-          sh?.pickupTime || "-",
+          sh ? `${sh.pickupTime} - ${sh.endTime}` : "Unassigned",
+          flightList,
           staffList
         ];
       });
 
       autoTable(doc, {
         startY: startY,
-        head: [['S/N', 'FLIGHT', 'SECTOR', 'STA', 'STD', 'SHIFT', 'ASSIGNED STAFF']],
+        head: [['S/N', 'SHIFT PERIOD', 'COVERED FLIGHTS', 'ASSIGNED PERSONNEL']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillStyle: 'F', fillColor: [15, 23, 42], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        headStyles: { fillColor: [15, 23, 42], fontSize: 8 },
         bodyStyles: { fontSize: 8 },
         columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { fontStyle: 'bold' },
-          6: { cellWidth: 'auto' }
-        },
-        margin: { left: 14, right: 14 }
+          0: { cellWidth: 10 },
+          1: { cellWidth: 35, fontStyle: 'bold' },
+          2: { cellWidth: 60 },
+          3: { cellWidth: 'auto' }
+        }
       });
 
       // @ts-ignore
       startY = doc.lastAutoTable.finalY + 10;
-
-      // Leave Section
       doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text("OFF & LEAVES REGISTRY", 14, startY);
+      doc.text("ABSENCE REGISTRY", 14, startY);
       startY += 5;
 
-      const leaveCategories = ['DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'];
-      const leaveData = leaveCategories.map(cat => {
+      const leaveData = ['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
         const inCat = (program.offDuty || [])
           .filter(off => off.type === cat)
           .map(off => getStaffById(off.staffId)?.initials)
@@ -129,66 +131,49 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         startY: startY,
         body: leaveData,
         theme: 'plain',
-        bodyStyles: { fontSize: 8, cellPadding: 1 },
-        columnStyles: {
-          0: { fontStyle: 'bold', cellWidth: 30 },
-          1: { cellWidth: 'auto' }
-        },
-        margin: { left: 14, right: 14 }
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 } }
       });
     });
 
-    doc.save(`ASE_SDU_Program_${formattedStartDate.replace(/\//g, '-')}.pdf`);
+    doc.save(`ASE_ShiftProgram_${formattedStartDate.replace(/\//g, '-')}.pdf`);
   };
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
-    const rows: any[] = [];
-    
-    rows.push([`ASE SDU Weekly Program From ${formattedStartDate} Till ${formattedEndDate}`]);
-    rows.push([]);
+    const rows: any[] = [[`ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`], []];
 
     sortedPrograms.forEach(program => {
       rows.push([`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`]);
-      rows.push(["S/N", "Flight No/Day", "From", "STA", "STD", "To", "SHIFT SLOT", "SDU Staff Assignment", "OFF & LEAVES"]);
+      rows.push(["S/N", "SHIFT SLOT", "FLIGHTS COVERED", "PERSONNEL", "OFF/LEAVE TYPE", "OFF/LEAVE STAFF"]);
 
-      const dayAssignments = [...program.assignments];
-      const flightGroups = Array.from(new Set(dayAssignments.map(a => a.flightId)));
-      
-      flightGroups.forEach((fId, idx) => {
-        const f = getFlightById(fId);
-        const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
-        // Requirement: Show initials only
-        const staffInitials = flightAssigs.map(a => getStaffById(a.staffId)?.initials).join(' - ');
-        const sh = getShiftById(flightAssigs[0]?.shiftId);
-
-        rows.push([
-          idx + 1,
-          f?.flightNumber || "-",
-          f?.from || "-",
-          f?.sta || "-",
-          f?.std || "-",
-          f?.to || "-",
-          sh?.pickupTime || "-",
-          staffInitials,
-          ""
-        ]);
+      const assignmentsByShift: Record<string, Assignment[]> = {};
+      program.assignments.forEach(a => {
+        const sid = a.shiftId || 'no-shift';
+        if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
+        assignmentsByShift[sid].push(a);
       });
 
-      const leaveCategories = ['DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'];
-      leaveCategories.forEach(cat => {
-        const inCat = (program.offDuty || [])
-          .filter(off => off.type === cat)
-          .map(off => getStaffById(off.staffId)?.initials)
-          .join(' - ');
-        rows.push(["", "", "", "", "", "", "", "", `${cat}: ${inCat || 'NIL'}`]);
+      Object.entries(assignmentsByShift).forEach(([sid, assigs], idx) => {
+        const sh = getShiftById(sid);
+        const flightNames = Array.from(new Set(assigs.map(a => getFlightById(a.flightId)?.flightNumber))).join(', ');
+        const staffNames = Array.from(new Set(assigs.map(a => {
+          const s = getStaffById(a.staffId);
+          return (s?.initials || '??') + (a.coveringStaffId ? " (C)" : "");
+        }))).join(' - ');
+        rows.push([idx + 1, sh ? `${sh.pickupTime}-${sh.endTime}` : "N/A", flightNames, staffNames, "", ""]);
+      });
+
+      const leaves = program.offDuty || [];
+      leaves.forEach(l => {
+        rows.push(["", "", "", "", l.type, getStaffById(l.staffId)?.initials || ""]);
       });
       rows.push([]);
     });
 
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Station_Program");
-    XLSX.writeFile(workbook, `ASE_SDU_Program_${formattedStartDate.replace(/\//g, '-')}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Shift_Program");
+    XLSX.writeFile(workbook, `ASE_ShiftProgram_${formattedStartDate.replace(/\//g, '-')}.xlsx`);
   };
 
   if (!programs || programs.length === 0) {
@@ -205,7 +190,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     <div className="space-y-16 animate-in fade-in duration-700 pb-32">
       <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-10">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Weekly Station Program</h2>
+          <h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Weekly Shift Program</h2>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{formattedStartDate} — {formattedEndDate}</p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -220,8 +205,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       <div className="space-y-24">
         {sortedPrograms.map((program) => {
-          const dayAssignments = [...(program.assignments || [])];
-          const flightsOfDay = Array.from(new Set(dayAssignments.map(a => a.flightId)));
+          // Grouping assignments by shift for display
+          const assignmentsByShift: Record<string, Assignment[]> = {};
+          program.assignments.forEach(a => {
+            const sid = a.shiftId || 'unassigned';
+            if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
+            assignmentsByShift[sid].push(a);
+          });
+
+          // Unique set of coverage links for this day
+          const coverageAssignments = program.assignments.filter(a => a.coveringStaffId);
 
           return (
             <div key={program.day} className="bg-white rounded-[4rem] overflow-hidden border border-slate-200 shadow-2xl group">
@@ -236,60 +229,73 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                    </div>
                 </div>
                 <div className="hidden md:flex items-center gap-6">
-                   <div className="text-right">
-                     <span className="text-[9px] font-black text-slate-600 uppercase block mb-1">Status</span>
-                     <span className="text-emerald-400 font-black italic text-sm">OPERATIONAL</span>
-                   </div>
-                   <div className="h-10 w-px bg-white/10" />
-                   <div className="text-right">
-                     <span className="text-[9px] font-black text-slate-600 uppercase block mb-1">Assignments</span>
-                     <span className="text-white font-black italic text-sm">{dayAssignments.length} Mapped</span>
+                   <div className="px-4 py-2 bg-rose-500/10 text-rose-400 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-2">
+                     <Link2 size={12} /> Coverage Alerts Active
                    </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-4 min-h-[500px]">
-                {/* Station Assignment Table */}
                 <div className="xl:col-span-3 overflow-x-auto no-scrollbar border-r border-slate-100">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-200 text-[10px]">
                       <tr>
                         <th className="px-8 py-6 border-r border-slate-100 text-center w-20">S/N</th>
-                        <th className="px-8 py-6 border-r border-slate-100">FLT NO</th>
-                        <th className="px-8 py-6 border-r border-slate-100">SECTOR</th>
-                        <th className="px-8 py-6 border-r border-slate-100 text-center">STA/STD</th>
-                        <th className="px-8 py-6 border-r border-slate-100 text-center">SHIFT</th>
+                        <th className="px-8 py-6 border-r border-slate-100">DUTY SHIFT</th>
+                        <th className="px-8 py-6 border-r border-slate-100">FLIGHTS COVERED</th>
                         <th className="px-8 py-6">ASSIGNED PERSONNEL</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {flightsOfDay.map((fId, idx) => {
-                        const f = getFlightById(fId);
-                        const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
-                        const sh = getShiftById(flightAssigs[0]?.shiftId);
+                      {Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
+                        const sh = getShiftById(sid);
+                        const uniqueFlights = Array.from(new Set(assigs.map(a => a.flightId)))
+                          .map(fid => getFlightById(fid))
+                          .filter(Boolean);
+                        
+                        const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));
 
                         return (
-                          <tr key={fId} className="hover:bg-slate-50/50 transition-colors">
+                          <tr key={sid} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-8 py-8 border-r border-slate-100 text-center font-black text-slate-300 italic text-xl">{idx + 1}</td>
-                            <td className="px-8 py-8 border-r border-slate-100 font-black italic text-slate-900 text-lg uppercase tracking-tighter">{f?.flightNumber || "---"}</td>
-                            <td className="px-8 py-8 border-r border-slate-100 font-black text-slate-500 text-xs uppercase italic">{f ? `${f.from} → ${f.to}` : "BASE"}</td>
-                            <td className="px-8 py-8 border-r border-slate-100 text-center font-black text-slate-900 text-sm italic">
-                              {f?.sta || "--"} / {f?.std || "--"}
+                            <td className="px-8 py-8 border-r border-slate-100">
+                              <div className="flex items-center gap-3">
+                                <Clock className="text-blue-500" size={18} />
+                                <div>
+                                  <p className="font-black italic text-slate-900 text-lg uppercase tracking-tighter leading-none">
+                                    {sh ? `${sh.pickupTime} — ${sh.endTime}` : "Unscheduled Slot"}
+                                  </p>
+                                  {sh && <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">Release: {sh.endDate}</p>}
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-8 py-8 border-r border-slate-100 text-center font-black text-indigo-600 text-sm italic">
-                              {sh ? sh.pickupTime : "---"}
+                            <td className="px-8 py-8 border-r border-slate-100">
+                              <div className="flex flex-col gap-2">
+                                {uniqueFlights.map(f => (
+                                  <div key={f!.id} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl">
+                                    <Plane size={12} className="text-indigo-400" />
+                                    <span className="text-[10px] font-black uppercase text-indigo-700">{f!.flightNumber}</span>
+                                    <span className="text-[9px] font-bold text-indigo-300 ml-auto">{f!.sta || '--'}/{f!.std || '--'}</span>
+                                  </div>
+                                ))}
+                                {uniqueFlights.length === 0 && <span className="text-[10px] text-slate-300 italic">No direct flights</span>}
+                              </div>
                             </td>
                             <td className="px-8 py-8">
-                              <div className="flex flex-wrap gap-3">
-                                {flightAssigs.map(a => {
-                                  const s = getStaffById(a.staffId);
-                                  const isLeader = a.role === 'Shift Leader';
+                              <div className="flex flex-wrap gap-2">
+                                {uniqueStaff.map(staffId => {
+                                  const s = getStaffById(staffId);
+                                  const a = assigs.find(as => as.staffId === staffId);
+                                  const isLeader = assigs.some(a => a.staffId === staffId && a.role === 'Shift Leader');
+                                  const isCoverage = !!a?.coveringStaffId;
+
                                   return (
-                                    <div key={a.id} className={`px-4 py-2 rounded-2xl font-black text-[10px] flex items-center gap-3 border transition-all hover:scale-105 shadow-sm ${
-                                      isLeader ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-900 border-slate-800 text-white'
+                                    <div key={staffId} className={`px-4 py-2 rounded-2xl font-black text-[10px] flex items-center gap-3 border transition-all ${
+                                      isCoverage ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-600/20' :
+                                      isLeader ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-600/20' : 
+                                      'bg-slate-900 border-slate-800 text-white'
                                     }`}>
-                                      {isLeader && <Shield size={14} className="text-blue-200" />}
-                                      {/* Requirement: Only initials, no role suffix */}
+                                      {isCoverage ? <Link2 size={14} className="animate-pulse" /> : isLeader ? <Shield size={14} className="text-blue-200" /> : null}
                                       {s?.initials || "??"}
                                     </div>
                                   );
@@ -303,38 +309,70 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                   </table>
                 </div>
 
-                {/* SDU OFF & LEAVES Operational Sidebar */}
                 <div className="xl:col-span-1 bg-slate-50/30 p-10 space-y-10 border-t xl:border-t-0 border-slate-100">
-                  <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
-                      <CalendarOff size={20} className="text-slate-400" />
+                  {/* (i) STAFF COVERAGE MAPPING - PLACED FIRST */}
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
+                      <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center shadow-sm border border-rose-100">
+                        <Link2 size={20} className="text-rose-600" />
+                      </div>
+                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-rose-600 italic">COVERAGE MAPPING</h4>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900 italic">OFF & LEAVES</h4>
-                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Planned Absence Registry</p>
+                    <div className="space-y-3">
+                      {coverageAssignments.length > 0 ? (
+                        // Group by staffId to handle if one person covers multiple tasks
+                        // Fix for line 325: explicitly cast or type the Set contents to string to ensure 'key' is string
+                        Array.from<string>(new Set(coverageAssignments.map(a => `${a.staffId}-${a.coveringStaffId}`))).map((key, i) => {
+                          const [workerId, absenteeId] = key.split('-');
+                          const worker = getStaffById(workerId);
+                          const absentee = getStaffById(absenteeId);
+                          return (
+                            <div key={i} className="p-4 bg-white border border-rose-100 rounded-2xl flex items-center justify-between shadow-sm border-l-4 border-l-rose-600">
+                               <span className="text-[11px] font-black text-rose-600 italic uppercase">{worker?.initials || "??"}</span>
+                               <div className="flex-1 mx-4 h-[1px] bg-rose-100 relative">
+                                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-[8px] font-bold text-rose-300">REPLACES</div>
+                               </div>
+                               <span className="text-[11px] font-black text-slate-400 italic uppercase">{absentee?.initials || "??"}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="p-10 border-2 border-dashed border-slate-100 rounded-[2rem] text-center">
+                          <p className="text-[10px] font-black text-slate-300 uppercase italic tracking-widest">Normal Ops: No Gaps</p>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  
-                  <div className="space-y-10">
-                    {['DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
-                      const list = (program.offDuty || [])
-                        .filter(off => off.type === cat)
-                        .map(off => getStaffById(off.staffId)?.initials)
-                        .filter(Boolean);
 
-                      return (
-                        <div key={cat} className="space-y-4">
-                          <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-600 pl-4 italic">{cat}</p>
-                          <div className="flex flex-wrap gap-3 pl-4">
-                            {list.length > 0 ? list.map((init, i) => (
-                              <div key={i} className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-black text-[11px] text-slate-950 italic shadow-sm">
-                                {init}
-                              </div>
-                            )) : <span className="text-[10px] font-bold text-slate-300 italic tracking-widest">NIL</span>}
+                  {/* (ii) OFF REGISTRY - PLACED SECOND */}
+                  <div className="space-y-6 pt-4">
+                    <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
+                        <CalendarOff size={20} className="text-slate-400" />
+                      </div>
+                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900 italic">ABSENCE REGISTRY</h4>
+                    </div>
+                    <div className="space-y-8">
+                      {['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
+                        const list = (program.offDuty || [])
+                          .filter(off => off.type === cat)
+                          .map(off => getStaffById(off.staffId)?.initials)
+                          .filter(Boolean);
+
+                        return (
+                          <div key={cat} className="space-y-4">
+                            <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-600 pl-4 italic">{cat}</p>
+                            <div className="flex flex-wrap gap-2 pl-4">
+                              {list.length > 0 ? list.map((init, i) => (
+                                <div key={i} className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-black text-[11px] text-slate-950 italic">
+                                  {init}
+                                </div>
+                              )) : <span className="text-[10px] font-bold text-slate-200 italic">NIL</span>}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
