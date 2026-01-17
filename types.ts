@@ -2,6 +2,7 @@
 export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
+export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
 export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'LIEU LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'NIL';
 
 export interface StaffSkill {
@@ -26,6 +27,7 @@ export interface Staff {
   name: string;
   initials: string; 
   type: StaffCategory;
+  workPattern: WorkPattern;
   skillRatings: Partial<Record<Skill, ProficiencyLevel>>;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;

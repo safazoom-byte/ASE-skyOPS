@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from "../types";
 
@@ -65,35 +66,39 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
   
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a high-performance ground handling weekly program.
+    CORE OBJECTIVE: Generate a high-performance ground handling weekly program based on FLIGHTS and DUTY SHIFTS.
     
     INPUT PARAMETERS:
     - WINDOW: ${options.startDate} for ${options.numDays} days.
-    - FLIGHTS: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date, from: f.from, to: f.to })))}
+    - FLIGHTS: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
+    - DUTY SHIFTS (CONSTRAINTS): ${JSON.stringify(data.shifts.map(s => ({ 
+        id: s.id, 
+        date: s.pickupDate, 
+        time: `${s.pickupTime}-${s.endTime}`,
+        min: s.minStaff,
+        max: s.maxStaff,
+        roles: s.roleCounts,
+        flights: s.flightIds
+      })))}
     - STAFF REGISTRY: ${JSON.stringify(data.staff.map(s => ({ 
         id: s.id, 
         name: s.name, 
-        initials: s.initials, 
-        type: s.type,
         skills: s.skillRatings,
-        workFrom: s.workFromDate, 
-        workTo: s.workToDate 
+        pattern: s.workPattern,
+        from: s.workFromDate, 
+        to: s.workToDate 
       })))}
     
-    CONSTRAINTS & BUSINESS LOGIC:
-    1. LOCAL STAFF (PERMANENT ASSETS): Staff with type 'Local' are ALWAYS available.
-       - They MUST work exactly 5 days per week.
-       - They MUST have 2 off-days per week.
-       - These 2 off-days DO NOT need to be sequential.
-       - IGNORE contract dates for Local staff.
-    2. ROSTER STAFF (CONTRACT ASSETS): Staff with type 'Roster' CANNOT be assigned if the duty date is outside their [workFrom, workTo] range.
-    3. COMMAND: Every active flight duty MUST have at least one 'Shift Leader'.
-    4. SHIFT LEADER PRIORITY: List Shift Leaders first in assignments.
-    5. LEAVE CATEGORIES: Every staff member not assigned to a flight for a specific day MUST be listed in the 'offDuty' array for that day.
-    6. OFF DUTY STATUS: Use EXACTLY: 'DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'. 
-    7. REST: Ensure ${options.minRestHours} hours buffer between duties.
+    ASSIGNMENT LOGIC (STRICT HIERARCHY):
+    1. TWO-PHASE ASSIGNMENT:
+       - PHASE A (SPECIAL ROLES): For every shift, assign staff who meet the specific "roles" (e.g., if roles say Shift Leader: 1, find a staff member with Shift Leader skill).
+       - PHASE B (MINIMUM FILL): If the shift still has fewer staff than the "min" requirement after Phase A, assign ANY available qualified staff to reach that minimum count.
+    2. SHIFT LINKING: Only assign staff to flights that are explicitly linked in the "flights" array of the Shift object.
+    3. TEMPORAL AVAILABILITY: Respect [from, to] dates for all personnel.
+    4. REST: Ensure ${options.minRestHours} hours buffer between duties.
+    5. LEAVE: Categorize unassigned staff as 'DAY OFF', 'ANNUAL LEAVE', etc.
     
-    MANDATORY OUTPUT: Return strictly JSON following the defined schema.
+    MANDATORY OUTPUT: Return strictly JSON.
   `;
 
   try {
@@ -102,65 +107,13 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
       contents: { parts: [{ text: prompt }] },
       config: { 
         thinkingConfig: { thinkingBudget: 16000 },
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            programs: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  day: { type: Type.NUMBER },
-                  assignments: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        id: { type: Type.STRING },
-                        staffId: { type: Type.STRING },
-                        flightId: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        shiftId: { type: Type.STRING }
-                      },
-                      required: ["id", "staffId", "flightId", "role"]
-                    }
-                  },
-                  offDuty: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        type: { type: Type.STRING } 
-                      },
-                      required: ["staffId", "type"]
-                    }
-                  }
-                },
-                required: ["day", "assignments"]
-              }
-            },
-            shortageReport: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  staffName: { type: Type.STRING },
-                  flightNumber: { type: Type.STRING },
-                  reason: { type: Type.STRING }
-                }
-              }
-            }
-          },
-          required: ["programs"]
-        }
+        responseMimeType: "application/json"
       }
     });
 
     const result = safeParseJson(response.text);
     return {
-      programs: result.programs,
+      programs: result.programs || [],
       shortageReport: result.shortageReport || []
     };
   } catch (error: any) { 
@@ -177,17 +130,20 @@ export async function extractDataFromContent(content: {
   const startDateStr = content.startDate || new Date().toISOString().split('T')[0];
 
   const prompt = `
-    ACT AS AN AVIATION DATA INTELLIGENCE ANALYST. 
-    Extract flight schedules and personnel registries from the provided source. 
+    ACT AS AN AVIATION DATA EXTRACTOR. 
+    TASK: Extract Flights, Staff, and DUTY SHIFTS.
     
-    Target Data:
-    - Flights: Flight number, Origin, Destination, STA, STD, and Date.
-    - Staff: Name, Initials, and Skill Ratings. 
+    EXTRACTION RULES:
+    1. Flights: Extract all flight details.
+    2. Staff: Extract all personnel.
+    3. Shifts: Identify the operational shifts/duties. Link them to flights if specified.
     
-    Skill Mapping Instructions:
-    Analyze proficiency for: Ramp, Load Control, Lost and Found, Shift Leader, Operations. Return 'Yes' or 'No' for each.
-    
-    IMPORTANT: Local staff are permanent. Only return 'workFromDate'/'workToDate' if specifically mentioned for a contract worker.
+    JSON STRUCTURE:
+    {
+      "flights": [{ "id": "fl_1", "flightNumber": "...", "sta": "...", "std": "...", "date": "...", "from": "...", "to": "..." }],
+      "staff": [{ "name": "...", "initials": "...", "type": "Local/Roster", "skillRatings": { "SkillName": "Yes/No" } }],
+      "shifts": [{ "id": "sh_1", "pickupDate": "...", "pickupTime": "HH:mm", "endDate": "...", "endTime": "HH:mm", "minStaff": 4, "maxStaff": 8, "flightIds": ["fl_1"] }]
+    }
   `;
 
   try {
@@ -202,84 +158,69 @@ export async function extractDataFromContent(content: {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: { parts },
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            flights: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  flightNumber: { type: Type.STRING },
-                  from: { type: Type.STRING },
-                  to: { type: Type.STRING },
-                  sta: { type: Type.STRING },
-                  std: { type: Type.STRING },
-                  date: { type: Type.STRING }
-                }
-              }
-            },
-            staff: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  initials: { type: Type.STRING },
-                  skillRatings: { 
-                    type: Type.OBJECT,
-                    properties: {
-                      'Ramp': { type: Type.STRING },
-                      'Load Control': { type: Type.STRING },
-                      'Lost and Found': { type: Type.STRING },
-                      'Shift Leader': { type: Type.STRING },
-                      'Operations': { type: Type.STRING }
-                    },
-                    required: ['Ramp', 'Load Control', 'Lost and Found', 'Shift Leader', 'Operations']
-                  },
-                  workFromDate: { type: Type.STRING },
-                  workToDate: { type: Type.STRING }
-                }
-              }
-            }
-          }
-        }
-      }
+      config: { responseMimeType: "application/json" }
     });
 
     const result = safeParseJson(response.text);
     if (!result) throw new Error("Could not parse data.");
     
+    const extractedFlights = (result.flights || []).map((f: any) => ({
+      ...f, 
+      id: f.id || Math.random().toString(36).substr(2, 9), 
+      date: f.date || startDateStr, 
+      day: 0
+    }));
+
+    const extractedStaff = (result.staff || []).map((s: any) => ({
+      ...s, 
+      id: Math.random().toString(36).substr(2, 9), 
+      initials: (s.initials || generateInitials(s.name)).toUpperCase(), 
+      skillRatings: s.skillRatings || {}, 
+      powerRate: s.powerRate || 75, 
+      type: s.type || 'Local', 
+      workPattern: s.workPattern || (s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off'),
+      maxShiftsPerWeek: 5, 
+      workFromDate: s.workFromDate || startDateStr,
+      workToDate: s.workToDate
+    }));
+
+    const extractedShifts = (result.shifts || []).map((sh: any) => {
+      const shiftId = sh.id || Math.random().toString(36).substr(2, 9);
+      const dateVal = sh.pickupDate || startDateStr;
+      
+      const start = new Date(startDateStr);
+      start.setHours(0,0,0,0);
+      const target = new Date(dateVal);
+      target.setHours(0,0,0,0);
+      const dayOffset = Math.floor((target.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+      return {
+        ...sh,
+        id: shiftId,
+        day: dayOffset,
+        pickupDate: dateVal,
+        endDate: sh.endDate || dateVal,
+        minStaff: sh.minStaff || 4,
+        maxStaff: sh.maxStaff || 8,
+        flightIds: sh.flightIds || []
+      };
+    });
+    
     return { 
-      flights: (result.flights || []).map((f: any) => ({
-        ...f, 
-        id: Math.random().toString(36).substr(2, 9), 
-        date: f.date || startDateStr, 
-        day: 0,
-        type: 'Turnaround'
-      })), 
-      staff: (result.staff || []).map((s: any) => ({
-        ...s, 
-        id: Math.random().toString(36).substr(2, 9), 
-        initials: (s.initials || generateInitials(s.name)).toUpperCase(), 
-        skillRatings: s.skillRatings || {}, 
-        powerRate: 75, 
-        type: s.workFromDate ? 'Roster' : 'Local', // Intelligent type guessing
-        maxShiftsPerWeek: s.workFromDate ? 7 : 5, 
-        workFromDate: s.workFromDate || undefined,
-        workToDate: s.workToDate || undefined
-      })), 
-      shifts: [], 
-      programs: [] 
+      flights: extractedFlights, 
+      staff: extractedStaff, 
+      shifts: extractedShifts, 
+      programs: result.programs || [] 
     };
-  } catch (error: any) { throw new Error("Extraction failed: " + error.message); }
+  } catch (error: any) { 
+    console.error("Extraction error:", error);
+    throw new Error("Extraction failed."); 
+  }
 }
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure OFF & LEAVES list is updated accordingly.`;
+  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure SDU OFF AND LEAVES list is updated accordingly.`;
   try {
     const parts: any[] = [{ text: prompt }, { text: `Data: ${JSON.stringify(data.programs)}` }];
     if (media?.length) media.forEach(m => parts.push({ inlineData: { mimeType: m.mimeType, data: m.data } }));
