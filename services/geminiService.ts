@@ -89,10 +89,16 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
 
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a ground handling weekly program with 100% adherence to SHIFT QUOTAS and MANDATORY REST.
-    REFERENCE START DATE: ${options.startDate}
+    STRICT START DATE: ${options.startDate}
     PROGRAM DURATION: ${options.numDays} days.
     MINIMUM REST BUFFER: ${options.minRestHours} hours.
+    
+    CRITICAL CHRONOLOGICAL RULE: 
+    - The output 'day: 0' MUST correspond exactly to the date ${options.startDate}. 
+    - Do NOT align to the start of the current week (e.g., Saturday) if it differs from ${options.startDate}. 
+    - Every assignment 'day' is an offset from ${options.startDate}.
+    
+    CORE OBJECTIVE: Generate a ground handling weekly program with 100% adherence to SHIFT QUOTAS, LOAD CONTROL SAFETY, and EXHAUSTIVE OFF-DUTY LOGGING.
     
     INPUT DATA:
     - FLIGHTS: ${JSON.stringify(normalizedFlights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
@@ -114,18 +120,14 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
         type: s.type
       })))}
     
-    CRITICAL INSTRUCTIONS (FAILURE IS NOT AN OPTION):
-    1. HARD STAFFING QUOTA: Every shift MUST be assigned exactly the 'min' number of staff specified in the DUTY SHIFTS. If a shift says min=4, you MUST assign 4 staff members.
-    2. MANDATORY WEEKLY REST: 
-       - For "Local" staff: You MUST schedule exactly 2 days as 'DAY OFF' within every 7-day period.
-       - For "Roster" staff: You MUST schedule regular 'ROSTER LEAVE' blocks to prevent fatigue.
-       - Every staff member who is NOT assigned to a shift on a specific day MUST be listed in the 'offDuty' registry for that day.
-    3. ABSENCE REGISTRY POPULATION: The 'offDuty' array for each day MUST include all personnel resting that day.
-    4. COVERAGE & REPLACEMENT: If a shift is short because a staff member is on 'DAY OFF', select another available staff member (with enough rest) to cover. For these staff, you MUST set 'coveringStaffId' to the ID of the person they are replacing.
-    5. REST-TIME VALIDATION: Do not assign anyone to back-to-back shifts without the ${options.minRestHours}h buffer.
-    6. ROLE ALIGNMENT: Prioritize 'Shift Leader' and 'Ramp' skills for those specific roles.
+    INSTRUCTIONS (MANDATORY):
+    1. LOAD CONTROL SAFETY: Shifts with 'Load Control' quotas MUST be filled by staff with 'Load Control: Yes'. 
+    2. HARD QUOTA: Every shift MUST assign exactly 'min' staff.
+    3. EXHAUSTIVE OFF-DUTY: Every staff member not assigned on a specific 'day' MUST be in 'offDuty'.
+    4. COVERAGE PERSONNEL: When a staff member is on 'DAY OFF', assign a replacement. For these replacements, you MUST set 'coveringStaffId' to the ID of the person on leave. This is CRITICAL for the Red Coverage visual.
+    5. CALENDAR SYNC: 'day: 0' IS ${options.startDate}. Verify all assignments align with the flights on that date.
 
-    OUTPUT FORMAT: Return strictly JSON with 'programs', 'shortageReport', and 'recommendations'. Ensure 'offDuty' is fully populated for every day.
+    OUTPUT FORMAT: Return strictly JSON.
   `;
 
   try {
@@ -154,7 +156,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
                         flightId: { type: Type.STRING },
                         role: { type: Type.STRING },
                         shiftId: { type: Type.STRING },
-                        coveringStaffId: { type: Type.STRING, description: "ID of the staff member on leave who is being covered" }
+                        coveringStaffId: { type: Type.STRING }
                       },
                       required: ["id", "staffId", "flightId", "role", "shiftId"]
                     }
@@ -228,16 +230,6 @@ export async function extractDataFromContent(content: {
   const prompt = `
     ACT AS AN AVIATION DATA EXTRACTOR. 
     TASK: Extract Flights, Staff, and DUTY SHIFTS.
-    
-    EXTRACTION RULES FOR STAFF (MANDATORY):
-    1. Full Name: Extract the complete name.
-    2. Initials: Extract or generate initials (e.g. "MZ").
-    3. Category & Pattern:
-       - If "Local" or "Fixed": Set type "Local" and pattern "5 Days On / 2 Off".
-       - If "Roster": Set type "Roster" and pattern "Continuous (Roster)".
-    4. Contract Dates: Capture "Start/From" and "End/To" dates as YYYY-MM-DD.
-    5. Power Rate: Default to 75 if not specified. Value should be 50-100.
-    6. Skill Proficiency Matrix: Identify if staff is qualified for: "Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations". Return "Yes" or "No" for each.
     
     JSON STRUCTURE:
     {
@@ -330,12 +322,7 @@ export async function extractDataFromContent(content: {
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Modify roster: "${instruction}". 
-  STRICT RULES:
-  1. Maintain 100% coverage of required roles and minStaff quotas.
-  2. If someone is moved to offDuty, you MUST show them in the absence registry and link a replacement via coveringStaffId.
-  3. Use flexible/split rest for ALL Local staff.
-  4. Return strictly JSON.`;
+  const prompt = `Modify roster: "${instruction}". Return strictly JSON.`;
 
   try {
     const parts: any[] = [{ text: prompt }, { text: `Data: ${JSON.stringify(data.programs)}` }];

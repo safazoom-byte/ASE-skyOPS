@@ -30,21 +30,21 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const getDayName = (dayIndex: number) => {
     if (!startDate) return `Day ${dayIndex}`;
-    const d = new Date(startDate);
+    const d = new Date(startDate + 'T00:00:00');
     d.setDate(d.getDate() + dayIndex);
     return DAYS_OF_WEEK[d.getDay()];
   };
 
   const getDayDate = (dayIndex: number) => {
     if (!startDate) return `Day ${dayIndex}`;
-    const start = new Date(startDate);
+    const start = new Date(startDate + 'T00:00:00');
     const result = new Date(start);
     result.setDate(start.getDate() + dayIndex);
     return result.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
   };
 
-  const formattedStartDate = startDate ? new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
-  const formattedEndDate = endDate ? new Date(endDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
+  const formattedStartDate = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
+  const formattedEndDate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
@@ -67,7 +67,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, startY);
       startY += 5;
 
-      // Group by Shift ID
       const assignmentsByShift: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
         const sid = a.shiftId || 'no-shift';
@@ -116,7 +115,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       // @ts-ignore
       startY = doc.lastAutoTable.finalY + 10;
       doc.setFontSize(10);
-      doc.text("ABSENCE REGISTRY", 14, startY);
+      doc.text("STATION OFF-DUTY LOG", 14, startY);
       startY += 5;
 
       const leaveData = ['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
@@ -205,7 +204,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       <div className="space-y-24">
         {sortedPrograms.map((program) => {
-          // Grouping assignments by shift for display
           const assignmentsByShift: Record<string, Assignment[]> = {};
           program.assignments.forEach(a => {
             const sid = a.shiftId || 'unassigned';
@@ -213,7 +211,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             assignmentsByShift[sid].push(a);
           });
 
-          // Unique set of coverage links for this day
           const coverageAssignments = program.assignments.filter(a => a.coveringStaffId);
 
           return (
@@ -286,16 +283,18 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                 {uniqueStaff.map(staffId => {
                                   const s = getStaffById(staffId);
                                   const a = assigs.find(as => as.staffId === staffId);
-                                  const isLeader = assigs.some(a => a.staffId === staffId && a.role === 'Shift Leader');
+                                  const isLeader = a?.role === 'Shift Leader';
+                                  const isLoadControl = a?.role === 'Load Control';
                                   const isCoverage = !!a?.coveringStaffId;
 
                                   return (
                                     <div key={staffId} className={`px-4 py-2 rounded-2xl font-black text-[10px] flex items-center gap-3 border transition-all ${
-                                      isCoverage ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-600/20' :
+                                      isCoverage ? 'bg-rose-600 border-rose-600 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-600/20 animate-pulse scale-105 z-10' :
+                                      isLoadControl ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/20' :
                                       isLeader ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-600/20' : 
                                       'bg-slate-900 border-slate-800 text-white'
                                     }`}>
-                                      {isCoverage ? <Link2 size={14} className="animate-pulse" /> : isLeader ? <Shield size={14} className="text-blue-200" /> : null}
+                                      {isCoverage ? <Link2 size={14} /> : isLoadControl ? <Activity size={14} className="text-purple-200" /> : isLeader ? <Shield size={14} className="text-blue-200" /> : null}
                                       {s?.initials || "??"}
                                     </div>
                                   );
@@ -310,18 +309,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                 </div>
 
                 <div className="xl:col-span-1 bg-slate-50/30 p-10 space-y-10 border-t xl:border-t-0 border-slate-100">
-                  {/* (i) STAFF COVERAGE MAPPING - PLACED FIRST */}
                   <div className="space-y-6">
                     <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
                       <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center shadow-sm border border-rose-100">
                         <Link2 size={20} className="text-rose-600" />
                       </div>
-                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-rose-600 italic">COVERAGE MAPPING</h4>
+                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-rose-600 italic">SHIFT COVERAGE PERSONNEL</h4>
                     </div>
                     <div className="space-y-3">
                       {coverageAssignments.length > 0 ? (
-                        // Group by staffId to handle if one person covers multiple tasks
-                        // Fix for line 325: explicitly cast or type the Set contents to string to ensure 'key' is string
                         Array.from<string>(new Set(coverageAssignments.map(a => `${a.staffId}-${a.coveringStaffId}`))).map((key, i) => {
                           const [workerId, absenteeId] = key.split('-');
                           const worker = getStaffById(workerId);
@@ -330,7 +326,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                             <div key={i} className="p-4 bg-white border border-rose-100 rounded-2xl flex items-center justify-between shadow-sm border-l-4 border-l-rose-600">
                                <span className="text-[11px] font-black text-rose-600 italic uppercase">{worker?.initials || "??"}</span>
                                <div className="flex-1 mx-4 h-[1px] bg-rose-100 relative">
-                                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-[8px] font-bold text-rose-300">REPLACES</div>
+                                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-[8px] font-bold text-rose-300">COVERING</div>
                                </div>
                                <span className="text-[11px] font-black text-slate-400 italic uppercase">{absentee?.initials || "??"}</span>
                             </div>
@@ -338,19 +334,18 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                         })
                       ) : (
                         <div className="p-10 border-2 border-dashed border-slate-100 rounded-[2rem] text-center">
-                          <p className="text-[10px] font-black text-slate-300 uppercase italic tracking-widest">Normal Ops: No Gaps</p>
+                          <p className="text-[10px] font-black text-slate-300 uppercase italic tracking-widest">Station Secure: No Coverage Required</p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* (ii) OFF REGISTRY - PLACED SECOND */}
                   <div className="space-y-6 pt-4">
                     <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
                       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
                         <CalendarOff size={20} className="text-slate-400" />
                       </div>
-                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900 italic">ABSENCE REGISTRY</h4>
+                      <h4 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900 italic">STATION OFF-DUTY LOG</h4>
                     </div>
                     <div className="space-y-8">
                       {['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
