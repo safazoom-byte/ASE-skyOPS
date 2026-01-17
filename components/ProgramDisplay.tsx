@@ -112,7 +112,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       // @ts-ignore
       startY = doc.lastAutoTable.finalY + 10;
       doc.setFontSize(10);
-      doc.text("STATION OFF-DUTY LOG", 14, startY);
+      doc.text("OFF & LEAVES REGISTRY", 14, startY);
       startY += 5;
 
       const leaveData = leaveCategories.map(cat => {
@@ -314,7 +314,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
                         <CalendarOff size={20} className="text-slate-400" />
                       </div>
-                      <h4 className="text-xs font-black uppercase tracking-0.2em text-slate-900 italic">STATION OFF-DUTY LOG</h4>
+                      <h4 className="text-xs font-black uppercase tracking-0.2em text-slate-900 italic">OFF & LEAVES REGISTRY</h4>
                     </div>
                     <div className="space-y-8">
                       {leaveCategories.map(cat => {

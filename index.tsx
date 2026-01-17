@@ -283,12 +283,12 @@ const App: React.FC = () => {
   ];
 
   const checklistItems = [
-    "The day before Rest Hour Carry-over (Day 1 Logic) done ✅",
-    "All staff Specific Day Off Requests: done ✅",
-    "All local staff work 5 days and get 2 off and initials for days off staff inserted in OFF & LEAVES REGISTRY done ✅",
-    "All roster staff off period respected and all off staff inserted into OFF & LEAVES REGISTRY done ✅",
-    "All specific roles requested per shifts are maintained for all shifts done ✅",
-    "All shifts have met the minimum staff requested done ✅"
+    "1-The day before Rest Hour Carry-over (Day 1 Logic) done ✅",
+    "2-All staff Specific Day Off Requests: done ✅",
+    "3-All local staff work 5 days and get 2 off and initials for days off staff inserted in OFF & LEAVES REGISTRY done ✅",
+    "4-All roster staff off period respected and all off staff inserted into OFF & LEAVES REGISTRY done ✅",
+    "5-All specific roles requested per shifts are maintained for all shifts done ✅",
+    "6-All shifts are met the minimum staff requested. Done ✅"
   ];
 
   return (
