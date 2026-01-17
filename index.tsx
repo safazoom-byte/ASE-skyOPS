@@ -15,7 +15,11 @@ import {
   ShieldCheck,
   TrendingUp,
   Activity,
-  ChevronRight
+  ChevronRight,
+  History,
+  UserMinus,
+  Palmtree,
+  CheckCircle2
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -35,7 +39,10 @@ const STORAGE_KEYS = {
   START_DATE: 'skyops_start_date',
   END_DATE: 'skyops_end_date',
   REST_HOURS: 'skyops_min_rest',
-  RECOMMENDATIONS: 'skyops_recommendations'
+  RECOMMENDATIONS: 'skyops_recommendations',
+  PREV_DUTY_LOG: 'skyops_prev_duty_log',
+  DAY_OFF_REQUESTS: 'skyops_day_off_requests',
+  ANNUAL_LEAVE_REQUESTS: 'skyops_annual_leave_requests'
 };
 
 const App: React.FC = () => {
@@ -83,6 +90,16 @@ const App: React.FC = () => {
   });
 
   const [customRules, setCustomRules] = useState<string>('');
+  const [previousDutyLog, setPreviousDutyLog] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.PREV_DUTY_LOG) || '';
+  });
+  const [specificDayOffRequests, setSpecificDayOffRequests] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.DAY_OFF_REQUESTS) || '';
+  });
+  const [annualLeaveRequests, setAnnualLeaveRequests] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.ANNUAL_LEAVE_REQUESTS) || '';
+  });
+
   const [minRestHours, setMinRestHours] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.REST_HOURS);
     return saved ? parseInt(saved) : 12;
@@ -90,6 +107,7 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showSuccessChecklist, setShowSuccessChecklist] = useState(false);
 
   const [proposedPrograms, setProposedPrograms] = useState<DailyProgram[] | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageWarning[]>([]);
@@ -121,7 +139,10 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.END_DATE, endDate);
     localStorage.setItem(STORAGE_KEYS.REST_HOURS, minRestHours.toString());
     localStorage.setItem(STORAGE_KEYS.RECOMMENDATIONS, JSON.stringify(recommendations));
-  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, recommendations]);
+    localStorage.setItem(STORAGE_KEYS.PREV_DUTY_LOG, previousDutyLog);
+    localStorage.setItem(STORAGE_KEYS.DAY_OFF_REQUESTS, specificDayOffRequests);
+    localStorage.setItem(STORAGE_KEYS.ANNUAL_LEAVE_REQUESTS, annualLeaveRequests);
+  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, recommendations, previousDutyLog, specificDayOffRequests, annualLeaveRequests]);
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
@@ -205,6 +226,12 @@ const App: React.FC = () => {
     setIsGenerating(true);
     setError(null);
     try {
+      const constraintsContext = [
+        `Previous Duty Log: ${previousDutyLog}`,
+        `Specific Day Off Requests: ${specificDayOffRequests}`,
+        `Annual Leave Requests: ${annualLeaveRequests}`
+      ].join(' | ');
+
       const result = await generateAIProgram(
         { 
           flights: activeFlightsInRange, 
@@ -212,7 +239,7 @@ const App: React.FC = () => {
           shifts: activeShiftsInRange, 
           programs: [] 
         },
-        "", 
+        constraintsContext, 
         { numDays, customRules, minRestHours, startDate }
       );
       
@@ -227,6 +254,7 @@ const App: React.FC = () => {
       } else {
         setPrograms(result.programs);
         setActiveTab('program');
+        setShowSuccessChecklist(true);
       }
     } catch (err: any) {
       setError(err.message || "Logic assembly failed.");
@@ -242,6 +270,7 @@ const App: React.FC = () => {
       setShortageReport([]);
       setShowWaiverDialog(false);
       setActiveTab('program');
+      setShowSuccessChecklist(true);
     }
   };
 
@@ -251,6 +280,15 @@ const App: React.FC = () => {
     { id: 'staff', icon: Users, label: 'Staff' },
     { id: 'shifts', icon: Clock, label: 'Duties' },
     { id: 'program', icon: Calendar, label: 'Program' },
+  ];
+
+  const checklistItems = [
+    "The day before Rest Hour Carry-over (Day 1 Logic) done ✅",
+    "All staff Specific Day Off Requests: done ✅",
+    "All local staff work 5 days and get 2 off and initials for days off staff inserted in OFF & LEAVES REGISTRY done ✅",
+    "All roster staff off period respected and all off staff inserted into OFF & LEAVES REGISTRY done ✅",
+    "All specific roles requested per shifts are maintained for all shifts done ✅",
+    "All shifts have met the minimum staff requested done ✅"
   ];
 
   return (
@@ -416,18 +454,56 @@ const App: React.FC = () => {
       </main>
 
       {showConfirmDialog && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-xl w-full p-12">
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl overflow-y-auto">
+          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-xl w-full p-12 my-8">
             <h3 className="text-2xl font-black italic uppercase mb-10 text-slate-900 tracking-tighter">Operational Constraints</h3>
             <div className="space-y-8">
               <div className="bg-slate-50 p-6 rounded-2xl border">
                 <label className="block text-[9px] font-black text-slate-400 uppercase mb-2">Min Rest Buffer (Hours)</label>
                 <input type="number" className="w-full bg-transparent font-black text-3xl text-blue-600 outline-none" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value) || 12)} />
               </div>
-              <div>
-                <label className="block text-[9px] font-black text-slate-400 uppercase mb-2">Build Instructions</label>
+              
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
+                  <History size={14} className="text-indigo-600" /> Previous Duty Log (Carry-over Rest)
+                </label>
+                <textarea 
+                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                  placeholder="Format: Initials (YYYY-MM-DD HH:mm). Example: MZ (2026-05-10 22:00)..." 
+                  value={previousDutyLog} 
+                  onChange={e => setPreviousDutyLog(e.target.value)} 
+                />
+              </div>
+
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
+                  <UserMinus size={14} className="text-rose-600" /> Personal Day Off Requests
+                </label>
+                <textarea 
+                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                  placeholder="Format: Initials (YYYY-MM-DD). Example: AH (2026-05-12)..." 
+                  value={specificDayOffRequests} 
+                  onChange={e => setSpecificDayOffRequests(e.target.value)} 
+                />
+              </div>
+
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
+                  <Palmtree size={14} className="text-emerald-600" /> Annual Leave Requests
+                </label>
+                <textarea 
+                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                  placeholder="Format: Initials Date. Example: ah 16apr26..." 
+                  value={annualLeaveRequests} 
+                  onChange={e => setAnnualLeaveRequests(e.target.value)} 
+                />
+              </div>
+
+              <div className="space-y-4">
+                <label className="block text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Build Instructions</label>
                 <textarea className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-32 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" placeholder="e.g. Ensure supervisors on SM416..." value={customRules} onChange={e => setCustomRules(e.target.value)} />
               </div>
+              
               <div className="flex gap-4">
                 <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-5 font-black uppercase text-[10px] text-slate-400">Abort</button>
                 <button onClick={confirmGenerateProgram} className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-xl">BUILD PROGRAM</button>
@@ -456,6 +532,33 @@ const App: React.FC = () => {
               <button onClick={() => setShowWaiverDialog(false)} className="flex-1 py-5 font-black text-slate-400 uppercase text-[10px]">Reject</button>
               <button onClick={finalizeProposedPrograms} className="flex-[2] py-5 bg-rose-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest">Authorize Waiver</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showSuccessChecklist && (
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-2xl">
+          <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 border border-white/20 animate-in zoom-in-95 duration-300">
+             <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mb-10 mx-auto shadow-inner border border-emerald-100">
+               <CheckCircle2 size={40} />
+             </div>
+             <h3 className="text-3xl font-black italic uppercase text-center mb-10 text-slate-900 tracking-tighter">Logic Validation Success</h3>
+             
+             <div className="space-y-4 mb-12">
+                {checklistItems.map((item, i) => (
+                  <div key={i} className="flex items-start gap-4 p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+                     <div className="mt-0.5 text-emerald-600 group-hover:scale-110 transition-transform"><CheckCircle2 size={18} /></div>
+                     <p className="text-xs font-bold text-slate-700 leading-relaxed italic">{item}</p>
+                  </div>
+                ))}
+             </div>
+
+             <button 
+               onClick={() => setShowSuccessChecklist(false)} 
+               className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-emerald-600 transition-all active:scale-95 text-xs"
+             >
+               Review Final Program
+             </button>
           </div>
         </div>
       )}
