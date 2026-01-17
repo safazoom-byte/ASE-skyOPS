@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -29,21 +28,6 @@ export interface BuildResult {
   recommendations?: ResourceRecommendation;
 }
 
-const normalizeDate = (d?: any): string | undefined => {
-  if (!d) return undefined;
-  if (typeof d === 'number') {
-    const date = new Date((d - 25569) * 86400 * 1000);
-    return date.toISOString().split('T')[0];
-  }
-  try {
-    const date = new Date(d);
-    if (isNaN(date.getTime())) return String(d).trim();
-    return date.toISOString().split('T')[0];
-  } catch {
-    return String(d).trim();
-  }
-};
-
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
@@ -69,36 +53,25 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-const generateInitials = (name: string): string => {
-  if (!name) return "??";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length < 2) return parts[0]?.substring(0, 2).toUpperCase() || "??";
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-};
-
 export const extractDataFromContent = async (params: { 
   textData?: string, 
   media?: ExtractionMedia[],
   startDate?: string 
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   const prompt = `
-    Extract aviation ground handling data into JSON.
-    Context Date: ${params.startDate || 'Current Week'}
-    
-    Fields to find:
-    - Flights: Flight Number, STA, STD, Date, Sectors.
-    - Staff: Full Name, Initials, Skills (Shift Leader, Ramp, Load Control, L&F, Ops), Availability Dates (From/To), Category (Local/Roster).
-    - Shifts: Pickup Time, End Time, Min Staff, and a list of 'flightNumbers' covered by this shift.
-    
-    Rules:
-    - Dates must be YYYY-MM-DD.
-    - Times must be HH:mm.
-    - If a person has a date range next to their name, extract it as workFromDate and workToDate.
+    Deep Scan Task: Extract aviation ground handling data into a structured JSON format.
+    Context Date: ${params.startDate || 'Current Operational Week'}
+
+    SCHEMA REQUIREMENTS:
+    1. FLIGHTS: Identify flight numbers, STA, STD, Sectors, and convert dates to YYYY-MM-DD.
+    2. STAFF: Full Name, Initials, Category (Local/Roster), Skills, and Availability.
+    3. SHIFTS: Pickup/End times, Quotas (Min/Max), and Flight Links.
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `Raw Text Content:\n${params.textData}` });
+  if (params.textData) parts.push({ text: `Raw Text/CSV Data:\n${params.textData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -106,9 +79,9 @@ export const extractDataFromContent = async (params: {
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-flash-lite-latest',
+    model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json" }
+    config: { responseMimeType: "application/json", temperature: 0.1 }
   });
 
   return safeParseJson(response.text);
@@ -122,52 +95,45 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster.
-    
-    STRICT COMPLIANCE RULES:
-    1. LEAVE LOGGING: 
-       - ROSTER STAFF: If a staff member is category 'Roster' and the day is outside their work dates (workFromDate to workToDate), they MUST be in 'offDuty' as 'ROSTER LEAVE'.
-       - LOCAL STAFF: If a 'Local' staff member is not assigned a shift, they MUST be in 'offDuty' as 'DAY OFF'.
-    2. NO STAFF LEFT BEHIND (MANDATORY): EVERY available staff member (those within their contract dates) MUST be assigned to an active shift UNLESS they have leave or insufficient rest.
-       - Overstaffing is allowed and expected if there is surplus manpower.
-    3. NO COVERAGE/SUBSTITUTION: The 'coveringStaffId' field is FORBIDDEN. Do not use it.
-    4. FULL ACCOUNTING: Every person in the registry must appear in either 'assignments' or 'offDuty' for every single day.
-    5. REST: Maintain ${config.minRestHours} hours minimum rest between duties.
-    
-    6. CARRY-OVER REST (DAY 1): Read the 'Operational Constraints' log. 
-       Format for rest is 'Initials (YYYY-MM-DD HH:mm)', e.g., 'MZ (2026-05-10 22:00)'.
-       Ensure they have ${config.minRestHours} hours of rest from that timestamp before their first shift on Day 1.
-    
-    7. SPECIFIC DAY OFF REQUESTS: Read the 'Operational Constraints' log. 
-       Format is 'Initials (YYYY-MM-DD)', e.g., 'AH (2026-05-12)'.
-       Place them in 'offDuty' with type 'DAY OFF'.
-    
-    8. ANNUAL LEAVE: Read the 'Operational Constraints' log. 
-       Format is 'Initials Date', e.g., 'ah 16apr26'. 
-       If a staff member is on annual leave:
-       - Place them in 'offDuty' as 'ANNUAL LEAVE' for that date.
-       - FOR 'LOCAL' STAFF: If they take ANY annual leave during the week, they MUST NOT work more than 4 DAYS in total for the entire week (instead of the usual 5).
-       - FOR 'ROSTER' STAFF: They must not be assigned any shifts on the leave date.
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these 6 STRICT CHECKLIST RULES:
 
-    Output JSON:
-    {
-      "programs": [{"day": 0, "dateString": "YYYY-MM-DD", "assignments": [], "offDuty": []}],
-      "shortageReport": [],
-      "recommendations": {"healthScore": 0-100, "hireAdvice": "..."}
-    }
+    CHECKLIST 1 - DAY 1 REST: Parse "Previous Duty Log". On Day 1 (${config.startDate}), ensure staff assigned have >= ${config.minRestHours} hours rest from their previous finish time.
+    
+    CHECKLIST 2 - UNIFIED ABSENCE PROCESSING:
+    - Scan the "Personnel Absence & Requests" box for any mentions of initials and dates.
+    - Categorize based on keywords:
+      - "Off", "Day off", "Requested" -> 'DAY OFF' (Priority for Local 5/2 pattern).
+      - "AL", "Annual", "Leave" -> 'ANNUAL LEAVE'.
+      - "Sick" -> 'SICK LEAVE'.
+      - "Lieu" -> 'LIEU LEAVE'.
+    - If no keyword is present (e.g., "MZ 12May"), default to 'DAY OFF' for Local staff and 'ROSTER LEAVE' for Roster staff.
+    - Note: You must correctly map specific dates to the generated days.
+
+    CHECKLIST 3 - LOCAL 5/2 CALCULATION:
+    - For every 'Local' staff member, exactly 2 days out of 7 MUST be 'OFF'.
+    - Use the processed absences from Checklist 2 as the first choice for these 2 days.
+    - If a specific Day Off is requested, it MUST be one of these two days.
+    - Resulting 2 days MUST go in 'offDuty' array.
+
+    CHECKLIST 4 - ROSTER CALCULATION:
+    - 'Roster' staff are OFF if: 
+      a) Today is outside their [workFromDate, workToDate] contract range (Result: 'ROSTER LEAVE').
+      b) Today matches a request in the Absence Box (Result: 'ANNUAL LEAVE' or specified type).
+
+    CHECKLIST 5 - ROLE MATRIX: Honor 'roleCounts' for every shift.
+
+    CHECKLIST 6 - MINIMUM STAFFING: Every shift MUST meet 'minStaff'.
+
+    STATION RESERVE LOGIC:
+    - If personnel are On-Duty but not assigned to a shift, they are "Station Reserve". 
+    - DO NOT put them in 'offDuty' unless they are officially on leave/off.
   `;
 
   const prompt = `
-    Data:
-    - Start Date: ${config.startDate}
-    - Operational Window: ${config.numDays} Days
-    - Operational Constraints Log: ${constraintsLog}
-    - Staff Registry: ${JSON.stringify(data.staff)}
-    - Flight Schedule: ${JSON.stringify(data.flights)}
-    - Duty Shifts: ${JSON.stringify(data.shifts)}
-    - Additional Instructions: ${config.customRules}
-    
-    Task: Build the program. Enforce Annual Leave rules (Max 4 days work for Local staff on Leave) and the ${config.minRestHours}h rest rule.
+    Operational Window: ${config.numDays} Days from ${config.startDate}
+    Registry: Staff: ${JSON.stringify(data.staff)}, Flights: ${JSON.stringify(data.flights)}, Shifts: ${JSON.stringify(data.shifts)}
+    Constraints: ${constraintsLog}
+    Custom Rules: ${config.customRules}
   `;
 
   const response = await ai.models.generateContent({
@@ -181,7 +147,7 @@ export const generateAIProgram = async (
   });
 
   const result = safeParseJson(response.text);
-  if (!result || !result.programs) throw new Error("Logic assembly failed. Ensure station data is complete.");
+  if (!result || !result.programs) throw new Error("Logic assembly failed.");
   return result;
 };
 
@@ -194,11 +160,9 @@ export const modifyProgramWithAI = async (
   
   const systemInstruction = `
     You are an "Operational Coordinator". 
-    MANDATORY RULES:
-    - NO STAFF LEFT BEHIND: Every available staff member must have a shift.
-    - NO COVERAGE: Do not use 'coveringStaffId'. All staff are standard assigned.
-    - OVERSTAFFING: If manpower is high, assign extra staff to existing shifts.
-    - LEAVE CATEGORIES: Put 'Roster' staff on 'ROSTER LEAVE' if out of contract dates. Put 'Local' staff on 'DAY OFF' if not working.
+    Strictly maintain the 6-point checklist and over-staffing rules. 
+    Use the 5/2 pattern calculation for Local staff and Contract-based logic for Roster staff.
+    Unassigned on-duty staff = Station Reserve (not in offDuty).
   `;
 
   const parts: any[] = [
@@ -211,7 +175,7 @@ export const modifyProgramWithAI = async (
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-flash-lite-latest',
+    model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { 
       systemInstruction,

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -19,7 +18,10 @@ import {
   History,
   UserMinus,
   Palmtree,
-  CheckCircle2
+  CheckCircle2,
+  CalendarDays,
+  FileText,
+  Settings
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -41,8 +43,7 @@ const STORAGE_KEYS = {
   REST_HOURS: 'skyops_min_rest',
   RECOMMENDATIONS: 'skyops_recommendations',
   PREV_DUTY_LOG: 'skyops_prev_duty_log',
-  DAY_OFF_REQUESTS: 'skyops_day_off_requests',
-  ANNUAL_LEAVE_REQUESTS: 'skyops_annual_leave_requests'
+  PERSONNEL_REQUESTS: 'skyops_personnel_requests'
 };
 
 const App: React.FC = () => {
@@ -93,11 +94,8 @@ const App: React.FC = () => {
   const [previousDutyLog, setPreviousDutyLog] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEYS.PREV_DUTY_LOG) || '';
   });
-  const [specificDayOffRequests, setSpecificDayOffRequests] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEYS.DAY_OFF_REQUESTS) || '';
-  });
-  const [annualLeaveRequests, setAnnualLeaveRequests] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEYS.ANNUAL_LEAVE_REQUESTS) || '';
+  const [personnelRequests, setPersonnelRequests] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.PERSONNEL_REQUESTS) || '';
   });
 
   const [minRestHours, setMinRestHours] = useState<number>(() => {
@@ -140,9 +138,8 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.REST_HOURS, minRestHours.toString());
     localStorage.setItem(STORAGE_KEYS.RECOMMENDATIONS, JSON.stringify(recommendations));
     localStorage.setItem(STORAGE_KEYS.PREV_DUTY_LOG, previousDutyLog);
-    localStorage.setItem(STORAGE_KEYS.DAY_OFF_REQUESTS, specificDayOffRequests);
-    localStorage.setItem(STORAGE_KEYS.ANNUAL_LEAVE_REQUESTS, annualLeaveRequests);
-  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, recommendations, previousDutyLog, specificDayOffRequests, annualLeaveRequests]);
+    localStorage.setItem(STORAGE_KEYS.PERSONNEL_REQUESTS, personnelRequests);
+  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, recommendations, previousDutyLog, personnelRequests]);
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
@@ -210,11 +207,11 @@ const App: React.FC = () => {
   const handleBuildRequest = () => {
     setError(null);
     if (activeFlightsInRange.length === 0 && flights.length > 0) {
-      setError(`The target window (${startDate}) shows no flights in its strict range. Please add flights for this period.`);
+      setError(`The target window (${startDate}) shows no flights in its range. Please add flights for this period.`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     } else if (flights.length === 0) {
-      setError(`Critical: No flights registered. Build sequence halted.`);
+      setError(`No flights registered. Build sequence halted.`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -228,8 +225,7 @@ const App: React.FC = () => {
     try {
       const constraintsContext = [
         `Previous Duty Log: ${previousDutyLog}`,
-        `Specific Day Off Requests: ${specificDayOffRequests}`,
-        `Annual Leave Requests: ${annualLeaveRequests}`
+        `Personnel Absence & Requests: ${personnelRequests}`
       ].join(' | ');
 
       const result = await generateAIProgram(
@@ -243,323 +239,322 @@ const App: React.FC = () => {
         { numDays, customRules, minRestHours, startDate }
       );
       
+      setProposedPrograms(result.programs);
+      setShortageReport(result.shortageReport);
+      
       if (result.recommendations) {
         setRecommendations(result.recommendations);
       }
 
-      if (result.shortageReport && result.shortageReport.length > 0) {
-        setProposedPrograms(result.programs);
-        setShortageReport(result.shortageReport);
+      if (result.shortageReport.length > 0) {
         setShowWaiverDialog(true);
       } else {
         setPrograms(result.programs);
         setActiveTab('program');
         setShowSuccessChecklist(true);
       }
-    } catch (err: any) {
-      setError(err.message || "Logic assembly failed.");
+    } catch (e: any) {
+      setError(e.message || "Engine failure during roster assembly.");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const finalizeProposedPrograms = () => {
+  const acceptProposedProgram = () => {
     if (proposedPrograms) {
       setPrograms(proposedPrograms);
       setProposedPrograms(null);
-      setShortageReport([]);
       setShowWaiverDialog(false);
       setActiveTab('program');
       setShowSuccessChecklist(true);
     }
   };
 
-  const navItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
-    { id: 'flights', icon: Plane, label: 'Flights' },
-    { id: 'staff', icon: Users, label: 'Staff' },
-    { id: 'shifts', icon: Clock, label: 'Duties' },
-    { id: 'program', icon: Calendar, label: 'Program' },
-  ];
-
-  const checklistItems = [
-    "1-The day before Rest Hour Carry-over (Day 1 Logic) done ✅",
-    "2-All staff Specific Day Off Requests: done ✅",
-    "3-All local staff work 5 days and get 2 off and initials for days off staff inserted in OFF & LEAVES REGISTRY done ✅",
-    "4-All roster staff off period respected and all off staff inserted into OFF & LEAVES REGISTRY done ✅",
-    "5-All specific roles requested per shifts are maintained for all shifts done ✅",
-    "6-All shifts are met the minimum staff requested. Done ✅"
-  ];
+  const handleChatUpdate = (updatedPrograms: DailyProgram[]) => {
+    setPrograms(updatedPrograms);
+    setActiveTab('program');
+  };
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-[3000] lg:hidden animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-slate-950/98 backdrop-blur-2xl" onClick={() => setIsMobileMenuOpen(false)} />
-          <div className="relative h-full flex flex-col p-8 w-[85%] bg-slate-950 border-r border-white/10 shadow-2xl">
-            <div className="flex items-center justify-between mb-12">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold italic text-white">ASE</div>
-                <h1 className="text-xl font-black uppercase tracking-tighter italic text-white">SkyOPS</h1>
-              </div>
-              <button onClick={() => setIsMobileMenuOpen(false)} className="p-3 text-white/50 hover:text-white transition-colors">
-                <X size={32} />
-              </button>
-            </div>
-            <nav className="flex-1 space-y-4">
-              {navItems.map((item) => (
-                <button key={item.id} onClick={() => { setActiveTab(item.id as any); setIsMobileMenuOpen(false); }}
-                  className={`w-full flex items-center gap-6 px-8 py-6 rounded-3xl transition-all ${activeTab === item.id ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>
-                  <item.icon size={24} />
-                  <span className="text-lg font-black uppercase">{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-indigo-100">
+      <header className="sticky top-0 z-[100] bg-slate-950/80 backdrop-blur-2xl border-b border-white/5 py-6 px-8 flex items-center justify-between">
+        <div className="flex items-center gap-6">
+           <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20 group">
+             <Plane className="text-white group-hover:rotate-45 transition-transform" size={24} />
+           </div>
+           <div>
+              <h1 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">SkyOPS</h1>
+              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mt-1">Operational Command Hub</span>
+           </div>
         </div>
-      )}
 
-      <aside className="hidden lg:flex w-72 bg-slate-950 text-white flex-col border-r border-white/5">
-        <div className="p-8 flex items-center gap-4 border-b border-white/5">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold italic shadow-lg shadow-blue-600/20">ASE</div>
-          <h1 className="text-xl font-black uppercase tracking-tighter italic">SkyOPS</h1>
-        </div>
-        <nav className="flex-1 px-4 py-8 space-y-2">
-          {navItems.map((item) => (
-            <button key={item.id} onClick={() => setActiveTab(item.id as any)}
-              className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${activeTab === item.id ? 'sidebar-item-active' : 'text-slate-500 hover:text-slate-200'}`}>
-              <item.icon size={20} />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em]">{item.label}</span>
+        <nav className="hidden md:flex items-center gap-2">
+          {[
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+            { id: 'flights', icon: Activity, label: 'Flights' },
+            { id: 'staff', icon: Users, label: 'Manpower' },
+            { id: 'shifts', icon: Clock, label: 'Duty Master' },
+            { id: 'program', icon: CalendarDays, label: 'Live Program' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase italic tracking-widest transition-all flex items-center gap-3 ${
+                activeTab === tab.id ? 'bg-white/10 text-white shadow-xl shadow-black/20' : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <tab.icon size={16} />
+              {tab.label}
             </button>
           ))}
         </nav>
-      </aside>
 
-      <main className="flex-1 overflow-hidden flex flex-col relative">
-        <header className="lg:hidden flex items-center justify-between px-6 py-4 bg-slate-950 text-white z-[50]">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold italic text-xs">ASE</div>
-            <h1 className="text-base font-black uppercase italic tracking-tighter">SkyOPS</h1>
-          </div>
-          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2"><Menu size={24} /></button>
-        </header>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+          className="md:hidden p-3 bg-white/5 text-white rounded-xl"
+        >
+          {isMobileMenuOpen ? <X /> : <Menu />}
+        </button>
+      </header>
 
-        {isGenerating && (
-          <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl">
-            <div className="text-center">
-              <div className="w-20 h-20 border-t-4 border-blue-500 rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-blue-500/20"></div>
-              <p className="text-blue-400 font-black uppercase tracking-widest text-xs">Assembling Station Logic...</p>
-            </div>
+      <main className="flex-1 max-w-[1600px] mx-auto w-full p-6 lg:p-12">
+        {error && (
+          <div className="mb-10 p-8 bg-rose-500/10 border border-rose-500/20 rounded-[3rem] flex items-center justify-between animate-in slide-in-from-top duration-500">
+             <div className="flex items-center gap-6">
+                <AlertCircle size={32} className="text-rose-500" />
+                <div>
+                   <h5 className="text-sm font-black text-white uppercase italic mb-1">Operational Error</h5>
+                   <p className="text-xs text-rose-300 font-medium">{error}</p>
+                </div>
+             </div>
+             <button onClick={() => setError(null)} className="p-3 text-rose-500 hover:text-white transition-colors">&times;</button>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 lg:p-12 no-scrollbar">
-          {activeTab === 'dashboard' && (
-            <div className="space-y-12 max-w-7xl mx-auto">
-              {error && (
-                <div className="p-6 bg-rose-50 border border-rose-100 rounded-[2.5rem] flex items-center gap-4">
-                  <AlertCircle size={20} className="text-rose-600" />
-                  <p className="text-[11px] font-black text-rose-700 uppercase">{error}</p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-                <div className="lg:col-span-8 space-y-10">
-                  <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm">
-                    <div className="flex items-center justify-between mb-10">
-                       <h3 className="text-2xl font-black italic uppercase text-slate-950 tracking-tighter">Station Command Dashboard</h3>
-                       <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-2">
-                         <Activity size={14} /> Systems Live
-                       </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                      {[
-                        { label: 'Active Flights', value: activeFlightsInRange.length, icon: Plane, color: 'text-blue-600' },
-                        { label: 'Personnel', value: staff.length, icon: Users, color: 'text-emerald-600' },
-                        { label: 'Duty Hours', value: activeShiftsInRange.length * 8, icon: Clock, color: 'text-amber-600' },
-                        { label: 'Health Score', value: recommendations ? `${recommendations.healthScore}%` : '---', icon: ShieldCheck, color: 'text-indigo-600' }
-                      ].map((stat, i) => (
-                        <div key={i} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 transition-all hover:scale-[1.02]">
-                          <stat.icon size={20} className={`${stat.color} mb-3`} />
-                          <h4 className="text-3xl font-black text-slate-900 leading-none mb-2 italic">{stat.value}</h4>
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
+        {activeTab === 'dashboard' && (
+          <div className="space-y-12 animate-in fade-in duration-700">
+             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                   <div className="bg-white p-12 rounded-[4rem] shadow-sm border border-slate-100 relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-[100px] pointer-events-none transition-all duration-1000 group-hover:bg-indigo-500/10"></div>
+                      <h2 className="text-4xl font-black italic text-slate-950 uppercase tracking-tighter leading-none mb-4">Command Dashboard</h2>
+                      <p className="text-slate-400 text-sm font-medium italic mb-12">Targeting window: <span className="text-slate-900 font-black">{startDate} — {endDate}</span></p>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                        <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-blue-200 transition-all">
+                           <Activity className="text-blue-500 mb-3" size={20} />
+                           <p className="text-3xl font-black text-slate-900 italic leading-none mb-1">{activeFlightsInRange.length}</p>
+                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Active Flights</p>
                         </div>
-                      ))}
-                    </div>
-
-                    {recommendations && (
-                      <div className="mt-10 p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] space-y-6">
-                        <div className="flex items-center gap-4">
-                           <TrendingUp className="text-indigo-600" size={20} />
-                           <h4 className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Resource Recommendations</h4>
+                        <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-emerald-200 transition-all">
+                           <Users className="text-emerald-500 mb-3" size={20} />
+                           <p className="text-3xl font-black text-slate-900 italic leading-none mb-1">{staff.length}</p>
+                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Station Agents</p>
                         </div>
-                        <p className="text-xs font-medium text-indigo-800 leading-relaxed italic">"{recommendations.hireAdvice}"</p>
-                        <div className="flex flex-wrap gap-2">
-                           {recommendations.skillGaps.map((gap, i) => (
-                             <span key={i} className="px-3 py-1 bg-white border border-indigo-200 rounded-xl text-[8px] font-black uppercase text-indigo-600 tracking-widest">
-                               Critical Need: {gap}
-                             </span>
-                           ))}
+                        <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-amber-200 transition-all">
+                           <Clock className="text-amber-500 mb-3" size={20} />
+                           <p className="text-3xl font-black text-slate-900 italic leading-none mb-1">{activeShiftsInRange.length}</p>
+                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Duty Slots</p>
+                        </div>
+                        <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-indigo-200 transition-all">
+                           <ShieldCheck className="text-indigo-500 mb-3" size={20} />
+                           <p className="text-3xl font-black text-slate-900 italic leading-none mb-1">{recommendations?.healthScore || 0}%</p>
+                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Health Score</p>
                         </div>
                       </div>
-                    )}
-                  </div>
+                   </div>
 
-                  <ProgramScanner onDataExtracted={handleDataExtracted} startDate={startDate} numDays={numDays} />
+                   <ProgramScanner onDataExtracted={handleDataExtracted} startDate={startDate} numDays={numDays} />
                 </div>
 
-                <div className="lg:col-span-4 space-y-10">
-                  <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <Calendar size={14} /> Operational Window
-                    </h4>
-                    <div className="space-y-6">
-                      <div>
-                        <label className="block text-[8px] font-black text-slate-300 uppercase mb-2">Effective From</label>
-                        <input type="date" className="w-full p-4 bg-slate-50 border rounded-2xl font-black text-sm" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <div className="bg-slate-950 rounded-[4rem] p-12 text-white shadow-2xl relative overflow-hidden flex flex-col">
+                   <div className="absolute inset-0 bg-blue-600/5 mix-blend-overlay"></div>
+                   <div className="relative z-10 flex-1">
+                      <div className="flex items-center gap-4 mb-10">
+                        <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
+                          <TrendingUp size={24} className="text-blue-400" />
+                        </div>
+                        <h4 className="text-xl font-black italic uppercase tracking-tighter">Operational Build</h4>
                       </div>
-                      <div>
-                        <label className="block text-[8px] font-black text-slate-300 uppercase mb-2">Effective Till</label>
-                        <input type="date" className="w-full p-4 bg-slate-50 border rounded-2xl font-black text-sm" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+
+                      <div className="space-y-10 mb-12">
+                        <div className="space-y-4">
+                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] block ml-1">Date Window</label>
+                           <div className="flex gap-2">
+                             <input type="date" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl text-[11px] font-black outline-none focus:border-blue-500 transition-all" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                             <input type="date" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl text-[11px] font-black outline-none focus:border-blue-500 transition-all" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                           </div>
+                        </div>
+
+                        <div className="space-y-4">
+                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] block ml-1">Rest Constraint (Hrs)</label>
+                           <input type="number" min="8" max="24" className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-2xl font-black italic outline-none focus:border-blue-500 transition-all" value={minRestHours} onChange={e => setMinRestHours(parseInt(e.target.value) || 12)} />
+                        </div>
                       </div>
-                    </div>
-                    <button 
+                   </div>
+
+                   <button 
                       onClick={handleBuildRequest}
-                      className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl italic hover:bg-slate-900 transition-all active:scale-95 flex items-center justify-center gap-3"
-                    >
-                      GENERATE WEEKLY PROGRAM <ChevronRight size={18} />
-                    </button>
-                  </div>
+                      disabled={isGenerating}
+                      className="relative z-10 w-full py-8 bg-blue-600 hover:bg-blue-500 text-white rounded-[2.5rem] font-black text-sm uppercase italic tracking-[0.3em] shadow-2xl shadow-blue-600/30 transition-all active:scale-95 flex items-center justify-center gap-4"
+                   >
+                     {isGenerating ? (
+                       <div className="flex gap-2 items-center">
+                          <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                          <div className="w-2 h-2 bg-white rounded-full animate-bounce [animation-delay:0.4s]"></div>
+                       </div>
+                     ) : (
+                       <>GENERATE WEEKLY PROGRAM <ChevronRight size={18} /></>
+                     )}
+                   </button>
                 </div>
-              </div>
-            </div>
-          )}
+             </div>
+          </div>
+        )}
 
-          {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={(f) => setFlights([...flights, f])} onUpdate={(f) => setFlights(flights.map(prev => prev.id === f.id ? f : prev))} onDelete={(id) => setFlights(flights.filter(f => f.id !== id))} />}
-          {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={handleStaffUpdate} onDelete={(id) => setStaff(staff.filter(s => s.id !== id))} onClearAll={clearStaff} defaultMaxShifts={5} programStartDate={startDate} programEndDate={endDate} />}
-          {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} startDate={startDate} onAdd={(s) => setShifts([...shifts, s])} onUpdate={(s) => setShifts(shifts.map(prev => prev.id === s.id ? s : prev))} onDelete={(id) => setShifts(shifts.filter(sh => sh.id !== id))} />}
-          {activeTab === 'program' && (
-            <div className="space-y-12">
-              <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} aiRecommendations={recommendations} />
-              <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={setPrograms} />
-            </div>
-          )}
+        {activeTab === 'flights' && (
+          <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => setFlights([...flights, f])} onUpdate={f => setFlights(flights.map(fl => fl.id === f.id ? f : fl))} onDelete={id => setFlights(flights.filter(f => f.id !== id))} />
+        )}
 
-          <footer className="mt-24 pb-12 pt-8 border-t border-slate-200 text-center">
-             <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.4em] italic mb-2">SkyOPS Station Intelligence System</p>
-             <p className="text-[7px] font-bold text-slate-300 uppercase tracking-widest">© 2026 Mostafa Zaghloul. Production Build.</p>
-          </footer>
-        </div>
+        {activeTab === 'staff' && (
+          <StaffManager staff={staff} onUpdate={handleStaffUpdate} onDelete={id => setStaff(staff.filter(s => s.id !== id))} onClearAll={clearStaff} defaultMaxShifts={5} programStartDate={startDate} programEndDate={endDate} />
+        )}
+
+        {activeTab === 'shifts' && (
+          <ShiftManager shifts={shifts} flights={flights} startDate={startDate} onAdd={s => setShifts([...shifts, s])} onUpdate={s => setShifts(shifts.map(sh => sh.id === s.id ? s : sh))} onDelete={id => setShifts(shifts.filter(s => s.id !== id))} />
+        )}
+
+        {activeTab === 'program' && (
+          <div className="relative">
+            <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} aiRecommendations={recommendations} />
+            <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={handleChatUpdate} />
+          </div>
+        )}
       </main>
 
+      {/* Constraints Confirmation Dialog */}
       {showConfirmDialog && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xl overflow-y-auto">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-xl w-full p-12 my-8">
-            <h3 className="text-2xl font-black italic uppercase mb-10 text-slate-900 tracking-tighter">Operational Constraints</h3>
-            <div className="space-y-8">
-              <div className="bg-slate-50 p-6 rounded-2xl border">
-                <label className="block text-[9px] font-black text-slate-400 uppercase mb-2">Min Rest Buffer (Hours)</label>
-                <input type="number" className="w-full bg-transparent font-black text-3xl text-blue-600 outline-none" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value) || 12)} />
-              </div>
-              
-              <div className="space-y-4">
-                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
-                  <History size={14} className="text-indigo-600" /> Previous Duty Log (Carry-over Rest)
-                </label>
-                <textarea 
-                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
-                  placeholder="Format: Initials (YYYY-MM-DD HH:mm). Example: MZ (2026-05-10 22:00)..." 
-                  value={previousDutyLog} 
-                  onChange={e => setPreviousDutyLog(e.target.value)} 
-                />
-              </div>
-
-              <div className="space-y-4">
-                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
-                  <UserMinus size={14} className="text-rose-600" /> Personal Day Off Requests
-                </label>
-                <textarea 
-                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
-                  placeholder="Format: Initials (YYYY-MM-DD). Example: AH (2026-05-12)..." 
-                  value={specificDayOffRequests} 
-                  onChange={e => setSpecificDayOffRequests(e.target.value)} 
-                />
-              </div>
-
-              <div className="space-y-4">
-                <label className="flex items-center gap-3 text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">
-                  <Palmtree size={14} className="text-emerald-600" /> Annual Leave Requests
-                </label>
-                <textarea 
-                  className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-24 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
-                  placeholder="Format: Initials Date. Example: ah 16apr26..." 
-                  value={annualLeaveRequests} 
-                  onChange={e => setAnnualLeaveRequests(e.target.value)} 
-                />
-              </div>
-
-              <div className="space-y-4">
-                <label className="block text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Build Instructions</label>
-                <textarea className="w-full p-6 bg-slate-50 border rounded-2xl text-xs font-bold h-32 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" placeholder="e.g. Ensure supervisors on SM416..." value={customRules} onChange={e => setCustomRules(e.target.value)} />
-              </div>
-              
-              <div className="flex gap-4">
-                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-5 font-black uppercase text-[10px] text-slate-400">Abort</button>
-                <button onClick={confirmGenerateProgram} className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-xl">BUILD PROGRAM</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showWaiverDialog && (
-        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-2xl w-full p-12">
-            <h3 className="text-2xl font-black italic uppercase mb-4 text-rose-600">Shortage Waiver Required</h3>
-            <p className="text-slate-500 text-sm font-medium mb-10">Primary man power deficit detected. The AI has proposed a coverage plan with minimal rest violations.</p>
-            <div className="space-y-3 mb-10 max-h-64 overflow-y-auto no-scrollbar">
-              {shortageReport.map((w, i) => (
-                <div key={i} className="p-5 bg-rose-50 border border-rose-100 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <p className="font-black text-[11px] uppercase italic text-slate-900">{w.staffName}</p>
-                    <p className="text-[8px] text-rose-400 uppercase tracking-widest font-black">Violation: {w.reason}</p>
-                  </div>
+        <div className="fixed inset-0 z-[1500] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-2xl animate-in fade-in duration-300">
+           <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 border border-white/10">
+              <div className="flex items-center gap-6 mb-12">
+                <div className="w-16 h-16 bg-slate-950 rounded-3xl flex items-center justify-center">
+                  <Settings className="text-white" size={32} />
                 </div>
-              ))}
-            </div>
-            <div className="flex gap-4">
-              <button onClick={() => setShowWaiverDialog(false)} className="flex-1 py-5 font-black text-slate-400 uppercase text-[10px]">Reject</button>
-              <button onClick={finalizeProposedPrograms} className="flex-[2] py-5 bg-rose-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest">Authorize Waiver</button>
-            </div>
-          </div>
+                <div>
+                  <h4 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter leading-none mb-1">Operational Constraints</h4>
+                  <p className="text-xs text-slate-400 font-medium uppercase tracking-widest">Define station variables</p>
+                </div>
+              </div>
+
+              <div className="space-y-10 mb-12">
+                 <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-3 ml-1">
+                      <History size={16} className="text-blue-500" /> Previous Duty Log (Finish Times)
+                    </label>
+                    <textarea 
+                      className="w-full bg-slate-50 border border-slate-200 p-6 rounded-[2rem] font-bold text-xs outline-none focus:ring-8 focus:ring-blue-500/5 transition-all min-h-[100px]" 
+                      placeholder="e.g. MZ finished 02:00, AH finished 23:00..."
+                      value={previousDutyLog}
+                      onChange={e => setPreviousDutyLog(e.target.value)}
+                    />
+                 </div>
+
+                 <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-3 ml-1">
+                      <Palmtree size={16} className="text-emerald-500" /> Personnel Absence & Requests
+                    </label>
+                    <textarea 
+                      className="w-full bg-slate-50 border border-slate-200 p-6 rounded-[2rem] font-bold text-xs outline-none focus:ring-8 focus:ring-emerald-500/5 transition-all min-h-[140px]" 
+                      placeholder="e.g. MZ Off 12May, AH Annual Leave 13-15May, JS Sick 14May..."
+                      value={personnelRequests}
+                      onChange={e => setPersonnelRequests(e.target.value)}
+                    />
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Unified box for all leaves & specific day off requests.</p>
+                 </div>
+
+                 <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-3 ml-1">
+                      <ShieldCheck size={16} className="text-indigo-500" /> Custom Deployment Rules
+                    </label>
+                    <input 
+                      type="text" 
+                      className="w-full bg-slate-50 border border-slate-200 p-6 rounded-3xl font-bold text-xs outline-none focus:ring-8 focus:ring-indigo-500/5 transition-all" 
+                      placeholder="e.g. Always pair MZ with a Senior agent..."
+                      value={customRules}
+                      onChange={e => setCustomRules(e.target.value)}
+                    />
+                 </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4">
+                 <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-6 text-xs font-black uppercase text-slate-400 tracking-widest italic">Discard</button>
+                 <button 
+                  onClick={confirmGenerateProgram} 
+                  className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-blue-600 transition-all active:scale-95"
+                 >
+                   GENERATE PROGRAM
+                 </button>
+              </div>
+           </div>
         </div>
       )}
 
       {showSuccessChecklist && (
-        <div className="fixed inset-0 z-[4000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-2xl">
-          <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 border border-white/20 animate-in zoom-in-95 duration-300">
-             <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mb-10 mx-auto shadow-inner border border-emerald-100">
-               <CheckCircle2 size={40} />
-             </div>
-             <h3 className="text-3xl font-black italic uppercase text-center mb-10 text-slate-900 tracking-tighter">Logic Validation Success</h3>
-             
-             <div className="space-y-4 mb-12">
-                {checklistItems.map((item, i) => (
-                  <div key={i} className="flex items-start gap-4 p-5 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
-                     <div className="mt-0.5 text-emerald-600 group-hover:scale-110 transition-transform"><CheckCircle2 size={18} /></div>
-                     <p className="text-xs font-bold text-slate-700 leading-relaxed italic">{item}</p>
-                  </div>
-                ))}
-             </div>
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-3xl animate-in zoom-in-95 duration-500">
+           <div className="bg-white rounded-[5rem] shadow-2xl max-w-xl w-full p-16 text-center border border-white/10">
+              <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-inner border border-emerald-100">
+                 <CheckCircle2 size={56} className="text-emerald-500" />
+              </div>
+              <h3 className="text-4xl font-black italic uppercase text-slate-950 tracking-tighter mb-4 leading-none">Logic Verified</h3>
+              <p className="text-slate-400 text-sm font-medium mb-12">Roster generated successfully based on provided constraints.</p>
+              
+              <button 
+                onClick={() => setShowSuccessChecklist(false)} 
+                className="w-full py-7 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all active:scale-95"
+              >
+                ACCESS PROGRAM
+              </button>
+           </div>
+        </div>
+      )}
 
-             <button 
-               onClick={() => setShowSuccessChecklist(false)} 
-               className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-emerald-600 transition-all active:scale-95 text-xs"
-             >
-               Review Final Program
-             </button>
-          </div>
+      {showWaiverDialog && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-2xl animate-in fade-in">
+           <div className="bg-white rounded-[4rem] shadow-2xl max-w-3xl w-full p-12 lg:p-16 border border-white/10 max-h-[90vh] overflow-y-auto no-scrollbar">
+              <div className="flex items-center gap-6 mb-10">
+                 <AlertCircle size={40} className="text-amber-500" />
+                 <div>
+                    <h4 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter leading-none mb-1">Resource Alert</h4>
+                    <p className="text-xs text-slate-400 font-medium uppercase tracking-widest">Logic conflict detected</p>
+                 </div>
+              </div>
+
+              <div className="space-y-6 mb-12">
+                 <p className="text-xs text-slate-600 font-medium italic leading-relaxed">The AI has identified potential conflicts. Review below:</p>
+                 <div className="space-y-4">
+                    {shortageReport.map((s, i) => (
+                      <div key={i} className="p-6 bg-slate-50 border border-slate-200 rounded-3xl group hover:border-amber-200 transition-all">
+                        <div className="flex justify-between items-start mb-2">
+                           <p className="font-black italic text-slate-900 text-xs uppercase">{s.staffName} — Flight {s.flightNumber}</p>
+                           <span className="px-2 py-1 bg-amber-100 text-amber-600 rounded-lg text-[8px] font-black uppercase">{s.reason}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Actual Rest: <span className="text-rose-500">{s.actualRest}h</span> / Target: {s.targetRest}h</p>
+                      </div>
+                    ))}
+                 </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 sticky bottom-0 bg-white pt-6">
+                 <button onClick={() => setShowWaiverDialog(false)} className="flex-1 py-6 text-xs font-black uppercase text-slate-400 tracking-widest italic">Discard</button>
+                 <button 
+                  onClick={acceptProposedProgram} 
+                  className="flex-[2] py-6 bg-amber-500 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-amber-600 transition-all active:scale-95"
+                 >
+                   APPROVE & DEPLOY
+                 </button>
+              </div>
+           </div>
         </div>
       )}
     </div>
@@ -568,6 +563,5 @@ const App: React.FC = () => {
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
-  const root = ReactDOM.createRoot(rootElement);
-  root.render(<App />);
+  ReactDOM.createRoot(rootElement).render(<App />);
 }

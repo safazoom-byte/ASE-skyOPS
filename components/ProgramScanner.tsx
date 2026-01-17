@@ -1,8 +1,10 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
-import { FileUp, Sparkles, Database, AlertCircle, HelpCircle, Search, Clock } from 'lucide-react';
+// Import 'Users' from lucide-react which was missing but used on line 200.
+import { FileUp, Sparkles, Database, AlertCircle, HelpCircle, Search, Clock, Activity, Users } from 'lucide-react';
 
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => void;
@@ -24,12 +26,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
-    "Initializing Neural Scanner...",
-    "Decoding Spatial Layout...",
-    "Scanning Flight Patterns...",
-    "Analyzing Station Timings...",
-    "Mapping Man Power Registry...",
-    "Validating Logic Sync..."
+    "Initializing High-Res Spatial Scan...",
+    "Decoding Multi-Sheet Roster Logic...",
+    "Extracting Flight STA/STD Patterns...",
+    "Validating Staff Proficiency Matrix...",
+    "Cross-Referencing Shift Coverage...",
+    "Applying Fuzzy Date Synchronization...",
+    "Finalizing Station Logic Assembly..."
   ];
 
   useEffect(() => {
@@ -37,7 +40,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 2500);
+      }, 1800);
     } else {
       setScanPhase(0);
     }
@@ -98,14 +101,14 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
         setExtractedData(data);
       } else {
         throw { 
-          title: "Analysis Timeout", 
-          message: "Deep scanning was unable to find recognizable flight patterns or man power identifiers."
+          title: "Logic Deficit", 
+          message: "The deep scan found the document but couldn't verify aviation-standard patterns. Check file clarity."
         };
       }
     } catch (error: any) {
       setScanError({
-        title: error.title || "Extraction Failed",
-        message: error.message || "Unexpected analysis error."
+        title: error.title || "Scan Failed",
+        message: error.message || "The neural engine encountered a format conflict."
       });
     } finally {
       setIsScanning(false);
@@ -113,26 +116,42 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     }
   };
 
-  const outOfRangeFlights = (extractedData?.flights || []).filter(f => f.day < 0 || f.day >= numDays);
-
   return (
     <div className="relative">
       {isScanning && (
-        <div className="fixed inset-0 z-[600] bg-slate-950/95 backdrop-blur-2xl flex items-center justify-center p-6 text-center">
-          <div className="space-y-10 max-w-sm">
-            <Search className="mx-auto text-blue-400 animate-pulse" size={48} />
-            <h3 className="text-white text-2xl font-black uppercase italic tracking-tighter">{phases[scanPhase]}</h3>
+        <div className="fixed inset-0 z-[2000] bg-slate-950/98 backdrop-blur-3xl flex items-center justify-center p-6 text-center">
+          <div className="space-y-12 max-w-md">
+            <div className="relative mx-auto w-24 h-24">
+               <div className="absolute inset-0 bg-blue-500/20 blur-2xl animate-pulse rounded-full"></div>
+               <Search className="relative mx-auto text-blue-400 animate-bounce" size={64} />
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-white text-3xl font-black uppercase italic tracking-tighter leading-none">{phases[scanPhase]}</h3>
+              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Gemini 3 Visual Analysis Active</p>
+            </div>
+            <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
+               <div 
+                 className="h-full bg-blue-500 transition-all duration-1000 ease-in-out" 
+                 style={{ width: `${((scanPhase + 1) / phases.length) * 100}%` }}
+               ></div>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="bg-slate-900 text-white p-8 rounded-[2rem] border border-slate-700 shadow-2xl relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 blur-[120px] pointer-events-none group-hover:bg-blue-500/20 transition-all duration-1000"></div>
-        <div className="flex flex-col lg:flex-row items-center justify-between gap-8 relative z-10">
+      <div className="bg-slate-900 text-white p-10 rounded-[3rem] border border-slate-700 shadow-2xl relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/5 blur-[120px] pointer-events-none group-hover:bg-blue-500/15 transition-all duration-1000"></div>
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-10 relative z-10">
           <div className="flex-1 text-center lg:text-left">
-            <h3 className="text-2xl font-black mb-3 tracking-tight italic uppercase">Master Operational Scan</h3>
-            <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed">
-              Upload <span className="text-blue-400 font-black">flight schedules</span> or <span className="text-blue-400 font-black">man power lists</span>. 
+            <div className="flex items-center gap-3 mb-4 justify-center lg:justify-start">
+               <div className="px-3 py-1 bg-blue-600/20 border border-blue-500/30 rounded-lg text-[9px] font-black uppercase tracking-widest text-blue-400">
+                 Pro Visual Intelligence
+               </div>
+            </div>
+            <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">Global Data Scan</h3>
+            <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed italic">
+              Upload <span className="text-white font-bold">PDF Schedules</span>, <span className="text-white font-bold">Excel Manpower</span>, or <span className="text-white font-bold">Roster Photos</span>. 
+              Our neural engine will auto-map the station logic.
             </p>
           </div>
           
@@ -142,39 +161,57 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
             <button 
               onClick={() => fileInputRef.current?.click()}
               disabled={isScanning}
-              className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-[10px] uppercase flex items-center gap-3 shadow-xl shadow-blue-600/20"
+              className="px-10 py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase flex items-center gap-4 shadow-2xl shadow-blue-600/30 transition-all active:scale-95 group/btn"
             >
-              <FileUp size={18} /> DEEP SCAN DATA
+              <FileUp size={20} className="group-hover/btn:-translate-y-1 transition-transform" /> START DEEP SCAN
             </button>
           </div>
         </div>
 
         {scanError && (
-          <div className="mt-8 p-6 bg-rose-500/10 border border-rose-500/30 rounded-[2rem] flex items-center justify-between">
-            <p className="text-[10px] text-rose-200/80 font-medium">{scanError.message}</p>
-            <button onClick={() => setScanError(null)} className="p-3 text-rose-400 font-black">&times;</button>
+          <div className="mt-10 p-8 bg-rose-500/10 border border-rose-500/30 rounded-[2.5rem] flex items-center justify-between animate-in slide-in-from-top">
+            <div className="flex items-center gap-4">
+               <AlertCircle size={24} className="text-rose-500" />
+               <div>
+                  <p className="text-xs font-black text-white uppercase italic">{scanError.title}</p>
+                  <p className="text-[10px] text-rose-200/60 font-medium uppercase tracking-widest mt-1">{scanError.message}</p>
+               </div>
+            </div>
+            <button onClick={() => setScanError(null)} className="p-4 text-rose-400 font-black hover:text-white transition-colors">&times;</button>
           </div>
         )}
       </div>
 
       {extractedData && (
-        <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-2xl">
-          <div className="bg-white rounded-[3rem] shadow-2xl max-w-xl w-full p-10 lg:p-14 text-center">
-              <Database size={48} className="mx-auto text-emerald-500 mb-8" />
-              <h3 className="text-2xl font-black italic uppercase mb-8 text-slate-950 tracking-tighter">Sync Extracted Logic</h3>
-              <div className="grid grid-cols-2 gap-4 mb-10">
-                <div className="bg-slate-50 p-5 rounded-3xl border">
-                  <div className="text-3xl font-black text-blue-600">{extractedData.flights?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase">Flights</div>
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl">
+          <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 text-center animate-in zoom-in-95 duration-300">
+              <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-inner border border-emerald-100">
+                <Database size={48} className="text-emerald-500" />
+              </div>
+              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Extraction Verified</h3>
+              <p className="text-slate-400 text-sm font-medium mb-12">The station logic has been successfully decoded. Review the registry counts below before committing.</p>
+              
+              <div className="grid grid-cols-2 gap-6 mb-12">
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-blue-200 transition-all">
+                  <Activity size={20} className="mx-auto mb-4 text-blue-400" />
+                  <div className="text-4xl font-black text-slate-900 italic leading-none mb-2">{extractedData.flights?.length || 0}</div>
+                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">FLIGHT SERVICES</div>
                 </div>
-                <div className="bg-slate-50 p-5 rounded-3xl border">
-                  <div className="text-3xl font-black text-emerald-600">{extractedData.staff?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase">Staff</div>
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-emerald-200 transition-all">
+                  <Users size={20} className="mx-auto mb-4 text-emerald-400" />
+                  <div className="text-4xl font-black text-slate-900 italic leading-none mb-2">{extractedData.staff?.length || 0}</div>
+                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PERSONNEL ENTRIES</div>
                 </div>
               </div>
-              <div className="flex gap-4">
-                <button onClick={() => setExtractedData(null)} className="flex-1 py-5 text-[10px] font-black uppercase text-slate-400">Discard</button>
-                <button onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase italic shadow-2xl">COMMIT TO CORE</button>
+
+              <div className="flex flex-col sm:flex-row gap-4">
+                <button onClick={() => setExtractedData(null)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 tracking-widest italic">Abort Sync</button>
+                <button 
+                  onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} 
+                  className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl shadow-slate-950/20 hover:bg-emerald-600 transition-all active:scale-95"
+                >
+                  COMMIT TO SYSTEM
+                </button>
               </div>
           </div>
         </div>

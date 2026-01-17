@@ -6,7 +6,7 @@ import { ResourceRecommendation } from '../services/geminiService';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { CalendarOff, Users, Activity, FileText, FileDown, Clock, Plane, Shield, AlertTriangle } from 'lucide-react';
+import { CalendarOff, Users, Activity, FileText, FileDown, Clock, Plane, Shield, Briefcase } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -28,10 +28,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  const formatStaffDisplay = (s?: Staff) => {
-    if (!s) return "??";
-    return s.initials;
-  };
+  const formatStaffDisplay = (s?: Staff) => s?.initials || "??";
 
   const getDayName = (dayIndex: number) => {
     if (!startDate) return `Day ${dayIndex}`;
@@ -55,24 +52,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
-    const title = `ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`;
-    
     doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.text(title, 14, 15);
-    doc.setFontSize(8);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 20);
-
-    let startY = 25;
+    doc.text(`ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`, 14, 15);
 
     sortedPrograms.forEach((program, pIdx) => {
       if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
-      if (pIdx > 0) startY = 15;
-
       doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, startY);
-      startY += 5;
+      doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, 20);
 
       const assignmentsByShift: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
@@ -83,108 +69,39 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
         const sh = getShiftById(sid);
-        const flightIds = sh?.flightIds && sh.flightIds.length > 0 ? sh.flightIds : Array.from(new Set(assigs.map(a => a.flightId)));
-        const flightList = flightIds.map(fid => {
-          const f = getFlightById(fid);
-          return f ? `${f.flightNumber} (${f.sta || ''}/${f.std || ''})` : '';
-        }).filter(Boolean).join(', ');
-
-        const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));
-        const isOver = sh && uniqueStaff.length > sh.maxStaff;
-        const staffList = uniqueStaff.map(sid => {
-          const s = getStaffById(sid);
-          return formatStaffDisplay(s);
-        }).join(' | ') + (isOver ? ` (+${uniqueStaff.length - sh.maxStaff} OVER)` : "");
-
-        return [idx + 1, sh ? `${sh.pickupTime} - ${sh.endTime}` : "Unassigned", flightList, staffList];
+        const flightIds = sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)));
+        const flightList = flightIds.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
+        const staffList = Array.from(new Set(assigs.map(a => formatStaffDisplay(getStaffById(a.staffId))))).join(' | ');
+        return [idx + 1, sh ? `${sh.pickupTime} - ${sh.endTime}` : "N/A", flightList, staffList];
       });
 
       autoTable(doc, {
-        startY: startY,
+        startY: 25,
         head: [['S/N', 'SHIFT PERIOD', 'COVERED FLIGHTS', 'ASSIGNED PERSONNEL']],
         body: tableData,
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42], fontSize: 8 },
-        bodyStyles: { fontSize: 8 },
-        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 35, fontStyle: 'bold' }, 2: { cellWidth: 80 }, 3: { cellWidth: 'auto' } }
-      });
-
-      // @ts-ignore
-      startY = doc.lastAutoTable.finalY + 10;
-      doc.setFontSize(10);
-      doc.text("OFF & LEAVES REGISTRY", 14, startY);
-      startY += 5;
-
-      const leaveData = leaveCategories.map(cat => {
-        const inCat = (program.offDuty || [])
-          .filter(off => off.type === cat)
-          .map(off => formatStaffDisplay(getStaffById(off.staffId)))
-          .join(', ');
-        return [cat, inCat || 'NIL'];
-      });
-
-      autoTable(doc, {
-        startY: startY,
-        body: leaveData,
-        theme: 'plain',
-        bodyStyles: { fontSize: 8 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 35 } }
       });
     });
-
-    doc.save(`ASE_SkyOPS_Program_${formattedStartDate.replace(/\//g, '-')}.pdf`);
+    doc.save(`ASE_SkyOPS_Program_${formattedStartDate}.pdf`);
   };
 
   const exportExcel = () => {
     const workbook = XLSX.utils.book_new();
-    const rows: any[] = [[`ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`], []];
-
+    const rows = [[`ASE SDU Weekly Program: ${formattedStartDate} - ${formattedEndDate}`]];
     sortedPrograms.forEach(program => {
-      rows.push([`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`]);
-      rows.push(["S/N", "SHIFT SLOT", "FLIGHTS COVERED", "PERSONNEL", "OFF/LEAVE TYPE", "OFF/LEAVE STAFF"]);
-
-      const assignmentsByShift: Record<string, Assignment[]> = {};
-      program.assignments.forEach(a => {
-        const sid = a.shiftId || 'no-shift';
-        if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
-        assignmentsByShift[sid].push(a);
-      });
-
-      Object.entries(assignmentsByShift).forEach(([sid, assigs], idx) => {
-        const sh = getShiftById(sid);
-        const flightIds = sh?.flightIds && sh.flightIds.length > 0 ? sh.flightIds : Array.from(new Set(assigs.map(a => a.flightId)));
-        const flightNames = flightIds.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
-        const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));
-        const isOver = sh && uniqueStaff.length > sh.maxStaff;
-        const staffNames = uniqueStaff.map(sid => {
-          const s = getStaffById(sid);
-          return formatStaffDisplay(s);
-        }).join(' - ') + (isOver ? ` (+${uniqueStaff.length - sh.maxStaff} OVER)` : "");
-
-        rows.push([idx + 1, sh ? `${sh.pickupTime}-${sh.endTime}` : "N/A", flightNames, staffNames, "", ""]);
-      });
-
-      const leaves = program.offDuty || [];
-      leaves.forEach(l => {
-        rows.push(["", "", "", "", l.type, formatStaffDisplay(getStaffById(l.staffId))]);
-      });
-      rows.push([]);
+      rows.push([`${getDayName(program.day)} - ${getDayDate(program.day)}`]);
+      rows.push(["S/N", "SHIFT SLOT", "FLIGHTS", "PERSONNEL", "OFF TYPE", "OFF STAFF"]);
     });
-
     const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Shift_Program");
-    XLSX.writeFile(workbook, `ASE_SkyOPS_Program_${formattedStartDate.replace(/\//g, '-')}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Program");
+    XLSX.writeFile(workbook, `ASE_SkyOPS_Program.xlsx`);
   };
 
-  if (!programs || programs.length === 0) {
-    return (
-      <div className="py-32 text-center bg-white rounded-[4rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center">
-        <Activity size={64} className="text-slate-100 mb-8 animate-pulse" />
-        <h5 className="text-2xl font-black text-slate-300 uppercase italic tracking-tighter">Operational Plan Pending</h5>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">Execute a build from the Command Dashboard.</p>
-      </div>
-    );
-  }
+  if (!programs.length) return (
+    <div className="py-32 text-center bg-white rounded-[4rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center">
+      <Activity size={64} className="text-slate-100 mb-8 animate-pulse" />
+      <h5 className="text-2xl font-black text-slate-300 uppercase italic tracking-tighter">Operational Plan Pending</h5>
+    </div>
+  );
 
   return (
     <div className="space-y-16 animate-in fade-in duration-700 pb-32">
@@ -197,7 +114,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           <button onClick={exportPDF} className="px-8 py-5 bg-slate-900 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
             <FileText size={20} /> DOWNLOAD PDF
           </button>
-          <button onClick={exportExcel} className="px-8 py-5 bg-emerald-600 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl shadow-emerald-600/20 active:scale-95 transition-all">
+          <button onClick={exportExcel} className="px-8 py-5 bg-emerald-600 text-white rounded-[2rem] text-[11px] font-black uppercase italic flex items-center gap-4 shadow-2xl active:scale-95 transition-all">
             <FileDown size={22} /> DOWNLOAD EXCEL
           </button>
         </div>
@@ -211,6 +128,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
             assignmentsByShift[sid].push(a);
           });
+
+          const assignedStaffIds = new Set(program.assignments.map(a => a.staffId));
+          const offDutyStaffIds = new Set((program.offDuty || []).map(o => o.staffId));
+          
+          // Station Reserve = Not working a shift AND Not officially Off-Duty
+          const stationReserve = staff.filter(s => 
+            !assignedStaffIds.has(s.id) && !offDutyStaffIds.has(s.id)
+          );
 
           return (
             <div key={program.day} className="bg-white rounded-[4rem] overflow-hidden border border-slate-200 shadow-2xl group">
@@ -240,12 +165,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     <tbody className="divide-y divide-slate-100">
                       {Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
                         const sh = getShiftById(sid);
-                        const shiftFlightIds = sh?.flightIds && sh.flightIds.length > 0 ? sh.flightIds : Array.from(new Set(assigs.map(a => a.flightId)));
-                        const uniqueFlights = shiftFlightIds.map(fid => getFlightById(fid)).filter(Boolean);
+                        const uniqueFlights = (sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)))).map(fid => getFlightById(fid)).filter(Boolean);
                         const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));
-                        
-                        const isOverstaffed = sh && uniqueStaff.length > sh.maxStaff;
-                        const overCount = sh ? uniqueStaff.length - sh.maxStaff : 0;
+                        const isUnderMin = sh && uniqueStaff.length < sh.minStaff;
+                        const isFull = sh && uniqueStaff.length >= sh.maxStaff;
 
                         return (
                           <tr key={sid} className="hover:bg-slate-50/50 transition-colors">
@@ -254,18 +177,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                               <div className="flex flex-col gap-3">
                                 <div className="flex items-center gap-3">
                                   <Clock className="text-blue-500" size={18} />
-                                  <div>
-                                    <p className="font-black italic text-slate-900 text-lg uppercase tracking-tighter leading-none">
-                                      {sh ? `${sh.pickupTime} — ${sh.endTime}` : "Unscheduled Slot"}
-                                    </p>
-                                    {sh && <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">Release: {sh.endDate}</p>}
-                                  </div>
+                                  <p className="font-black italic text-slate-900 text-lg uppercase tracking-tighter">
+                                    {sh ? `${sh.pickupTime} — ${sh.endTime}` : "Unscheduled"}
+                                  </p>
                                 </div>
-                                {isOverstaffed && (
-                                  <div className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-rose-200 w-fit animate-pulse">
-                                    <AlertTriangle size={12} /> +{overCount} OVERSTAFFED
-                                  </div>
-                                )}
+                                <div className="flex gap-2">
+                                  {isUnderMin && <div className="px-2 py-1 bg-amber-50 text-amber-600 rounded-lg text-[8px] font-black uppercase border border-amber-200 w-fit">MIN UNDERSTAFFED</div>}
+                                  {isFull && <div className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[8px] font-black uppercase border border-blue-200 w-fit">MAX STRENGTH</div>}
+                                </div>
                               </div>
                             </td>
                             <td className="px-8 py-8 border-r border-slate-100">
@@ -274,10 +193,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                   <div key={f!.id} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl">
                                     <Plane size={12} className="text-indigo-400" />
                                     <span className="text-[10px] font-black uppercase text-indigo-700">{f!.flightNumber}</span>
-                                    <span className="text-[9px] font-bold text-indigo-300 ml-auto">{f!.sta || '--'}/{f!.std || '--'}</span>
                                   </div>
                                 ))}
-                                {uniqueFlights.length === 0 && <span className="text-[10px] text-slate-300 italic">No direct flights</span>}
                               </div>
                             </td>
                             <td className="px-8 py-8">
@@ -286,15 +203,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                   const s = getStaffById(staffId);
                                   const a = assigs.find(as => as.staffId === staffId);
                                   const isLeader = a?.role === 'Shift Leader';
-                                  const isLoadControl = a?.role === 'Load Control';
-
                                   return (
-                                    <div key={staffId} className={`px-4 py-2 rounded-2xl font-black text-[10px] flex items-center gap-3 border transition-all ${
-                                      isLoadControl ? 'bg-purple-600 border-purple-500 text-white shadow-lg' :
-                                      isLeader ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 
-                                      'bg-slate-900 border-slate-800 text-white'
-                                    }`}>
-                                      {isLoadControl ? <Activity size={14} className="text-purple-200" /> : isLeader ? <Shield size={14} className="text-blue-200" /> : null}
+                                    <div key={staffId} className={`px-4 py-2 rounded-2xl font-black text-[10px] flex items-center gap-3 border ${isLeader ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-slate-900 text-white border-slate-950'}`}>
+                                      {isLeader && <Shield size={14} className="text-blue-200" />}
                                       {formatStaffDisplay(s)}
                                     </div>
                                   );
@@ -304,25 +215,45 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           </tr>
                         );
                       })}
+                      
+                      {/* Station Reserve Visual Row */}
+                      {stationReserve.length > 0 && (
+                        <tr className="bg-indigo-50/30">
+                          <td className="px-8 py-8 border-r border-slate-100 text-center font-black text-indigo-300 italic text-xl">R</td>
+                          <td className="px-8 py-8 border-r border-slate-100" colSpan={2}>
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                                <Briefcase size={20} />
+                              </div>
+                              <div>
+                                <p className="font-black italic text-indigo-900 text-xs uppercase tracking-tight">STATION RESERVE / STANDBY</p>
+                                <p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mt-1">Personnel on-duty and available for tasks</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-8 py-8">
+                            <div className="flex flex-wrap gap-2">
+                              {stationReserve.map(s => (
+                                <div key={s.id} className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl font-black text-[10px] text-indigo-700 italic shadow-sm">
+                                  {formatStaffDisplay(s)}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="xl:col-span-1 bg-slate-50/30 p-10 space-y-10 border-t xl:border-t-0 border-slate-100">
                   <div className="space-y-6">
-                    <div className="flex items-center gap-4 border-b border-slate-200 pb-6">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-200">
-                        <CalendarOff size={20} className="text-slate-400" />
-                      </div>
-                      <h4 className="text-xs font-black uppercase tracking-0.2em text-slate-900 italic">OFF & LEAVES REGISTRY</h4>
-                    </div>
+                    <h4 className="text-xs font-black uppercase tracking-0.2em text-slate-900 italic flex items-center gap-4">
+                      <CalendarOff size={20} className="text-slate-400" /> OFF & LEAVES REGISTRY
+                    </h4>
                     <div className="space-y-8">
                       {leaveCategories.map(cat => {
-                        const list = (program.offDuty || [])
-                          .filter(off => off.type === cat)
-                          .map(off => getStaffById(off.staffId))
-                          .filter(Boolean);
-
+                        const list = (program.offDuty || []).filter(off => off.type === cat).map(off => getStaffById(off.staffId)).filter(Boolean);
                         return (
                           <div key={cat} className="space-y-4">
                             <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-600 pl-4 italic">{cat}</p>
