@@ -89,9 +89,10 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
 
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a high-performance ground handling weekly program starting from ${options.startDate}.
+    CORE OBJECTIVE: Generate a high-performance ground handling weekly program with 100% staff accountability.
+    REFERENCE START DATE: ${options.startDate}
     
-    INPUT DATA:
+    INPUT DATA (TREAT AS IMMUTABLE FACTS):
     - FLIGHTS: ${JSON.stringify(normalizedFlights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
     - DUTY SHIFTS: ${JSON.stringify(normalizedShifts.map(s => ({ 
         id: s.id, 
@@ -109,18 +110,30 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
         type: s.type
       })))}
     
-    STRICT COMPLIANCE RULES:
-    1. GENERAL CAPABILITY: ALL staff members (even those with "No" for all roles) are qualified for basic "Check-in" and "Gate" duties. Treat them as General Ground Agents.
-    2. AVAILABILITY RULES: 
-       - ROSTER STAFF: Strictly check if Flight Date falls between staff 'from' and 'to' dates. If it is outside this range, they ARE NOT AVAILABLE.
-       - LOCAL STAFF: Strictly follow a "5 Days ON / 2 Days OFF" pattern starting from the first day of the program.
-    3. ASSIGNMENT PRIORITY (TWO-PHASE):
-       - PHASE 1: Fill the specific "roles" (Shift Leader, Ramp, Load Control, etc.) using staff who have those skills marked "Yes".
-       - PHASE 2: Fill the remaining slots to reach the "minStaff" requirement using ANY available staff member (including those with no specific skills).
-    4. NO UNDERSTAFFING: If available staff exist, you must reach the "minStaff" count.
-    5. WORKLOAD: Ensure a fair distribution of shifts. Respect the minimum rest of ${options.minRestHours} hours between shifts.
+    STRICT OPERATIONAL CONSTRAINTS:
+    1. IMMUTABILITY RULE: DO NOT change the date, day, or time of any Flight or Shift.
+    2. TOTAL ACCOUNTABILITY RULE: EVERY single staff member from the registry MUST be accounted for in the output for EVERY day. If they are not working, they MUST be in the 'offDuty' array for that specific day.
     
-    OUTPUT: Return strictly JSON with the programs array and a shortageReport if rules are violated.
+    3. ELIGIBILITY & PATTERN ENFORCEMENT:
+       - LOCAL STAFF (5/2 Pattern): For every staff member of type 'Local', calculate their cycle based on the index of the day (starting from 0 at ${options.startDate}).
+         Days 0, 1, 2, 3, 4 are WORK DAYS.
+         Days 5, 6 are MANDATORY OFF DAYS (Type: 'DAY OFF').
+         This pattern repeats every 7 days: (day_index % 7) >= 5 means OFF.
+       - ROSTER STAFF: Check the Shift Date against the staff 'from' and 'to' dates. 
+         If (Shift.date < Staff.from) OR (Staff.to exists AND Shift.date > Staff.to), the staff member is UNAVAILABLE (Type: 'ROSTER LEAVE').
+       
+    4. ASSIGNMENT LOGIC (TWO-PHASE):
+       - PHASE 1: Assign specialists to the required 'roles' in the shift (Shift Leader, Ramp, etc.) using staff with "Yes" skills.
+       - PHASE 2: Fill the remaining 'minStaff' requirement using ANY ELIGIBLE available staff member (All are qualified for Check-in/Gate).
+    
+    5. REST RULE: Ensure ${options.minRestHours} hours of rest between shifts.
+    6. NO UNDERSTAFFING: If eligible staff are available, you MUST reach the 'minStaff' count.
+
+    OUTPUT FORMAT: Return strictly JSON with 'programs' and 'shortageReport'.
+    Each program object MUST have:
+    - day: number
+    - assignments: array of working staff
+    - offDuty: array of ALL OTHER staff members not in assignments for that day, categorized by type ('DAY OFF', 'ROSTER LEAVE', etc.).
   `;
 
   try {
@@ -164,7 +177,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
                     }
                   }
                 },
-                required: ["day", "assignments"]
+                required: ["day", "assignments", "offDuty"]
               }
             },
             shortageReport: {
@@ -312,7 +325,7 @@ export async function extractDataFromContent(content: {
 
 export async function modifyProgramWithAI(instruction: string, data: ProgramData, media?: ExtractionMedia[]): Promise<{ programs: DailyProgram[], explanation: string }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure SDU OFF AND LEAVES list is updated accordingly.`;
+  const prompt = `Modify roster: "${instruction}". Return JSON. Ensure SDU OFF AND LEAVES list is updated accordingly. Ensure all staff remain accounted for every day.`;
   try {
     const parts: any[] = [{ text: prompt }, { text: `Data: ${JSON.stringify(data.programs)}` }];
     if (media?.length) media.forEach(m => parts.push({ inlineData: { mimeType: m.mimeType, data: m.data } }));
