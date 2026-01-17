@@ -106,7 +106,7 @@ export const extractDataFromContent = async (params: {
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite-latest',
+    model: 'gemini-flash-lite-latest',
     contents: { parts },
     config: { responseMimeType: "application/json" }
   });
@@ -211,7 +211,7 @@ export const modifyProgramWithAI = async (
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite-latest',
+    model: 'gemini-flash-lite-latest',
     contents: { parts },
     config: { 
       systemInstruction,
