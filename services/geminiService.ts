@@ -29,14 +29,18 @@ export interface BuildResult {
   recommendations?: ResourceRecommendation;
 }
 
-const normalizeDate = (d?: string): string | undefined => {
+const normalizeDate = (d?: any): string | undefined => {
   if (!d) return undefined;
+  if (typeof d === 'number') {
+    const date = new Date((d - 25569) * 86400 * 1000);
+    return date.toISOString().split('T')[0];
+  }
   try {
     const date = new Date(d);
-    if (isNaN(date.getTime())) return d;
+    if (isNaN(date.getTime())) return String(d).trim();
     return date.toISOString().split('T')[0];
   } catch {
-    return d;
+    return String(d).trim();
   }
 };
 
@@ -75,7 +79,6 @@ const generateInitials = (name: string): string => {
 export async function generateAIProgram(data: ProgramData, qmsContext: string, options: any): Promise<BuildResult> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Normalize all input dates to ensure string comparison works for the AI
   const normalizedFlights = data.flights.map(f => ({ ...f, date: normalizeDate(f.date) }));
   const normalizedStaff = data.staff.map(s => ({ 
     ...s, 
@@ -86,9 +89,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
 
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a high-performance ground handling weekly program.
-    
-    OPERATIONAL WINDOW: ${options.startDate} for ${options.numDays} days.
+    CORE OBJECTIVE: Generate a high-performance ground handling weekly program starting from ${options.startDate}.
     
     INPUT DATA:
     - FLIGHTS: ${JSON.stringify(normalizedFlights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
@@ -104,19 +105,22 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
         name: s.name, 
         skills: s.skillRatings,
         from: s.workFromDate, 
-        to: s.workToDate 
+        to: s.workToDate,
+        type: s.type
       })))}
     
     STRICT COMPLIANCE RULES:
-    1. AVAILABILITY PRE-CHECK (MANDATORY): For every assignment, you MUST verify: Is FlightDate >= Staff.from AND (Staff.to is empty OR FlightDate <= Staff.to)? 
-       If NO, that staff member is INELIGIBLE for that specific day.
-    2. TWO-PHASE ASSIGNMENT:
-       - Phase 1: Assign Special Roles (Shift Leader, etc.) from eligible staff.
-       - Phase 2: Fill minimum staff requirements from eligible staff.
-    3. NO PARTIAL BUILDS: Do not return an empty array if you can fulfill at least some flights.
-    4. UNASSIGNED STAFF: If a staff member is eligible but not assigned, categorize them as 'DAY OFF'.
+    1. GENERAL CAPABILITY: ALL staff members (even those with "No" for all roles) are qualified for basic "Check-in" and "Gate" duties. Treat them as General Ground Agents.
+    2. AVAILABILITY RULES: 
+       - ROSTER STAFF: Strictly check if Flight Date falls between staff 'from' and 'to' dates. If it is outside this range, they ARE NOT AVAILABLE.
+       - LOCAL STAFF: Strictly follow a "5 Days ON / 2 Days OFF" pattern starting from the first day of the program.
+    3. ASSIGNMENT PRIORITY (TWO-PHASE):
+       - PHASE 1: Fill the specific "roles" (Shift Leader, Ramp, Load Control, etc.) using staff who have those skills marked "Yes".
+       - PHASE 2: Fill the remaining slots to reach the "minStaff" requirement using ANY available staff member (including those with no specific skills).
+    4. NO UNDERSTAFFING: If available staff exist, you must reach the "minStaff" count.
+    5. WORKLOAD: Ensure a fair distribution of shifts. Respect the minimum rest of ${options.minRestHours} hours between shifts.
     
-    OUTPUT: Return strictly JSON.
+    OUTPUT: Return strictly JSON with the programs array and a shortageReport if rules are violated.
   `;
 
   try {
@@ -181,8 +185,8 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
     });
 
     const result = safeParseJson(response.text);
-    if (!result || !result.programs || result.programs.length === 0) {
-      throw new Error("AI could not generate a valid program within the selected dates. Check staff availability.");
+    if (!result || !result.programs) {
+      throw new Error("AI engine failed to assemble the logic.");
     }
 
     return {
@@ -207,15 +211,28 @@ export async function extractDataFromContent(content: {
     ACT AS AN AVIATION DATA EXTRACTOR. 
     TASK: Extract Flights, Staff, and DUTY SHIFTS.
     
-    EXTRACTION RULES:
-    1. Flights: Extract Flight Number, STA, STD, Origin, Destination, and Date.
-    2. Staff: Extract Personnel. Look for "Work From", "Effective Date", "Start Date", "End Date", or "Expiry". Map to YYYY-MM-DD.
-    3. Shifts: Identify duties and link to flights via IDs.
+    EXTRACTION RULES FOR STAFF (MANDATORY):
+    1. Full Name: Extract the complete name.
+    2. Initials: Extract or generate initials (e.g. "MZ").
+    3. Category & Pattern:
+       - If "Local" or "Fixed": Set type "Local" and pattern "5 Days On / 2 Off".
+       - If "Roster": Set type "Roster" and pattern "Continuous (Roster)".
+    4. Contract Dates: Capture "Start/From" and "End/To" dates as YYYY-MM-DD.
+    5. Power Rate: Default to 75 if not specified. Value should be 50-100.
+    6. Skill Proficiency Matrix: Identify if staff is qualified for: "Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations". Return "Yes" or "No" for each.
     
     JSON STRUCTURE:
     {
       "flights": [{ "id": "fl_1", "flightNumber": "...", "sta": "...", "std": "...", "date": "YYYY-MM-DD", "from": "...", "to": "..." }],
-      "staff": [{ "name": "...", "initials": "...", "type": "Local/Roster", "workFromDate": "YYYY-MM-DD", "workToDate": "YYYY-MM-DD", "skillRatings": { "SkillName": "Yes/No" } }],
+      "staff": [{ 
+        "name": "Full Name", 
+        "initials": "MZ", 
+        "type": "Local/Roster", 
+        "workFromDate": "YYYY-MM-DD", 
+        "workToDate": "YYYY-MM-DD", 
+        "powerRate": 75,
+        "skillRatings": { "Ramp": "Yes/No", "Load Control": "Yes/No", "Lost and Found": "Yes/No", "Shift Leader": "Yes/No", "Operations": "Yes/No" } 
+      }],
       "shifts": [{ "id": "sh_1", "pickupDate": "YYYY-MM-DD", "pickupTime": "HH:mm", "endDate": "YYYY-MM-DD", "endTime": "HH:mm", "minStaff": 4, "flightIds": ["fl_1"] }]
     }
   `;
@@ -248,11 +265,12 @@ export async function extractDataFromContent(content: {
     const extractedStaff = (result.staff || []).map((s: any) => ({
       ...s, 
       id: Math.random().toString(36).substr(2, 9), 
-      initials: (s.initials || generateInitials(s.name)).toUpperCase(), 
+      name: s.name || "Unknown Staff",
+      initials: (s.initials || generateInitials(s.name || "US")).toUpperCase(), 
       skillRatings: s.skillRatings || {}, 
       powerRate: s.powerRate || 75, 
       type: s.type || 'Local', 
-      workPattern: s.workPattern || (s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off'),
+      workPattern: s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off',
       maxShiftsPerWeek: 5, 
       workFromDate: normalizeDate(s.workFromDate) || startDateStr,
       workToDate: normalizeDate(s.workToDate)

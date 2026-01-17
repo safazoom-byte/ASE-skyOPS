@@ -125,12 +125,24 @@ const App: React.FC = () => {
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
+      // SMART MERGE: Match by ID first, then by exact Name or Initials to prevent duplicates
       const idMatchIdx = prev.findIndex(s => s.id === updatedStaff.id);
-      if (idMatchIdx !== -1) {
-        const existing = prev[idMatchIdx];
-        const merged = { ...existing, ...updatedStaff };
+      const nameMatchIdx = prev.findIndex(s => s.name.toLowerCase() === updatedStaff.name.toLowerCase());
+      const initialsMatchIdx = prev.findIndex(s => s.initials.toUpperCase() === updatedStaff.initials.toUpperCase());
+      
+      const targetIdx = idMatchIdx !== -1 ? idMatchIdx : (nameMatchIdx !== -1 ? nameMatchIdx : initialsMatchIdx);
+
+      if (targetIdx !== -1) {
+        const existing = prev[targetIdx];
+        // Merge extracted data into existing, but prioritize existing edited data if the new one is empty
+        const merged = { 
+          ...existing, 
+          ...updatedStaff,
+          // Retain skills if the new import is empty/partial
+          skillRatings: { ...existing.skillRatings, ...updatedStaff.skillRatings }
+        };
         const newList = [...prev];
-        newList[idMatchIdx] = merged;
+        newList[targetIdx] = merged;
         return newList;
       }
       return [...prev, updatedStaff];
@@ -196,7 +208,6 @@ const App: React.FC = () => {
     setIsGenerating(true);
     setError(null);
     try {
-      // CRITICAL FIX: Only send flights and shifts within the active range to the AI
       const result = await generateAIProgram(
         { 
           flights: activeFlightsInRange, 
@@ -364,14 +375,6 @@ const App: React.FC = () => {
                       GENERATE WEEKLY PROGRAM <ChevronRight size={18} />
                     </button>
                   </div>
-                  
-                  {recommendations && (
-                    <div className="bg-indigo-600 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
-                       <TrendingUp className="absolute -bottom-4 -right-4 w-32 h-32 opacity-10" />
-                       <h5 className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-4">Command Advice</h5>
-                       <p className="text-sm font-bold italic leading-relaxed">"{recommendations.hireAdvice}"</p>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, OffDutyRecord } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
@@ -75,7 +76,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
         const staffList = flightAssigs.map(a => {
           const s = getStaffById(a.staffId);
-          return `${s?.initials || '??'} (${a.role.substring(0, 3)})`;
+          // Requirement: Show initials only, remove role suffix
+          return `${s?.initials || '??'}`;
         }).join(' | ');
         const sh = getShiftById(flightAssigs[0]?.shiftId);
 
@@ -156,6 +158,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       flightGroups.forEach((fId, idx) => {
         const f = getFlightById(fId);
         const flightAssigs = dayAssignments.filter(a => a.flightId === fId).sort((a, b) => a.role === 'Shift Leader' ? -1 : 1);
+        // Requirement: Show initials only
         const staffInitials = flightAssigs.map(a => getStaffById(a.staffId)?.initials).join(' - ');
         const sh = getShiftById(flightAssigs[0]?.shiftId);
 
@@ -286,8 +289,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       isLeader ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-900 border-slate-800 text-white'
                                     }`}>
                                       {isLeader && <Shield size={14} className="text-blue-200" />}
+                                      {/* Requirement: Only initials, no role suffix */}
                                       {s?.initials || "??"}
-                                      <span className="opacity-40 font-bold uppercase text-[7px] tracking-widest">{a.role.substring(0, 3)}</span>
                                     </div>
                                   );
                                 })}

@@ -40,7 +40,9 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
     initials: '',
     type: 'Local',
     powerRate: 75,
-    skillRatings: {}
+    skillRatings: {},
+    workFromDate: '',
+    workToDate: ''
   });
 
   const generateInitials = (name: string) => {
@@ -64,28 +66,32 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
       workPattern: newStaff.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off',
       powerRate: newStaff.powerRate || 75,
       skillRatings: newStaff.skillRatings || {},
-      maxShiftsPerWeek: defaultMaxShifts
+      maxShiftsPerWeek: defaultMaxShifts,
+      workFromDate: newStaff.type === 'Roster' ? newStaff.workFromDate : undefined,
+      workToDate: newStaff.type === 'Roster' ? newStaff.workToDate : undefined
     };
 
     onUpdate(staffData);
-    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, skillRatings: {} });
+    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, skillRatings: {}, workFromDate: '', workToDate: '' });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>, isEdit: boolean) => {
     const { name, value } = e.target;
-    const setter = isEdit ? setEditingStaff : (val: any) => setNewStaff(prev => ({ ...prev, ...val }));
     
-    if (isEdit && !editingStaff) return;
-
-    const update = { [name]: value };
-    if (name === 'type') {
-      const isRoster = value === 'Roster';
-      (update as any).workPattern = isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off';
-    }
-
     if (isEdit) {
+      if (!editingStaff) return;
+      const update = { [name]: value };
+      if (name === 'type') {
+        const isRoster = value === 'Roster';
+        (update as any).workPattern = isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+      }
       setEditingStaff(prev => prev ? { ...prev, ...update } : null);
     } else {
+      const update = { [name]: value };
+      if (name === 'type') {
+        const isRoster = value === 'Roster';
+        (update as any).workPattern = isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+      }
       setNewStaff(prev => ({ ...prev, ...update }));
     }
   };
@@ -117,8 +123,8 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
       'Category': s.type,
       'Power Rate': `${s.powerRate}%`,
       'Work Pattern': s.workPattern,
-      'Work From': s.type === 'Roster' ? (s.workFromDate || '---') : '---',
-      'Work To': s.type === 'Roster' ? (s.workToDate || '---') : '---',
+      'Work From': s.workFromDate || '---',
+      'Work To': s.workToDate || '---',
       ...AVAILABLE_SKILLS.reduce((acc, skill) => ({ ...acc, [skill]: s.skillRatings[skill] || 'No' }), {})
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -216,6 +222,37 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
             </div>
           </div>
 
+          {newStaff.type === 'Roster' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-10 bg-slate-50 rounded-[3rem] border border-slate-100 animate-in slide-in-from-top duration-300">
+              <div className="space-y-3">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service Commencement</label>
+                <div className="relative">
+                  <Calendar className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input 
+                    type="date" name="workFromDate"
+                    className="w-full pl-14 pr-6 py-5 bg-white border border-slate-200 rounded-[2rem] font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                    value={newStaff.workFromDate} 
+                    onChange={(e) => handleInputChange(e, false)} 
+                    required={newStaff.type === 'Roster'}
+                  />
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service End</label>
+                <div className="relative">
+                  <Calendar className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input 
+                    type="date" name="workToDate"
+                    className="w-full pl-14 pr-6 py-5 bg-white border border-slate-200 rounded-[2rem] font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" 
+                    value={newStaff.workToDate} 
+                    onChange={(e) => handleInputChange(e, false)} 
+                    required={newStaff.type === 'Roster'}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4 pt-6 border-t border-slate-50">
             <p className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 ml-1">
               <GraduationCap size={16} className="text-indigo-600" /> Skill Proficiency Matrix
@@ -269,6 +306,11 @@ export const StaffManager: React.FC<Props> = ({ staff, onUpdate, onDelete, onCle
                 </div>
                 <h5 className="text-xl font-black text-slate-900 leading-tight mb-1 truncate">{member.name}</h5>
                 <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{member.workPattern}</p>
+                {member.type === 'Roster' && member.workFromDate && (
+                  <p className="text-[7px] font-black text-amber-500 uppercase tracking-widest mt-2">
+                    Valid: {member.workFromDate} {member.workToDate ? `— ${member.workToDate}` : ''}
+                  </p>
+                )}
               </div>
 
               <div className="flex-1 space-y-6">
