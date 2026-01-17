@@ -29,6 +29,17 @@ export interface BuildResult {
   recommendations?: ResourceRecommendation;
 }
 
+const normalizeDate = (d?: string): string | undefined => {
+  if (!d) return undefined;
+  try {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return d;
+    return date.toISOString().split('T')[0];
+  } catch {
+    return d;
+  }
+};
+
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
@@ -64,41 +75,48 @@ const generateInitials = (name: string): string => {
 export async function generateAIProgram(data: ProgramData, qmsContext: string, options: any): Promise<BuildResult> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Normalize all input dates to ensure string comparison works for the AI
+  const normalizedFlights = data.flights.map(f => ({ ...f, date: normalizeDate(f.date) }));
+  const normalizedStaff = data.staff.map(s => ({ 
+    ...s, 
+    workFromDate: normalizeDate(s.workFromDate), 
+    workToDate: normalizeDate(s.workToDate) 
+  }));
+  const normalizedShifts = data.shifts.map(sh => ({ ...sh, pickupDate: normalizeDate(sh.pickupDate) }));
+
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a high-performance ground handling weekly program based on FLIGHTS and DUTY SHIFTS.
+    CORE OBJECTIVE: Generate a high-performance ground handling weekly program.
     
-    INPUT PARAMETERS:
-    - WINDOW: ${options.startDate} for ${options.numDays} days.
-    - FLIGHTS: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
-    - DUTY SHIFTS (CONSTRAINTS): ${JSON.stringify(data.shifts.map(s => ({ 
+    OPERATIONAL WINDOW: ${options.startDate} for ${options.numDays} days.
+    
+    INPUT DATA:
+    - FLIGHTS: ${JSON.stringify(normalizedFlights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
+    - DUTY SHIFTS: ${JSON.stringify(normalizedShifts.map(s => ({ 
         id: s.id, 
         date: s.pickupDate, 
-        time: `${s.pickupTime}-${s.endTime}`,
         min: s.minStaff,
-        max: s.maxStaff,
         roles: s.roleCounts,
         flights: s.flightIds
       })))}
-    - STAFF REGISTRY: ${JSON.stringify(data.staff.map(s => ({ 
+    - STAFF REGISTRY: ${JSON.stringify(normalizedStaff.map(s => ({ 
         id: s.id, 
         name: s.name, 
         skills: s.skillRatings,
-        pattern: s.workPattern,
         from: s.workFromDate, 
         to: s.workToDate 
       })))}
     
-    ASSIGNMENT LOGIC (STRICT HIERARCHY):
-    1. TWO-PHASE ASSIGNMENT:
-       - PHASE A (SPECIAL ROLES): For every shift, assign staff who meet the specific "roles" (e.g., if roles say Shift Leader: 1, find a staff member with Shift Leader skill).
-       - PHASE B (MINIMUM FILL): If the shift still has fewer staff than the "min" requirement after Phase A, assign ANY available qualified staff to reach that minimum count.
-    2. SHIFT LINKING: Only assign staff to flights that are explicitly linked in the "flights" array of the Shift object.
-    3. TEMPORAL AVAILABILITY: Respect [from, to] dates for all personnel.
-    4. REST: Ensure ${options.minRestHours} hours buffer between duties.
-    5. LEAVE: Categorize unassigned staff as 'DAY OFF', 'ANNUAL LEAVE', etc.
+    STRICT COMPLIANCE RULES:
+    1. AVAILABILITY PRE-CHECK (MANDATORY): For every assignment, you MUST verify: Is FlightDate >= Staff.from AND (Staff.to is empty OR FlightDate <= Staff.to)? 
+       If NO, that staff member is INELIGIBLE for that specific day.
+    2. TWO-PHASE ASSIGNMENT:
+       - Phase 1: Assign Special Roles (Shift Leader, etc.) from eligible staff.
+       - Phase 2: Fill minimum staff requirements from eligible staff.
+    3. NO PARTIAL BUILDS: Do not return an empty array if you can fulfill at least some flights.
+    4. UNASSIGNED STAFF: If a staff member is eligible but not assigned, categorize them as 'DAY OFF'.
     
-    MANDATORY OUTPUT: Return strictly JSON.
+    OUTPUT: Return strictly JSON.
   `;
 
   try {
@@ -107,16 +125,72 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
       contents: { parts: [{ text: prompt }] },
       config: { 
         thinkingConfig: { thinkingBudget: 16000 },
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            programs: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  day: { type: Type.NUMBER },
+                  assignments: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        staffId: { type: Type.STRING },
+                        flightId: { type: Type.STRING },
+                        role: { type: Type.STRING },
+                        shiftId: { type: Type.STRING }
+                      },
+                      required: ["id", "staffId", "flightId", "role"]
+                    }
+                  },
+                  offDuty: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        staffId: { type: Type.STRING },
+                        type: { type: Type.STRING }
+                      }
+                    }
+                  }
+                },
+                required: ["day", "assignments"]
+              }
+            },
+            shortageReport: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  staffName: { type: Type.STRING },
+                  flightNumber: { type: Type.STRING },
+                  reason: { type: Type.STRING }
+                }
+              }
+            }
+          },
+          required: ["programs"]
+        }
       }
     });
 
     const result = safeParseJson(response.text);
+    if (!result || !result.programs || result.programs.length === 0) {
+      throw new Error("AI could not generate a valid program within the selected dates. Check staff availability.");
+    }
+
     return {
-      programs: result.programs || [],
+      programs: result.programs,
       shortageReport: result.shortageReport || []
     };
   } catch (error: any) { 
+    console.error("Program Generation Error:", error);
     throw new Error(error.message || "Logic assembly failed."); 
   }
 }
@@ -134,15 +208,15 @@ export async function extractDataFromContent(content: {
     TASK: Extract Flights, Staff, and DUTY SHIFTS.
     
     EXTRACTION RULES:
-    1. Flights: Extract all flight details.
-    2. Staff: Extract all personnel.
-    3. Shifts: Identify the operational shifts/duties. Link them to flights if specified.
+    1. Flights: Extract Flight Number, STA, STD, Origin, Destination, and Date.
+    2. Staff: Extract Personnel. Look for "Work From", "Effective Date", "Start Date", "End Date", or "Expiry". Map to YYYY-MM-DD.
+    3. Shifts: Identify duties and link to flights via IDs.
     
     JSON STRUCTURE:
     {
-      "flights": [{ "id": "fl_1", "flightNumber": "...", "sta": "...", "std": "...", "date": "...", "from": "...", "to": "..." }],
-      "staff": [{ "name": "...", "initials": "...", "type": "Local/Roster", "skillRatings": { "SkillName": "Yes/No" } }],
-      "shifts": [{ "id": "sh_1", "pickupDate": "...", "pickupTime": "HH:mm", "endDate": "...", "endTime": "HH:mm", "minStaff": 4, "maxStaff": 8, "flightIds": ["fl_1"] }]
+      "flights": [{ "id": "fl_1", "flightNumber": "...", "sta": "...", "std": "...", "date": "YYYY-MM-DD", "from": "...", "to": "..." }],
+      "staff": [{ "name": "...", "initials": "...", "type": "Local/Roster", "workFromDate": "YYYY-MM-DD", "workToDate": "YYYY-MM-DD", "skillRatings": { "SkillName": "Yes/No" } }],
+      "shifts": [{ "id": "sh_1", "pickupDate": "YYYY-MM-DD", "pickupTime": "HH:mm", "endDate": "YYYY-MM-DD", "endTime": "HH:mm", "minStaff": 4, "flightIds": ["fl_1"] }]
     }
   `;
 
@@ -167,7 +241,7 @@ export async function extractDataFromContent(content: {
     const extractedFlights = (result.flights || []).map((f: any) => ({
       ...f, 
       id: f.id || Math.random().toString(36).substr(2, 9), 
-      date: f.date || startDateStr, 
+      date: normalizeDate(f.date) || startDateStr, 
       day: 0
     }));
 
@@ -180,13 +254,13 @@ export async function extractDataFromContent(content: {
       type: s.type || 'Local', 
       workPattern: s.workPattern || (s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off'),
       maxShiftsPerWeek: 5, 
-      workFromDate: s.workFromDate || startDateStr,
-      workToDate: s.workToDate
+      workFromDate: normalizeDate(s.workFromDate) || startDateStr,
+      workToDate: normalizeDate(s.workToDate)
     }));
 
     const extractedShifts = (result.shifts || []).map((sh: any) => {
       const shiftId = sh.id || Math.random().toString(36).substr(2, 9);
-      const dateVal = sh.pickupDate || startDateStr;
+      const dateVal = normalizeDate(sh.pickupDate) || startDateStr;
       
       const start = new Date(startDateStr);
       start.setHours(0,0,0,0);
@@ -199,7 +273,7 @@ export async function extractDataFromContent(content: {
         id: shiftId,
         day: dayOffset,
         pickupDate: dateVal,
-        endDate: sh.endDate || dateVal,
+        endDate: normalizeDate(sh.endDate) || dateVal,
         minStaff: sh.minStaff || 4,
         maxStaff: sh.maxStaff || 8,
         flightIds: sh.flightIds || []

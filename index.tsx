@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -107,6 +108,10 @@ const App: React.FC = () => {
     return flights.filter(f => f.date >= startDate && f.date <= endDate);
   }, [flights, startDate, endDate]);
 
+  const activeShiftsInRange = useMemo(() => {
+    return shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
+  }, [shifts, startDate, endDate]);
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.FLIGHTS, JSON.stringify(flights));
     localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(staff));
@@ -175,7 +180,9 @@ const App: React.FC = () => {
   const handleBuildRequest = () => {
     setError(null);
     if (activeFlightsInRange.length === 0 && flights.length > 0) {
-      setError(`The target window (${startDate}) shows no flights in its strict range. The AI will prioritize available global data.`);
+      setError(`The target window (${startDate}) shows no flights in its strict range. Please add flights for this period.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     } else if (flights.length === 0) {
       setError(`Critical: No flights registered. Build sequence halted.`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -189,8 +196,14 @@ const App: React.FC = () => {
     setIsGenerating(true);
     setError(null);
     try {
+      // CRITICAL FIX: Only send flights and shifts within the active range to the AI
       const result = await generateAIProgram(
-        { flights, staff, shifts, programs },
+        { 
+          flights: activeFlightsInRange, 
+          staff, 
+          shifts: activeShiftsInRange, 
+          programs: [] 
+        },
         "", 
         { numDays, customRules, minRestHours, startDate }
       );
@@ -314,7 +327,7 @@ const App: React.FC = () => {
                       {[
                         { label: 'Active Flights', value: activeFlightsInRange.length, icon: Plane, color: 'text-blue-600' },
                         { label: 'Personnel', value: staff.length, icon: Users, color: 'text-emerald-600' },
-                        { label: 'Duty Hours', value: shifts.length * 8, icon: Clock, color: 'text-amber-600' },
+                        { label: 'Duty Hours', value: activeShiftsInRange.length * 8, icon: Clock, color: 'text-amber-600' },
                         { label: 'Health Score', value: '98%', icon: ShieldCheck, color: 'text-indigo-600' }
                       ].map((stat, i) => (
                         <div key={i} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 transition-all hover:scale-[1.02]">
