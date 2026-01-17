@@ -1,9 +1,9 @@
 
+// Add React import to fix 'Cannot find namespace React' errors
 import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
-// Import 'Users' from lucide-react which was missing but used on line 200.
 import { FileUp, Sparkles, Database, AlertCircle, HelpCircle, Search, Clock, Activity, Users } from 'lucide-react';
 
 interface Props {
@@ -97,18 +97,24 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
         startDate: startDate
       });
 
-      if (data && (data.flights?.length > 0 || data.staff?.length > 0)) {
+      const hasFlights = data?.flights && data.flights.length > 0;
+      const hasStaff = data?.staff && data.staff.length > 0;
+      const hasShifts = data?.shifts && data.shifts.length > 0;
+
+      if (data && (hasFlights || hasStaff || hasShifts)) {
         setExtractedData(data);
       } else {
         throw { 
           title: "Logic Deficit", 
-          message: "The deep scan found the document but couldn't verify aviation-standard patterns. Check file clarity."
+          message: "The AI found the document but couldn't verify standard aviation patterns (Flight Numbers, STA/STD, or Staff Initials).",
+          suggestion: "Ensure your Excel headers are descriptive (e.g., 'Flight No', 'STA', 'Agent Name') and start on the first row."
         };
       }
     } catch (error: any) {
       setScanError({
         title: error.title || "Scan Failed",
-        message: error.message || "The neural engine encountered a format conflict."
+        message: error.message || "The neural engine encountered a format conflict.",
+        suggestion: error.suggestion
       });
     } finally {
       setIsScanning(false);
@@ -175,6 +181,9 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
                <div>
                   <p className="text-xs font-black text-white uppercase italic">{scanError.title}</p>
                   <p className="text-[10px] text-rose-200/60 font-medium uppercase tracking-widest mt-1">{scanError.message}</p>
+                  {scanError.suggestion && (
+                    <p className="text-[9px] text-amber-400 font-bold uppercase tracking-widest mt-2">TIP: {scanError.suggestion}</p>
+                  )}
                </div>
             </div>
             <button onClick={() => setScanError(null)} className="p-4 text-rose-400 font-black hover:text-white transition-colors">&times;</button>

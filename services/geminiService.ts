@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -61,17 +62,29 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    Deep Scan Task: Extract aviation ground handling data into a structured JSON format.
-    Context Date: ${params.startDate || 'Current Operational Week'}
+    Deep Scan Task: Professional Aviation Data Extraction (Excellent Precision Required).
+    Context Date/Reference: ${params.startDate || 'Current Operational Week'}
 
-    SCHEMA REQUIREMENTS:
-    1. FLIGHTS: Identify flight numbers, STA, STD, Sectors, and convert dates to YYYY-MM-DD.
-    2. STAFF: Full Name, Initials, Category (Local/Roster), Skills, and Availability.
-    3. SHIFTS: Pickup/End times, Quotas (Min/Max), and Flight Links.
+    RECOGNITION RULES:
+    1. FLIGHT HEADERS: Map "Flt", "Flt No", "Service", "Flight ID" to 'flightNumber'. 
+    2. TIME HEADERS: Map "STA", "Arrival", "Arv", "In" to 'sta'. Map "STD", "Departure", "Dep", "Out" to 'std'.
+    3. SECTOR HEADERS: Map "From/To", "Origin/Dest", "Sector", "Route" to 'from' and 'to'.
+    4. STAFF HEADERS: Map "Agent", "Employee", "Name" to 'name'. Map "MZ", "Code", "ID" to 'initials'.
+    5. PATTERN MATCHING: 
+       - If you see "XX123", it is a Flight Number. 
+       - If you see 3-letter uppercase (e.g. DXB, LHR), it is a Sector.
+       - If you see "HH:mm", it is a Time.
+    6. DATE NORMALIZATION: Force all dates to YYYY-MM-DD. Use ${params.startDate} to infer the year/month for entries like "12 May".
+
+    OUTPUT STRUCTURE:
+    Return a structured JSON containing:
+    - flights: Array of { flightNumber, from, to, sta, std, date }
+    - staff: Array of { name, initials, type (Local/Roster), skills (array) }
+    - shifts: Array of { pickupDate, pickupTime, endDate, endTime, minStaff, maxStaff }
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `Raw Text/CSV Data:\n${params.textData}` });
+  if (params.textData) parts.push({ text: `RAW DOCUMENT DATA SOURCE:\n${params.textData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -81,7 +94,55 @@ export const extractDataFromContent = async (params: {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json", temperature: 0.1 }
+    config: { 
+      responseMimeType: "application/json",
+      temperature: 0.1,
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          flights: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                flightNumber: { type: Type.STRING, description: "e.g. EK 123" },
+                from: { type: Type.STRING, description: "Origin IATA" },
+                to: { type: Type.STRING, description: "Destination IATA" },
+                sta: { type: Type.STRING, description: "HH:mm" },
+                std: { type: Type.STRING, description: "HH:mm" },
+                date: { type: Type.STRING, description: "YYYY-MM-DD" }
+              }
+            }
+          },
+          staff: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                initials: { type: Type.STRING, description: "2-3 character ID" },
+                type: { type: Type.STRING, description: "Must be 'Local' or 'Roster'" },
+                skills: { type: Type.ARRAY, items: { type: Type.STRING } }
+              }
+            }
+          },
+          shifts: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                pickupDate: { type: Type.STRING },
+                pickupTime: { type: Type.STRING },
+                endDate: { type: Type.STRING },
+                endTime: { type: Type.STRING },
+                minStaff: { type: Type.NUMBER },
+                maxStaff: { type: Type.NUMBER }
+              }
+            }
+          }
+        }
+      }
+    }
   });
 
   return safeParseJson(response.text);
@@ -102,31 +163,24 @@ export const generateAIProgram = async (
     CHECKLIST 2 - UNIFIED ABSENCE PROCESSING:
     - Scan the "Personnel Absence & Requests" box for any mentions of initials and dates.
     - Categorize based on keywords:
-      - "Off", "Day off", "Requested" -> 'DAY OFF' (Priority for Local 5/2 pattern).
+      - "Off", "Day off", "Requested" -> 'DAY OFF'.
       - "AL", "Annual", "Leave" -> 'ANNUAL LEAVE'.
       - "Sick" -> 'SICK LEAVE'.
-      - "Lieu" -> 'LIEU LEAVE'.
-    - If no keyword is present (e.g., "MZ 12May"), default to 'DAY OFF' for Local staff and 'ROSTER LEAVE' for Roster staff.
-    - Note: You must correctly map specific dates to the generated days.
+    - Default to 'DAY OFF' for Local staff and 'ROSTER LEAVE' for Roster staff if today matches their request.
 
     CHECKLIST 3 - LOCAL 5/2 CALCULATION:
     - For every 'Local' staff member, exactly 2 days out of 7 MUST be 'OFF'.
-    - Use the processed absences from Checklist 2 as the first choice for these 2 days.
-    - If a specific Day Off is requested, it MUST be one of these two days.
-    - Resulting 2 days MUST go in 'offDuty' array.
+    - Use the processed absences from Checklist 2 as the first choice.
 
     CHECKLIST 4 - ROSTER CALCULATION:
-    - 'Roster' staff are OFF if: 
-      a) Today is outside their [workFromDate, workToDate] contract range (Result: 'ROSTER LEAVE').
-      b) Today matches a request in the Absence Box (Result: 'ANNUAL LEAVE' or specified type).
+    - 'Roster' staff are OFF if outside their contract range or requested leave.
 
     CHECKLIST 5 - ROLE MATRIX: Honor 'roleCounts' for every shift.
 
     CHECKLIST 6 - MINIMUM STAFFING: Every shift MUST meet 'minStaff'.
 
     STATION RESERVE LOGIC:
-    - If personnel are On-Duty but not assigned to a shift, they are "Station Reserve". 
-    - DO NOT put them in 'offDuty' unless they are officially on leave/off.
+    - On-duty staff not assigned to a shift = "Station Reserve".
   `;
 
   const prompt = `
@@ -160,9 +214,8 @@ export const modifyProgramWithAI = async (
   
   const systemInstruction = `
     You are an "Operational Coordinator". 
-    Strictly maintain the 6-point checklist and over-staffing rules. 
-    Use the 5/2 pattern calculation for Local staff and Contract-based logic for Roster staff.
-    Unassigned on-duty staff = Station Reserve (not in offDuty).
+    Strictly maintain the 6-point checklist.
+    Use the 5/2 pattern calculation for Local staff.
   `;
 
   const parts: any[] = [
