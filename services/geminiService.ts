@@ -95,8 +95,11 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
     
     CRITICAL CHRONOLOGICAL RULE: 
     - The output 'day: 0' MUST correspond exactly to the date ${options.startDate}. 
-    - Do NOT align to the start of the current week (e.g., Saturday) if it differs from ${options.startDate}. 
-    - Every assignment 'day' is an offset from ${options.startDate}.
+    - Every assignment 'day' is an offset from ${options.startDate}. 
+    
+    OPERATIONAL CONTINUITY (FATIGUE GUARD):
+    - Check Build Instructions for "Day -1" info (staff coming off night shifts or late duties yesterday).
+    - If a staff member finished a duty just before the program start, prioritize ${options.minRestHours}h rest. Do NOT start the weekly program with these people for early morning shifts on Day 0.
     
     CORE OBJECTIVE: Generate a ground handling weekly program with 100% adherence to SHIFT QUOTAS, LOAD CONTROL SAFETY, and EXHAUSTIVE OFF-DUTY LOGGING.
     
@@ -119,13 +122,18 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
         to: s.workToDate,
         type: s.type
       })))}
+    - BUILD INSTRUCTIONS: ${options.customRules}
     
     INSTRUCTIONS (MANDATORY):
-    1. LOAD CONTROL SAFETY: Shifts with 'Load Control' quotas MUST be filled by staff with 'Load Control: Yes'. 
-    2. HARD QUOTA: Every shift MUST assign exactly 'min' staff.
-    3. EXHAUSTIVE OFF-DUTY: Every staff member not assigned on a specific 'day' MUST be in 'offDuty'.
-    4. COVERAGE PERSONNEL: When a staff member is on 'DAY OFF', assign a replacement. For these replacements, you MUST set 'coveringStaffId' to the ID of the person on leave. This is CRITICAL for the Red Coverage visual.
-    5. CALENDAR SYNC: 'day: 0' IS ${options.startDate}. Verify all assignments align with the flights on that date.
+    1. MANDATORY LEADERSHIP: EVERY duty shift MUST include exactly one 'Shift Leader'. Prioritize staff with 'Shift Leader: Yes' skill for this role.
+    2. LOAD CONTROL SAFETY: Shifts with 'Load Control' quotas MUST be filled by staff with 'Load Control: Yes'. 
+    3. ASSIGNMENT SEQUENCE: For every shift, fill roles in this order: 1. Shift Leader, 2. Load Control, 3. Operations/Ramp.
+    4. HARD QUOTA: Every shift MUST assign exactly 'min' staff.
+    5. EXHAUSTIVE OFF-DUTY: Every staff member not assigned on a specific 'day' MUST be in 'offDuty'. 
+       Classify them explicitly as: 'ANNUAL LEAVE', 'ROSTER LEAVE', 'LIEU LEAVE', 'DAY OFF', or 'SICK LEAVE'. 
+       If a staff member is on Annual Leave, they MUST be visible in this log.
+    6. COVERAGE PERSONNEL: When a staff member is on leave, assign a replacement. For these replacements, you MUST set 'coveringStaffId' to the ID of the person on leave.
+    7. CALENDAR SYNC: 'day: 0' IS ${options.startDate}.
 
     OUTPUT FORMAT: Return strictly JSON.
   `;
@@ -230,6 +238,9 @@ export async function extractDataFromContent(content: {
   const prompt = `
     ACT AS AN AVIATION DATA EXTRACTOR. 
     TASK: Extract Flights, Staff, and DUTY SHIFTS.
+    
+    LEADERSHIP DETECTION:
+    - Identify "Supervisors", "Team Leads", "Duty Managers", or "PICs" and mark them as having 'Shift Leader: Yes' skill.
     
     JSON STRUCTURE:
     {

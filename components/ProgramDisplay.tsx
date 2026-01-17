@@ -46,6 +46,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formattedStartDate = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
   const formattedEndDate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
 
+  const leaveCategories = ['DAY OFF', 'ROSTER LEAVE', 'LIEU LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE'];
+
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
     const title = `ASE SDU Shift-Centric Program: ${formattedStartDate} - ${formattedEndDate}`;
@@ -118,7 +120,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.text("STATION OFF-DUTY LOG", 14, startY);
       startY += 5;
 
-      const leaveData = ['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
+      const leaveData = leaveCategories.map(cat => {
         const inCat = (program.offDuty || [])
           .filter(off => off.type === cat)
           .map(off => getStaffById(off.staffId)?.initials)
@@ -131,7 +133,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         body: leaveData,
         theme: 'plain',
         bodyStyles: { fontSize: 8 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 } }
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 35 } }
       });
     });
 
@@ -348,7 +350,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       <h4 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900 italic">STATION OFF-DUTY LOG</h4>
                     </div>
                     <div className="space-y-8">
-                      {['DAY OFF', 'ANNUAL LEAVE', 'SICK LEAVE'].map(cat => {
+                      {leaveCategories.map(cat => {
                         const list = (program.offDuty || [])
                           .filter(off => off.type === cat)
                           .map(off => getStaffById(off.staffId)?.initials)
