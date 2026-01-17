@@ -89,7 +89,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
 
   const prompt = `
     ACT AS AN AVIATION LOGISTICS ENGINE (SKY-OPS PRO).
-    CORE OBJECTIVE: Generate a ground handling weekly program with 100% adherence to SHIFT ROLE REQUIREMENTS.
+    CORE OBJECTIVE: Generate a ground handling weekly program with 100% adherence to SHIFT QUOTAS and MANDATORY REST.
     REFERENCE START DATE: ${options.startDate}
     PROGRAM DURATION: ${options.numDays} days.
     MINIMUM REST BUFFER: ${options.minRestHours} hours.
@@ -114,15 +114,18 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
         type: s.type
       })))}
     
-    STRICT OPERATIONAL CONSTRAINTS:
-    1. ROLE FULFILLMENT: Fulfill role requirements for each shift using available qualified staff.
-    2. COVERAGE MAPPING (CRITICAL): If you assign a staff member to cover a position because another staff member is on 'offDuty', you MUST set 'coveringStaffId' to the ID of the person being replaced. 
-    3. REST-TIME VALIDATION: Only select "Coverage" staff who have had at least ${options.minRestHours} hours of rest since their last shift.
-    4. SHORTAGE LOAD BALANCING: If manpower is short, prioritize core safety roles (Shift Leader, Ramp).
-    5. SHIFT-CENTRIC MAPPING: Every assignment MUST be linked to a 'shiftId'.
-    6. RECOMMENDATIONS: Analyze if the station needs more staff based on the gaps found.
+    CRITICAL INSTRUCTIONS (FAILURE IS NOT AN OPTION):
+    1. HARD STAFFING QUOTA: Every shift MUST be assigned exactly the 'min' number of staff specified in the DUTY SHIFTS. If a shift says min=4, you MUST assign 4 staff members.
+    2. MANDATORY WEEKLY REST: 
+       - For "Local" staff: You MUST schedule exactly 2 days as 'DAY OFF' within every 7-day period.
+       - For "Roster" staff: You MUST schedule regular 'ROSTER LEAVE' blocks to prevent fatigue.
+       - Every staff member who is NOT assigned to a shift on a specific day MUST be listed in the 'offDuty' registry for that day.
+    3. ABSENCE REGISTRY POPULATION: The 'offDuty' array for each day MUST include all personnel resting that day.
+    4. COVERAGE & REPLACEMENT: If a shift is short because a staff member is on 'DAY OFF', select another available staff member (with enough rest) to cover. For these staff, you MUST set 'coveringStaffId' to the ID of the person they are replacing.
+    5. REST-TIME VALIDATION: Do not assign anyone to back-to-back shifts without the ${options.minRestHours}h buffer.
+    6. ROLE ALIGNMENT: Prioritize 'Shift Leader' and 'Ramp' skills for those specific roles.
 
-    OUTPUT FORMAT: Return strictly JSON with 'programs', 'shortageReport', and 'recommendations'.
+    OUTPUT FORMAT: Return strictly JSON with 'programs', 'shortageReport', and 'recommendations'. Ensure 'offDuty' is fully populated for every day.
   `;
 
   try {
@@ -130,7 +133,7 @@ export async function generateAIProgram(data: ProgramData, qmsContext: string, o
       model: 'gemini-3-pro-preview',
       contents: { parts: [{ text: prompt }] },
       config: { 
-        thinkingConfig: { thinkingBudget: 16000 },
+        thinkingConfig: { thinkingBudget: 24000 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -329,11 +332,10 @@ export async function modifyProgramWithAI(instruction: string, data: ProgramData
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `Modify roster: "${instruction}". 
   STRICT RULES:
-  1. Maintain 100% coverage of required roles.
-  2. SHORTAGE MITIGATION: If instruction creates a shortage, distribute the deficit across shifts to maintain minimum coverage.
-  3. REST RECOVERY: Identify staff with sufficient rest time from previous duties to cover new gaps.
-  4. Use flexible/split rest for ALL Local staff.
-  5. Return strictly JSON.`;
+  1. Maintain 100% coverage of required roles and minStaff quotas.
+  2. If someone is moved to offDuty, you MUST show them in the absence registry and link a replacement via coveringStaffId.
+  3. Use flexible/split rest for ALL Local staff.
+  4. Return strictly JSON.`;
 
   try {
     const parts: any[] = [{ text: prompt }, { text: `Data: ${JSON.stringify(data.programs)}` }];
