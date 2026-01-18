@@ -1,4 +1,3 @@
-
 // Add React import to fix 'Cannot find namespace React' errors
 import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
@@ -26,13 +25,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
-    "Initializing High-Res Spatial Scan...",
-    "Decoding Multi-Sheet Roster Logic...",
-    "Extracting Flight STA/STD Patterns...",
-    "Validating Staff Proficiency Matrix...",
-    "Cross-Referencing Shift Coverage...",
-    "Applying Fuzzy Date Synchronization...",
-    "Finalizing Station Logic Assembly..."
+    "Spatial Analysis...",
+    "Decoding Multi-Sheet Logic...",
+    "Mapping Flight Patterns...",
+    "Validating Proficiency...",
+    "Cross-Referencing Coverage...",
+    "Fuzzy Date Sync...",
+    "Finalizing Logic..."
   ];
 
   useEffect(() => {
@@ -40,7 +39,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 1800);
+      }, 700); // Speed boosted from 1800ms to 700ms
     } else {
       setScanPhase(0);
     }
@@ -106,8 +105,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
       } else {
         throw { 
           title: "Logic Deficit", 
-          message: "The AI found the document but couldn't verify standard aviation patterns (Flight Numbers, STA/STD, or Staff Initials).",
-          suggestion: "Ensure your Excel headers are descriptive (e.g., 'Flight No', 'STA', 'Agent Name') and start on the first row."
+          message: "The AI found the document but couldn't verify standard patterns. The fuzzy recognition failed to find flight numbers or staff.",
+          suggestion: "Check if the file content is clear and contains flight IDs or agent names."
         };
       }
     } catch (error: any) {
@@ -133,11 +132,11 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
             </div>
             <div className="space-y-4">
               <h3 className="text-white text-3xl font-black uppercase italic tracking-tighter leading-none">{phases[scanPhase]}</h3>
-              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Gemini 3 Visual Analysis Active</p>
+              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Neural Intelligence Processing</p>
             </div>
             <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
                <div 
-                 className="h-full bg-blue-500 transition-all duration-1000 ease-in-out" 
+                 className="h-full bg-blue-500 transition-all duration-300 ease-in-out" 
                  style={{ width: `${((scanPhase + 1) / phases.length) * 100}%` }}
                ></div>
             </div>
@@ -198,7 +197,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
                 <Database size={48} className="text-emerald-500" />
               </div>
               <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Extraction Verified</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">The station logic has been successfully decoded. Review the registry counts below before committing.</p>
+              <p className="text-slate-400 text-sm font-medium mb-12">Station logic decoded successfully. Captured entries are ready for registry synchronization.</p>
               
               <div className="grid grid-cols-2 gap-6 mb-12">
                 <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-blue-200 transition-all">

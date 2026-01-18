@@ -143,9 +143,13 @@ const App: React.FC = () => {
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
-      const idMatchIdx = prev.findIndex(s => s.id === updatedStaff.id);
-      const nameMatchIdx = prev.findIndex(s => s.name.toLowerCase() === updatedStaff.name.toLowerCase());
-      const initialsMatchIdx = prev.findIndex(s => s.initials.toUpperCase() === updatedStaff.initials.toUpperCase());
+      // Ensure the staff member has an ID
+      const targetId = updatedStaff.id || Math.random().toString(36).substr(2, 9);
+      const staffWithId = { ...updatedStaff, id: targetId };
+
+      const idMatchIdx = prev.findIndex(s => s.id === staffWithId.id);
+      const nameMatchIdx = prev.findIndex(s => s.name.toLowerCase() === staffWithId.name.toLowerCase());
+      const initialsMatchIdx = prev.findIndex(s => s.initials && staffWithId.initials && s.initials.toUpperCase() === staffWithId.initials.toUpperCase());
       
       const targetIdx = idMatchIdx !== -1 ? idMatchIdx : (nameMatchIdx !== -1 ? nameMatchIdx : initialsMatchIdx);
 
@@ -153,14 +157,14 @@ const App: React.FC = () => {
         const existing = prev[targetIdx];
         const merged = { 
           ...existing, 
-          ...updatedStaff,
-          skillRatings: { ...existing.skillRatings, ...updatedStaff.skillRatings }
+          ...staffWithId,
+          skillRatings: { ...existing.skillRatings, ...staffWithId.skillRatings }
         };
         const newList = [...prev];
         newList[targetIdx] = merged;
         return newList;
       }
-      return [...prev, updatedStaff];
+      return [...prev, staffWithId as Staff];
     });
   };
 
@@ -169,19 +173,44 @@ const App: React.FC = () => {
   };
 
   const handleDataExtracted = (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => {
+    let earliestDate: string | null = null;
+    let latestDate: string | null = null;
+
     if (data.staff?.length > 0) {
-      data.staff.forEach(s => handleStaffUpdate(s));
+      data.staff.forEach(s => {
+        // Auto-ID and formatting for incoming AI staff
+        const cleanStaff: Staff = {
+          ...s,
+          id: s.id || Math.random().toString(36).substr(2, 9),
+          type: s.type || 'Local',
+          workPattern: s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off',
+          skillRatings: s.skillRatings || {},
+          maxShiftsPerWeek: 5,
+          powerRate: s.powerRate || 75
+        };
+        handleStaffUpdate(cleanStaff);
+      });
     }
 
     if (data.flights?.length > 0) {
       setFlights(prev => {
         const updated = [...prev];
         data.flights.forEach(newF => {
-          const idx = updated.findIndex(f => f.flightNumber === newF.flightNumber && f.date === newF.date);
+          if (!earliestDate || newF.date < earliestDate) earliestDate = newF.date;
+          if (!latestDate || newF.date > latestDate) latestDate = newF.date;
+
+          const flightWithId = { 
+            ...newF, 
+            id: newF.id || Math.random().toString(36).substr(2, 9),
+            type: newF.type || (newF.sta && newF.std ? 'Turnaround' : (newF.std ? 'Departure' : 'Arrival')),
+            day: 0 // Will be computed by offset logic if needed
+          };
+
+          const idx = updated.findIndex(f => f.flightNumber === flightWithId.flightNumber && f.date === flightWithId.date);
           if (idx !== -1) {
-            updated[idx] = { ...updated[idx], ...newF };
+            updated[idx] = { ...updated[idx], ...flightWithId };
           } else {
-            updated.push(newF);
+            updated.push(flightWithId as Flight);
           }
         });
         return updated;
@@ -192,7 +221,8 @@ const App: React.FC = () => {
       setShifts(prev => {
         const current = [...prev];
         data.shifts.forEach(sh => {
-          if (!current.some(s => s.id === sh.id)) current.push(sh);
+          const shiftWithId = { ...sh, id: sh.id || Math.random().toString(36).substr(2, 9) };
+          if (!current.some(s => s.id === shiftWithId.id)) current.push(shiftWithId as ShiftConfig);
         });
         return current;
       });
@@ -202,12 +232,16 @@ const App: React.FC = () => {
       setPrograms(data.programs);
       setActiveTab('program');
     }
+
+    // Auto-expand date window if new data falls outside current selection
+    if (earliestDate && earliestDate < startDate) setStartDate(earliestDate);
+    if (latestDate && latestDate > endDate) setEndDate(latestDate);
   };
 
   const handleBuildRequest = () => {
     setError(null);
     if (activeFlightsInRange.length === 0 && flights.length > 0) {
-      setError(`The target window (${startDate}) shows no flights in its range. Please add flights for this period.`);
+      setError(`The target window (${startDate}) shows no flights in its range. Please check your registry dates.`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     } else if (flights.length === 0) {

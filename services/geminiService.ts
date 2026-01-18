@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -62,29 +61,27 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    Deep Scan Task: Professional Aviation Data Extraction (Excellent Precision Required).
-    Context Date/Reference: ${params.startDate || 'Current Operational Week'}
+    Aviation Logistics Deep Scan: Resilient Data Extraction.
+    Reference Date: ${params.startDate || 'Current Operational Year'}
 
-    RECOGNITION RULES:
-    1. FLIGHT HEADERS: Map "Flt", "Flt No", "Service", "Flight ID" to 'flightNumber'. 
-    2. TIME HEADERS: Map "STA", "Arrival", "Arv", "In" to 'sta'. Map "STD", "Departure", "Dep", "Out" to 'std'.
-    3. SECTOR HEADERS: Map "From/To", "Origin/Dest", "Sector", "Route" to 'from' and 'to'.
-    4. STAFF HEADERS: Map "Agent", "Employee", "Name" to 'name'. Map "MZ", "Code", "ID" to 'initials'.
-    5. PATTERN MATCHING: 
-       - If you see "XX123", it is a Flight Number. 
-       - If you see 3-letter uppercase (e.g. DXB, LHR), it is a Sector.
-       - If you see "HH:mm", it is a Time.
-    6. DATE NORMALIZATION: Force all dates to YYYY-MM-DD. Use ${params.startDate} to infer the year/month for entries like "12 May".
+    INTELLIGENT RECOGNITION (NEURAL MAPPING):
+    - Identify columns by CONTENT if headers are vague or missing.
+    - FLIGHTS: Look for patterns like "XX123", "SM 456". Even if headers say "Service" or are blank, if it looks like a flight number, extract it.
+    - TIME: Columns with "HH:mm" or "HHmm" are STA/STD. Map them even if headers are "In/Out" or "Time 1/Time 2".
+    - SECTORS: 3-letter uppercase (DXB, LHR, RUH) are Sectors (From/To).
+    - STAFF: Names (e.g., "John Doe") and Initials (2-3 chars, e.g., "JD", "MZ").
+    - DATES: Normalize to YYYY-MM-DD. If year is missing, assume current year. If only "Monday" is listed, map to the nearest date from ${params.startDate}.
 
-    OUTPUT STRUCTURE:
-    Return a structured JSON containing:
-    - flights: Array of { flightNumber, from, to, sta, std, date }
-    - staff: Array of { name, initials, type (Local/Roster), skills (array) }
-    - shifts: Array of { pickupDate, pickupTime, endDate, endTime, minStaff, maxStaff }
+    RELAXED CONSTRAINTS:
+    - Capture partial data. If a row has a flight number but no STA, still extract the flight number.
+    - Support multi-sheet scanning.
+
+    OUTPUT:
+    Return JSON with arrays: flights, staff, shifts.
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `RAW DOCUMENT DATA SOURCE:\n${params.textData}` });
+  if (params.textData) parts.push({ text: `DATA SOURCE:\n${params.textData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -105,12 +102,12 @@ export const extractDataFromContent = async (params: {
             items: {
               type: Type.OBJECT,
               properties: {
-                flightNumber: { type: Type.STRING, description: "e.g. EK 123" },
-                from: { type: Type.STRING, description: "Origin IATA" },
-                to: { type: Type.STRING, description: "Destination IATA" },
-                sta: { type: Type.STRING, description: "HH:mm" },
-                std: { type: Type.STRING, description: "HH:mm" },
-                date: { type: Type.STRING, description: "YYYY-MM-DD" }
+                flightNumber: { type: Type.STRING },
+                from: { type: Type.STRING },
+                to: { type: Type.STRING },
+                sta: { type: Type.STRING },
+                std: { type: Type.STRING },
+                date: { type: Type.STRING }
               }
             }
           },
@@ -120,8 +117,8 @@ export const extractDataFromContent = async (params: {
               type: Type.OBJECT,
               properties: {
                 name: { type: Type.STRING },
-                initials: { type: Type.STRING, description: "2-3 character ID" },
-                type: { type: Type.STRING, description: "Must be 'Local' or 'Roster'" },
+                initials: { type: Type.STRING },
+                type: { type: Type.STRING, description: "'Local' or 'Roster'" },
                 skills: { type: Type.ARRAY, items: { type: Type.STRING } }
               }
             }
@@ -156,38 +153,23 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these 6 STRICT CHECKLIST RULES:
-
-    CHECKLIST 1 - DAY 1 REST: Parse "Previous Duty Log". On Day 1 (${config.startDate}), ensure staff assigned have >= ${config.minRestHours} hours rest from their previous finish time.
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster.
     
-    CHECKLIST 2 - UNIFIED ABSENCE PROCESSING:
-    - Scan the "Personnel Absence & Requests" box for any mentions of initials and dates.
-    - Categorize based on keywords:
-      - "Off", "Day off", "Requested" -> 'DAY OFF'.
-      - "AL", "Annual", "Leave" -> 'ANNUAL LEAVE'.
-      - "Sick" -> 'SICK LEAVE'.
-    - Default to 'DAY OFF' for Local staff and 'ROSTER LEAVE' for Roster staff if today matches their request.
-
-    CHECKLIST 3 - LOCAL 5/2 CALCULATION:
-    - For every 'Local' staff member, exactly 2 days out of 7 MUST be 'OFF'.
-    - Use the processed absences from Checklist 2 as the first choice.
-
-    CHECKLIST 4 - ROSTER CALCULATION:
-    - 'Roster' staff are OFF if outside their contract range or requested leave.
-
-    CHECKLIST 5 - ROLE MATRIX: Honor 'roleCounts' for every shift.
-
-    CHECKLIST 6 - MINIMUM STAFFING: Every shift MUST meet 'minStaff'.
-
-    STATION RESERVE LOGIC:
-    - On-duty staff not assigned to a shift = "Station Reserve".
+    RULES:
+    1. MIN REST: Ensure staff have >= ${config.minRestHours}h rest between duties.
+    2. ABSENCE: Process "Personnel Absence" text. If "MZ Off 12May", MZ cannot work on that date.
+    3. LOCAL 5/2: Local staff need 2 days off per week.
+    4. ROSTER: Roster staff are active only within their range.
+    5. SKILLS: Respect "roleCounts" in shifts.
   `;
 
   const prompt = `
-    Operational Window: ${config.numDays} Days from ${config.startDate}
-    Registry: Staff: ${JSON.stringify(data.staff)}, Flights: ${JSON.stringify(data.flights)}, Shifts: ${JSON.stringify(data.shifts)}
+    Window: ${config.numDays} Days from ${config.startDate}
+    Staff: ${JSON.stringify(data.staff)}
+    Flights: ${JSON.stringify(data.flights)}
+    Shifts: ${JSON.stringify(data.shifts)}
     Constraints: ${constraintsLog}
-    Custom Rules: ${config.customRules}
+    Rules: ${config.customRules}
   `;
 
   const response = await ai.models.generateContent({
@@ -196,6 +178,7 @@ export const generateAIProgram = async (
     config: { 
       systemInstruction, 
       responseMimeType: "application/json",
+      maxOutputTokens: 25000,
       thinkingConfig: { thinkingBudget: 16000 }
     }
   });
@@ -213,9 +196,8 @@ export const modifyProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are an "Operational Coordinator". 
-    Strictly maintain the 6-point checklist.
-    Use the 5/2 pattern calculation for Local staff.
+    Aviation Operational Coordinator. Apply instructions to the roster.
+    If no change is requested, explain why.
   `;
 
   const parts: any[] = [
@@ -245,4 +227,4 @@ export const modifyProgramWithAI = async (
   });
 
   return safeParseJson(response.text);
-};
+}
