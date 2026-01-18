@@ -61,23 +61,23 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    Aviation Logistics Deep Scan: Resilient Data Extraction.
+    Aviation Logistics Deep Scan: Exhaustive Data Extraction.
     Reference Date: ${params.startDate || 'Current Operational Year'}
 
+    STRICTNESS MANDATE:
+    1. EXTRACT EVERY ROW: Do not skip rows. Do not summarize. If a row has a flight number or agent name, it MUST be included in the JSON.
+    2. TREAT SEPARATE TIMES AS SEPARATE ENTRIES: If a flight number appears twice with different times (e.g., STA 10:00 and STD 12:00), extract BOTH as distinct items or a combined turnaround. 
+    3. FUZZY HEADERS: Map columns by content if headers are missing.
+
     INTELLIGENT RECOGNITION (NEURAL MAPPING):
-    - Identify columns by CONTENT if headers are vague or missing.
     - FLIGHTS: Look for patterns like "XX123", "SM 456". Even if headers say "Service" or are blank, if it looks like a flight number, extract it.
-    - TIME: Columns with "HH:mm" or "HHmm" are STA/STD. Map them even if headers are "In/Out" or "Time 1/Time 2".
+    - TIME: Columns with "HH:mm" or "HHmm" are STA/STD.
     - SECTORS: 3-letter uppercase (DXB, LHR, RUH) are Sectors (From/To).
     - STAFF: Names (e.g., "John Doe") and Initials (2-3 chars, e.g., "JD", "MZ").
-    - DATES: Normalize to YYYY-MM-DD. If year is missing, assume current year. If only "Monday" is listed, map to the nearest date from ${params.startDate}.
-
-    RELAXED CONSTRAINTS:
-    - Capture partial data. If a row has a flight number but no STA, still extract the flight number.
-    - Support multi-sheet scanning.
+    - DATES: Normalize to YYYY-MM-DD.
 
     OUTPUT:
-    Return JSON with arrays: flights, staff, shifts.
+    Return JSON with exhaustive arrays: flights, staff, shifts.
   `;
 
   const parts: any[] = [{ text: prompt }];
@@ -94,6 +94,8 @@ export const extractDataFromContent = async (params: {
     config: { 
       responseMimeType: "application/json",
       temperature: 0.1,
+      maxOutputTokens: 25000,
+      thinkingConfig: { thinkingBudget: 16000 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {

@@ -39,7 +39,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 700); // Speed boosted from 1800ms to 700ms
+      }, 700);
     } else {
       setScanPhase(0);
     }
@@ -57,6 +57,18 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
       reader.onerror = () => reject(new Error(`Failed to convert ${file.name} to Base64`));
       reader.readAsDataURL(file);
     });
+  };
+
+  /**
+   * Cleans CSV data by removing rows that are entirely empty or consist only of separators.
+   * This reduces token usage and prevents AI summarization errors.
+   */
+  const cleanCsvData = (csv: string): string => {
+    return csv
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && line.replace(/,/g, '').trim().length > 0)
+      .join('\n');
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -81,7 +93,9 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
           const workbook = XLSX.read(base64, { type: 'base64' });
           workbook.SheetNames.forEach(sheetName => {
             const worksheet = workbook.Sheets[sheetName];
-            combinedTextData += `### FILE: ${file.name} | SHEET: ${sheetName} ###\n` + XLSX.utils.sheet_to_csv(worksheet) + '\n\n';
+            const rawCsv = XLSX.utils.sheet_to_csv(worksheet);
+            const cleanedCsv = cleanCsvData(rawCsv);
+            combinedTextData += `### FILE: ${file.name} | SHEET: ${sheetName} ###\n` + cleanedCsv + '\n\n';
           });
         } else if (isPdf) {
           mediaParts.push({ data: base64, mimeType: 'application/pdf' });

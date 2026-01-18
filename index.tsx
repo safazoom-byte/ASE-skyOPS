@@ -206,7 +206,14 @@ const App: React.FC = () => {
             day: 0 // Will be computed by offset logic if needed
           };
 
-          const idx = updated.findIndex(f => f.flightNumber === flightWithId.flightNumber && f.date === flightWithId.date);
+          // CRITICAL: Match by Number + Date + Times to prevent turnaround leg collisions
+          const idx = updated.findIndex(f => 
+            f.flightNumber === flightWithId.flightNumber && 
+            f.date === flightWithId.date &&
+            f.sta === flightWithId.sta &&
+            f.std === flightWithId.std
+          );
+
           if (idx !== -1) {
             updated[idx] = { ...updated[idx], ...flightWithId };
           } else {
