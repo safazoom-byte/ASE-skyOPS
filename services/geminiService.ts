@@ -61,13 +61,14 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    STRICT DATA FIDELITY TASK: Extract ALL staff and flight data from the provided documents.
+    STRICT DATA FIDELITY TASK: Extract EVERY SINGLE staff and flight row from the provided documents.
     
     INTEGRITY CONSTRAINTS:
-    1. ZERO OMISSION: You are forbidden from summarizing. If the source has 150 rows, the JSON MUST have 150 objects.
-    2. ROW-COUNT VERIFICATION: Mentally count every row before generating. The total count of 'staff' and 'flights' must match the source exactly.
-    3. UNIQUE IDENTIFICATION: Generate unique initials (2-3 letters) for every staff member if they are missing in the source. Do not reuse initials for different names.
-    4. ACCURACY: Capture every flight's STA/STD, Sector, and Date without rounding times.
+    1. ZERO OMISSION: Do not summarize or truncate. If the source has 250 rows, you MUST produce 250 JSON objects.
+    2. ROW-COUNT PARITY: Before finalizing, count your extracted rows. They must match the source exactly.
+    3. INCOMPLETE DATA HANDLING: Even if a row has missing columns, extract whatever data is visible. Do NOT skip any rows.
+    4. UNIQUE IDENTIFICATION: Generate 2-3 letter initials for staff if missing.
+    5. PRECISION: Capture STA/STD times and dates exactly as written.
     
     Context Date: ${params.startDate || 'Current Operational Period'}
   `;
@@ -86,8 +87,8 @@ export const extractDataFromContent = async (params: {
     config: { 
       responseMimeType: "application/json", 
       temperature: 0,
-      maxOutputTokens: 8192,
-      thinkingConfig: { thinkingBudget: 2048 },
+      // Using maximum thinking budget for the Pro model to handle complex/large tables
+      thinkingConfig: { thinkingBudget: 32768 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -126,8 +127,7 @@ export const extractDataFromContent = async (params: {
                     'Lost and Found': { type: Type.STRING, enum: ['Yes', 'No'] },
                     'Shift Leader': { type: Type.STRING, enum: ['Yes', 'No'] },
                     'Operations': { type: Type.STRING, enum: ['Yes', 'No'] }
-                  },
-                  description: "Mapping of staff proficiency per role."
+                  }
                 }
               },
               required: ["name", "initials"]
@@ -151,8 +151,7 @@ export const extractDataFromContent = async (params: {
                     'Lost and Found': { type: Type.NUMBER },
                     'Shift Leader': { type: Type.NUMBER },
                     'Operations': { type: Type.NUMBER }
-                  },
-                  description: "Minimum personnel required for each specific role."
+                  }
                 }
               }
             }
@@ -206,7 +205,7 @@ export const generateAIProgram = async (
     config: { 
       systemInstruction, 
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 16000 }
+      thinkingConfig: { thinkingBudget: 32768 }
     }
   });
 
