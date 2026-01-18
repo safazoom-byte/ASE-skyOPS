@@ -31,23 +31,30 @@ export interface BuildResult {
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  // Remove markdown code blocks and any trailing/leading whitespace
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
+  
   try {
     return JSON.parse(cleanText);
   } catch (e) {
-    const startIdx = Math.min(
-      cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
-      cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
-    );
-    const endIdx = Math.max(
-      cleanText.lastIndexOf('}'),
-      cleanText.lastIndexOf(']')
-    );
-    if (startIdx !== Infinity && endIdx !== -1 && endIdx > startIdx) {
+    // If standard parse fails, try to find the first '{' and last '}'
+    const startIdx = cleanText.indexOf('{');
+    const endIdx = cleanText.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
       try {
         return JSON.parse(cleanText.slice(startIdx, endIdx + 1));
       } catch (e2) {
-        console.error("JSON Parse Failure:", e2);
+        console.error("Critical JSON Parse Failure:", e2);
+      }
+    }
+    // Try array if object fails
+    const startArr = cleanText.indexOf('[');
+    const endArr = cleanText.lastIndexOf(']');
+    if (startArr !== -1 && endArr !== -1 && endArr > startArr) {
+      try {
+        return JSON.parse(cleanText.slice(startArr, endArr + 1));
+      } catch (e3) {
+        console.error("Critical JSON Array Parse Failure:", e3);
       }
     }
     return null;
@@ -86,7 +93,7 @@ export const extractDataFromContent = async (params: {
     contents: { parts },
     config: { 
       responseMimeType: "application/json", 
-      temperature: 0, // Deterministic extraction
+      temperature: 0, 
       maxOutputTokens: 8192,
       thinkingConfig: { thinkingBudget: 2048 },
       responseSchema: {
@@ -154,38 +161,16 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these 6 STRICT CHECKLIST RULES:
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT CHECKLIST RULES:
 
-    CHECKLIST 1 - DAY 1 REST: Parse "Previous Duty Log". On Day 1 (${config.startDate}), ensure staff assigned have >= ${config.minRestHours} hours rest from their previous finish time.
-    
-    CHECKLIST 2 - UNIFIED ABSENCE PROCESSING:
-    - Scan the "Personnel Absence & Requests" box for any mentions of initials and dates.
-    - Categorize based on keywords:
-      - "Off", "Day off", "Requested" -> 'DAY OFF' (Priority for Local 5/2 pattern).
-      - "AL", "Annual", "Leave" -> 'ANNUAL LEAVE'.
-      - "Sick" -> 'SICK LEAVE'.
-      - "Lieu" -> 'LIEU LEAVE'.
-    - If no keyword is present (e.g., "MZ 12May"), default to 'DAY OFF' for Local staff and 'ROSTER LEAVE' for Roster staff.
-    - Note: You must correctly map specific dates to the generated days.
+    1. DAY 1 REST: On Day 1 (${config.startDate}), staff assigned must have >= ${config.minRestHours} hours rest since their "Previous Duty Log" finish time.
+    2. ABSENCE LOGIC: Scan "Personnel Absence & Requests" box. Map initials and dates to specific leave types (DAY OFF, ANNUAL LEAVE, etc.).
+    3. LOCAL 5/2 PATTERN: For 'Local' staff, exactly 2 days per 7-day period must be 'offDuty'. Use requested dates first.
+    4. ROSTER CONTRACTS: 'Roster' staff are OFF (ROSTER LEAVE) if today is outside their [workFromDate, workToDate] range.
+    5. SHIFT COVERAGE: Every shift MUST meet 'minStaff' and honor 'roleCounts' for specific skills (Shift Leader, etc.).
+    6. STATION RESERVE: On-duty staff not assigned to a shift are "Station Reserve". They are NOT in 'offDuty'.
 
-    CHECKLIST 3 - LOCAL 5/2 CALCULATION:
-    - For every 'Local' staff member, exactly 2 days out of 7 MUST be 'OFF'.
-    - Use the processed absences from Checklist 2 as the first choice for these 2 days.
-    - If a specific Day Off is requested, it MUST be one of these two days.
-    - Resulting 2 days MUST go in 'offDuty' array.
-
-    CHECKLIST 4 - ROSTER CALCULATION:
-    - 'Roster' staff are OFF if: 
-      a) Today is outside their [workFromDate, workToDate] contract range (Result: 'ROSTER LEAVE').
-      b) Today matches a request in the Absence Box (Result: 'ANNUAL LEAVE' or specified type).
-
-    CHECKLIST 5 - ROLE MATRIX: Honor 'roleCounts' for every shift.
-
-    CHECKLIST 6 - MINIMUM STAFFING: Every shift MUST meet 'minStaff'.
-
-    STATION RESERVE LOGIC:
-    - If personnel are On-Duty but not assigned to a shift, they are "Station Reserve". 
-    - DO NOT put them in 'offDuty' unless they are officially on leave/off.
+    OUTPUT FORMAT: You must return a valid JSON object matching the requested schema.
   `;
 
   const prompt = `
@@ -201,12 +186,79 @@ export const generateAIProgram = async (
     config: { 
       systemInstruction, 
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 16000 }
+      thinkingConfig: { thinkingBudget: 16000 },
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          programs: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                day: { type: Type.INTEGER },
+                dateString: { type: Type.STRING },
+                assignments: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      staffId: { type: Type.STRING },
+                      flightId: { type: Type.STRING },
+                      role: { type: Type.STRING },
+                      shiftId: { type: Type.STRING }
+                    },
+                    required: ["staffId", "flightId", "role"]
+                  }
+                },
+                offDuty: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      staffId: { type: Type.STRING },
+                      type: { type: Type.STRING }
+                    }
+                  }
+                }
+              },
+              required: ["day", "assignments"]
+            }
+          },
+          shortageReport: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                staffName: { type: Type.STRING },
+                flightNumber: { type: Type.STRING },
+                actualRest: { type: Type.NUMBER },
+                targetRest: { type: Type.NUMBER },
+                reason: { type: Type.STRING }
+              }
+            }
+          },
+          recommendations: {
+            type: Type.OBJECT,
+            properties: {
+              idealStaffCount: { type: Type.NUMBER },
+              currentStaffCount: { type: Type.NUMBER },
+              skillGaps: { type: Type.ARRAY, items: { type: Type.STRING } },
+              hireAdvice: { type: Type.STRING },
+              healthScore: { type: Type.NUMBER }
+            }
+          }
+        },
+        required: ["programs", "shortageReport"]
+      }
     }
   });
 
   const result = safeParseJson(response.text);
-  if (!result || !result.programs) throw new Error("Logic assembly failed.");
+  if (!result || !result.programs) {
+    console.error("Logic Assembly Failure Details:", response.text);
+    throw new Error("Logic assembly failed. The AI engine returned an incompatible format.");
+  }
   return result;
 };
 
