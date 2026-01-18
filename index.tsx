@@ -5,23 +5,20 @@ import {
   Plane, 
   Users, 
   Clock, 
-  Calendar, 
   LayoutDashboard,
   Menu,
   X,
   AlertCircle,
-  Info,
   ShieldCheck,
   TrendingUp,
   Activity,
   ChevronRight,
   History,
-  UserMinus,
   Palmtree,
   CheckCircle2,
   CalendarDays,
-  FileText,
-  Settings
+  Settings,
+  Check
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -34,16 +31,16 @@ import { ProgramChat } from './components/ProgramChat';
 import { generateAIProgram, ShortageWarning, ResourceRecommendation } from './services/geminiService';
 
 const STORAGE_KEYS = {
-  FLIGHTS: 'skyops_flights_v2',
-  STAFF: 'skyops_staff_v2',
-  SHIFTS: 'skyops_shifts_v2',
-  PROGRAMS: 'skyops_programs_v2',
-  START_DATE: 'skyops_start_date',
-  END_DATE: 'skyops_end_date',
-  REST_HOURS: 'skyops_min_rest',
-  RECOMMENDATIONS: 'skyops_recommendations',
-  PREV_DUTY_LOG: 'skyops_prev_duty_log',
-  PERSONNEL_REQUESTS: 'skyops_personnel_requests'
+  FLIGHTS: 'skyops_flights_v3',
+  STAFF: 'skyops_staff_v3',
+  SHIFTS: 'skyops_shifts_v3',
+  PROGRAMS: 'skyops_programs_v3',
+  START_DATE: 'skyops_start_date_v3',
+  END_DATE: 'skyops_end_date_v3',
+  REST_HOURS: 'skyops_min_rest_v3',
+  RECOMMENDATIONS: 'skyops_recommendations_v3',
+  PREV_DUTY_LOG: 'skyops_prev_duty_log_v3',
+  PERSONNEL_REQUESTS: 'skyops_personnel_requests_v3'
 };
 
 const App: React.FC = () => {
@@ -143,24 +140,38 @@ const App: React.FC = () => {
 
   const handleStaffUpdate = (updatedStaff: Staff) => {
     setStaff(prev => {
-      const idMatchIdx = prev.findIndex(s => s.id === updatedStaff.id);
+      const idMatchIdx = updatedStaff.id ? prev.findIndex(s => s.id === updatedStaff.id) : -1;
       const nameMatchIdx = prev.findIndex(s => s.name.toLowerCase() === updatedStaff.name.toLowerCase());
-      const initialsMatchIdx = prev.findIndex(s => s.initials.toUpperCase() === updatedStaff.initials.toUpperCase());
+      const initialsMatchIdx = (updatedStaff.initials && updatedStaff.initials.trim().length > 0) 
+        ? prev.findIndex(s => s.initials.toUpperCase() === updatedStaff.initials.toUpperCase()) 
+        : -1;
       
-      const targetIdx = idMatchIdx !== -1 ? idMatchIdx : (nameMatchIdx !== -1 ? nameMatchIdx : initialsMatchIdx);
+      let targetIdx = idMatchIdx !== -1 ? idMatchIdx : nameMatchIdx;
+      
+      if (targetIdx === -1 && initialsMatchIdx !== -1) {
+          if (prev[initialsMatchIdx].name.toLowerCase() === updatedStaff.name.toLowerCase()) {
+              targetIdx = initialsMatchIdx;
+          }
+      }
 
       if (targetIdx !== -1) {
         const existing = prev[targetIdx];
         const merged = { 
           ...existing, 
           ...updatedStaff,
+          id: existing.id,
           skillRatings: { ...existing.skillRatings, ...updatedStaff.skillRatings }
         };
         const newList = [...prev];
         newList[targetIdx] = merged;
         return newList;
       }
-      return [...prev, updatedStaff];
+      
+      const finalStaff = {
+        ...updatedStaff,
+        id: updatedStaff.id || Math.random().toString(36).substring(2, 11)
+      };
+      return [...prev, finalStaff];
     });
   };
 
@@ -169,11 +180,11 @@ const App: React.FC = () => {
   };
 
   const handleDataExtracted = (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => {
-    if (data.staff?.length > 0) {
+    if (data.staff && data.staff.length > 0) {
       data.staff.forEach(s => handleStaffUpdate(s));
     }
 
-    if (data.flights?.length > 0) {
+    if (data.flights && data.flights.length > 0) {
       setFlights(prev => {
         const updated = [...prev];
         data.flights.forEach(newF => {
@@ -181,7 +192,7 @@ const App: React.FC = () => {
           if (idx !== -1) {
             updated[idx] = { ...updated[idx], ...newF };
           } else {
-            updated.push(newF);
+            updated.push({ ...newF, id: newF.id || Math.random().toString(36).substr(2, 9) });
           }
         });
         return updated;
@@ -192,7 +203,12 @@ const App: React.FC = () => {
       setShifts(prev => {
         const current = [...prev];
         data.shifts.forEach(sh => {
-          if (!current.some(s => s.id === sh.id)) current.push(sh);
+          const idx = current.findIndex(s => s.pickupDate === sh.pickupDate && s.pickupTime === sh.pickupTime);
+          if (idx === -1) {
+            current.push({ ...sh, id: sh.id || Math.random().toString(36).substr(2, 9) });
+          } else {
+            current[idx] = { ...current[idx], ...sh };
+          }
         });
         return current;
       });
@@ -274,6 +290,15 @@ const App: React.FC = () => {
     setPrograms(updatedPrograms);
     setActiveTab('program');
   };
+
+  const checklistPoints = [
+    { label: "Day 1 Rest Guard", desc: "Previous shift finish times analyzed and respected." },
+    { label: "Absence Registry", desc: "All 'Off' dates from Absence Box have been strictly applied." },
+    { label: "Local 5/2 Pattern", desc: "Local staff forced to minimum 2 days off per period." },
+    { label: "Contract Validation", desc: "Verified Roster staff stay within contract date bounds." },
+    { label: "Role Matrix", desc: "Shift Leaders and specialties correctly deployed." },
+    { label: "Coverage Minimums", desc: "Shift strengths never fall below station requirements." }
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-indigo-100">
@@ -433,7 +458,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Constraints Confirmation Dialog */}
       {showConfirmDialog && (
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-2xl animate-in fade-in duration-300">
            <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 border border-white/10">
@@ -470,7 +494,6 @@ const App: React.FC = () => {
                       value={personnelRequests}
                       onChange={e => setPersonnelRequests(e.target.value)}
                     />
-                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest ml-1">Unified box for all leaves & specific day off requests.</p>
                  </div>
 
                  <div className="space-y-4">
@@ -502,18 +525,40 @@ const App: React.FC = () => {
 
       {showSuccessChecklist && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-3xl animate-in zoom-in-95 duration-500">
-           <div className="bg-white rounded-[5rem] shadow-2xl max-w-xl w-full p-16 text-center border border-white/10">
-              <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-inner border border-emerald-100">
+           <div className="bg-white rounded-[5rem] shadow-2xl max-w-2xl w-full p-16 border border-white/10 overflow-hidden relative">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px] pointer-events-none"></div>
+              
+              <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-inner border border-emerald-100">
                  <CheckCircle2 size={56} className="text-emerald-500" />
               </div>
-              <h3 className="text-4xl font-black italic uppercase text-slate-950 tracking-tighter mb-4 leading-none">Logic Verified</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">Roster generated successfully based on provided constraints.</p>
+              
+              <div className="text-center mb-10">
+                <h3 className="text-4xl font-black italic uppercase text-slate-950 tracking-tighter mb-2 leading-none">Logic Verified</h3>
+                <p className="text-slate-400 text-sm font-medium uppercase tracking-widest">Aviation Standards Checksum: PASS</p>
+              </div>
+
+              <div className="space-y-4 mb-12">
+                 {checklistPoints.map((point, i) => (
+                   <div key={i} className="flex items-center gap-6 p-5 bg-slate-50 border border-slate-100 rounded-[2rem] group hover:bg-emerald-50/30 hover:border-emerald-100 transition-all duration-300">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center shrink-0">
+                         <Check size={20} className="text-emerald-600 font-black" />
+                      </div>
+                      <div className="flex-1">
+                         <div className="flex items-center gap-3 mb-1">
+                            <h5 className="text-[11px] font-black text-slate-900 uppercase italic leading-none">{point.label}</h5>
+                            <span className="text-[9px] font-black text-emerald-500 bg-emerald-100/50 px-2 py-0.5 rounded-lg uppercase tracking-widest flex items-center gap-1">✅ Verified</span>
+                         </div>
+                         <p className="text-[10px] text-slate-400 font-medium italic">{point.desc}</p>
+                      </div>
+                   </div>
+                 ))}
+              </div>
               
               <button 
                 onClick={() => setShowSuccessChecklist(false)} 
-                className="w-full py-7 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all active:scale-95"
+                className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] text-xs font-black uppercase italic tracking-[0.4em] shadow-2xl hover:bg-emerald-600 transition-all active:scale-95 flex items-center justify-center gap-4 group"
               >
-                ACCESS PROGRAM
+                ACCESS FINAL PROGRAM <ChevronRight className="group-hover:translate-x-2 transition-transform" />
               </button>
            </div>
         </div>

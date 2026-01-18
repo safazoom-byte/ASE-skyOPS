@@ -29,31 +29,27 @@ export interface BuildResult {
 }
 
 const safeParseJson = (text: string | undefined): any => {
-  if (!text) return { flights: [], staff: [], shifts: [] };
-  
-  // Clean potential markdown or thinking blocks
+  if (!text) return null;
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
-  
-  // Look for the first JSON object or array block
-  const firstBrace = cleanText.indexOf('{');
-  const lastBrace = cleanText.lastIndexOf('}');
-  const firstBracket = cleanText.indexOf('[');
-  const lastBracket = cleanText.lastIndexOf(']');
-
-  let jsonCandidate = cleanText;
-  
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    jsonCandidate = cleanText.slice(firstBrace, lastBrace + 1);
-  } else if (firstBracket !== -1 && lastBracket > firstBracket) {
-    jsonCandidate = cleanText.slice(firstBracket, lastBracket + 1);
-  }
-
   try {
-    return JSON.parse(jsonCandidate);
+    return JSON.parse(cleanText);
   } catch (e) {
-    console.error("Advanced JSON Parse Failure. Payload:", jsonCandidate);
-    // If extraction fails, return empty arrays instead of null to prevent frontend crashes
-    return { flights: [], staff: [], shifts: [] };
+    const startIdx = Math.min(
+      cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
+      cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
+    );
+    const endIdx = Math.max(
+      cleanText.lastIndexOf('}'),
+      cleanText.lastIndexOf(']')
+    );
+    if (startIdx !== Infinity && endIdx !== -1 && endIdx > startIdx) {
+      try {
+        return JSON.parse(cleanText.slice(startIdx, endIdx + 1));
+      } catch (e2) {
+        console.error("JSON Parse Failure:", e2);
+      }
+    }
+    return null;
   }
 };
 
@@ -65,20 +61,19 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    CRITICAL EXTRACTION TASK: Convert the provided aviation ground handling documents into structured JSON.
+    STRICT DATA FIDELITY TASK: Extract ALL staff and flight data from the provided documents.
     
-    INTELLIGENT MAPPING RULES:
-    1. HEADERS: Map "Employee", "Agent", "Personnel", "Emp", "Name" to 'name'. Map "FLT", "Flt No", "Flight", "Service" to 'flightNumber'. 
-    2. TIME: Map "STA", "Arrival", "ETA" to 'sta' and "STD", "Departure", "ETD" to 'std'.
-    3. SKILLS: If a person is listed as qualified, set skill to "Yes". Interpret "Qualified", "1", "Checkmark", "P" as "Yes".
-    4. NO OMISSION: Every row found in the source MUST be in the JSON arrays. 
-    5. FALLBACK: If a date is missing, use the context date: ${params.startDate || 'Current Week'}.
+    INTEGRITY CONSTRAINTS:
+    1. ZERO OMISSION: You are forbidden from summarizing. If the source has 150 rows, the JSON MUST have 150 objects.
+    2. ROW-COUNT VERIFICATION: Mentally count every row before generating. The total count of 'staff' and 'flights' must match the source exactly.
+    3. UNIQUE IDENTIFICATION: Generate unique initials (2-3 letters) for every staff member if they are missing in the source. Do not reuse initials for different names.
+    4. ACCURACY: Capture every flight's STA/STD, Sector, and Date without rounding times.
     
-    The response MUST be valid JSON only.
+    Context Date: ${params.startDate || 'Current Operational Period'}
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `RAW DATA:\n${params.textData}` });
+  if (params.textData) parts.push({ text: `SOURCE DATA:\n${params.textData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -86,11 +81,11 @@ export const extractDataFromContent = async (params: {
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-pro-preview', 
     contents: { parts },
     config: { 
       responseMimeType: "application/json", 
-      temperature: 0, 
+      temperature: 0,
       maxOutputTokens: 8192,
       thinkingConfig: { thinkingBudget: 2048 },
       responseSchema: {
@@ -123,20 +118,9 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { 
-                  type: Type.OBJECT,
-                  description: "Specific station skill proficiencies",
-                  properties: {
-                    "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Lost and Found": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Shift Leader": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Operations": { type: Type.STRING, enum: ["Yes", "No"] }
-                  },
-                  required: ["Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations"]
-                }
+                skillRatings: { type: Type.OBJECT }
               },
-              required: ["name"]
+              required: ["name", "initials"]
             }
           },
           shifts: {
@@ -149,23 +133,11 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { 
-                  type: Type.OBJECT,
-                  description: "Required staff counts per role",
-                  properties: {
-                    "Ramp": { type: Type.INTEGER },
-                    "Load Control": { type: Type.INTEGER },
-                    "Lost and Found": { type: Type.INTEGER },
-                    "Shift Leader": { type: Type.INTEGER },
-                    "Operations": { type: Type.INTEGER }
-                  },
-                  required: ["Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations"]
-                }
+                roleCounts: { type: Type.OBJECT }
               }
             }
           }
-        },
-        required: ["flights", "staff", "shifts"]
+        }
       }
     }
   });
@@ -181,23 +153,31 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT CHECKLIST RULES:
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these 6 STRICT CHECKLIST POINTS:
+    
+    1. DAY 1 REST GUARD: You must analyze the 'Previous Duty Log'. If staff finished at 02:00, they cannot start before 14:00 (assuming 12h rest).
+    2. ABSENCE REGISTRY: You must parse the 'Personnel Absence & Requests' box. If it says 'MZ Off 12May', MZ MUST be 'DAY OFF' on that date. 
+    3. LOCAL 5/2 PATTERN: Staff categorized as 'Local' MUST have 2 days off per 7-day period. Do not assign them to more than 5 consecutive days.
+    4. CONTRACT VALIDATION: Staff categorized as 'Roster' can only work between their 'workFromDate' and 'workToDate'.
+    5. ROLE MATRIX: If a shift requires a 'Shift Leader', you MUST assign one. Do not use an agent without that skill rating for a SL role.
+    6. COVERAGE MINIMUMS: Never assign fewer staff than 'minStaff' required for a shift. If resources are tight, trigger a ShortageWarning rather than breaking coverage.
 
-    1. DAY 1 REST: On Day 1 (${config.startDate}), staff assigned must have >= ${config.minRestHours} hours rest since their "Previous Duty Log" finish time.
-    2. ABSENCE LOGIC: Scan "Personnel Absence & Requests" box. Map initials and dates to specific leave types (DAY OFF, ANNUAL LEAVE, etc.).
-    3. LOCAL 5/2 PATTERN: For 'Local' staff, exactly 2 days per 7-day period must be 'offDuty'. Use requested dates first.
-    4. ROSTER CONTRACTS: 'Roster' staff are OFF (ROSTER LEAVE) if today is outside their [workFromDate, workToDate] range.
-    5. SHIFT COVERAGE: Every shift MUST meet 'minStaff' and honor 'roleCounts' for specific skills.
-    6. STATION RESERVE: On-duty staff not assigned to a shift are "Station Reserve". They are NOT in 'offDuty'.
-
-    OUTPUT FORMAT: You must return a valid JSON object matching the requested schema.
+    OUTPUT FORMAT:
+    - programs: Array of DailyProgram objects.
+    - shortageReport: Array of ShortageWarning if any rest/coverage rules are bent.
+    - recommendations: ResourceRecommendation (HireAdvice, HealthScore 0-100).
   `;
 
   const prompt = `
     Operational Window: ${config.numDays} Days from ${config.startDate}
-    Registry: Staff: ${JSON.stringify(data.staff)}, Flights: ${JSON.stringify(data.flights)}, Shifts: ${JSON.stringify(data.shifts)}
-    Constraints: ${constraintsLog}
-    Custom Rules: ${config.customRules}
+    Registry: 
+    Staff: ${JSON.stringify(data.staff)}
+    Flights: ${JSON.stringify(data.flights)}
+    Shifts: ${JSON.stringify(data.shifts)}
+    
+    Station Input Log: ${constraintsLog}
+    Custom Directives: ${config.customRules}
+    Target Rest: ${config.minRestHours} Hours.
   `;
 
   const response = await ai.models.generateContent({
@@ -206,75 +186,13 @@ export const generateAIProgram = async (
     config: { 
       systemInstruction, 
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 16000 },
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          programs: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                day: { type: Type.INTEGER },
-                dateString: { type: Type.STRING },
-                assignments: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      staffId: { type: Type.STRING },
-                      flightId: { type: Type.STRING },
-                      role: { type: Type.STRING },
-                      shiftId: { type: Type.STRING }
-                    },
-                    required: ["staffId", "flightId", "role"]
-                  }
-                },
-                offDuty: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      staffId: { type: Type.STRING },
-                      type: { type: Type.STRING }
-                    }
-                  }
-                }
-              },
-              required: ["day", "assignments"]
-            }
-          },
-          shortageReport: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                staffName: { type: Type.STRING },
-                flightNumber: { type: Type.STRING },
-                actualRest: { type: Type.NUMBER },
-                targetRest: { type: Type.NUMBER },
-                reason: { type: Type.STRING }
-              }
-            }
-          },
-          recommendations: {
-            type: Type.OBJECT,
-            properties: {
-              idealStaffCount: { type: Type.NUMBER },
-              currentStaffCount: { type: Type.NUMBER },
-              skillGaps: { type: Type.ARRAY, items: { type: Type.STRING } },
-              hireAdvice: { type: Type.STRING },
-              healthScore: { type: Type.NUMBER }
-            }
-          }
-        },
-        required: ["programs", "shortageReport"]
-      }
+      thinkingConfig: { thinkingBudget: 16000 }
     }
   });
 
-  return safeParseJson(response.text);
+  const result = safeParseJson(response.text);
+  if (!result || !result.programs) throw new Error("Program assembly logic failed.");
+  return result;
 };
 
 export const modifyProgramWithAI = async (
@@ -283,35 +201,17 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const systemInstruction = `
-    You are an "Operational Coordinator". Maintain the 6-point checklist.
-    Unassigned on-duty staff = Station Reserve (not in offDuty).
-  `;
-
   const parts: any[] = [
-    { text: `Current Data: ${JSON.stringify(data)}` },
+    { text: `Data: ${JSON.stringify(data)}` },
     { text: `Instruction: ${instruction}` }
   ];
-  
-  if (media) {
-    media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  }
+  if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { 
-      systemInstruction,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          programs: { type: Type.ARRAY, items: { type: Type.OBJECT } },
-          explanation: { type: Type.STRING }
-        },
-        required: ["programs", "explanation"]
-      }
+      responseMimeType: "application/json"
     }
   });
 
