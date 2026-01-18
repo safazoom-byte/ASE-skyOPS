@@ -64,10 +64,10 @@ export const extractDataFromContent = async (params: {
     STRICT DATA FIDELITY TASK: Extract ALL staff and flight data from the provided documents.
     
     INTEGRITY CONSTRAINTS:
-    1. ZERO OMISSION: You are forbidden from summarizing. If the source has 150 rows, the JSON MUST have 150 objects.
-    2. ROW-COUNT VERIFICATION: Mentally count every row before generating. The total count of 'staff' and 'flights' must match the source exactly.
-    3. UNIQUE IDENTIFICATION: Generate unique initials (2-3 letters) for every staff member if they are missing in the source. Do not reuse initials for different names.
-    4. ACCURACY: Capture every flight's STA/STD, Sector, and Date without rounding times.
+    1. ZERO OMISSION: Extract every single row without summarization.
+    2. ROW-COUNT VERIFICATION: Total count of staff and flights must match the source.
+    3. UNIQUE IDENTIFICATION: Ensure unique initials for every staff member.
+    4. ACCURACY: Capture flight times (STA/STD) and sector data exactly.
     
     Context Date: ${params.startDate || 'Current Operational Period'}
   `;
@@ -118,7 +118,16 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { type: Type.OBJECT }
+                skillRatings: { 
+                  type: Type.OBJECT,
+                  properties: {
+                    "Shift Leader": { type: Type.STRING, enum: ['Yes', 'No'] },
+                    "Operations": { type: Type.STRING, enum: ['Yes', 'No'] },
+                    "Ramp": { type: Type.STRING, enum: ['Yes', 'No'] },
+                    "Load Control": { type: Type.STRING, enum: ['Yes', 'No'] },
+                    "Lost and Found": { type: Type.STRING, enum: ['Yes', 'No'] }
+                  }
+                }
               },
               required: ["name", "initials"]
             }
@@ -133,7 +142,16 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { type: Type.OBJECT }
+                roleCounts: { 
+                  type: Type.OBJECT,
+                  properties: {
+                    "Shift Leader": { type: Type.INTEGER },
+                    "Operations": { type: Type.INTEGER },
+                    "Ramp": { type: Type.INTEGER },
+                    "Load Control": { type: Type.INTEGER },
+                    "Lost and Found": { type: Type.INTEGER }
+                  }
+                }
               }
             }
           }
@@ -153,56 +171,41 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT MANDATORY RULES. 
-    FAILURE TO COMPLY WITH THESE RULES IS AN OPERATIONAL BREACH:
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT MANDATORY RULES.
     
     1. ROSTER LEAVE (CONTRACT BOUNDS): 
        - Staff of type 'Roster' have 'workFromDate' and 'workToDate'. 
-       - IF the date being planned is BEFORE 'workFromDate' OR AFTER 'workToDate', that staff member MUST be placed in the 'offDuty' list for that day with type 'ROSTER LEAVE'.
-       - They are strictly FORBIDDEN from being assigned to any shift on those dates.
+       - If the program date is NOT within their work period (Date < workFromDate OR Date > workToDate), they MUST be added to the 'offDuty' list with type 'ROSTER LEAVE'.
+       - Never assign them to any shift if they are outside these dates.
 
     2. LOCAL OFF DAYS (5/2 PATTERN):
-       - Staff of type 'Local' MUST have exactly 2 days OFF every 7 days.
-       - Staff of type 'Local' MUST NOT work more than 5 consecutive days.
-       - If a Local staff member has worked 5 days, the next 2 days MUST be marked as 'DAY OFF' in the 'offDuty' list.
+       - Local staff MUST have 2 days OFF (Type: 'DAY OFF') every 7 days.
+       - Do not work Local staff more than 5 consecutive days.
 
-    3. ABSENCE REGISTRY (PRIORITY 1):
-       - You MUST parse the 'Personnel Absence & Requests' box immediately.
-       - If it says 'MZ Off 12May' or 'AH Annual Leave 13-15May', those staff MUST be moved to the 'offDuty' array for those specific dates. 
-       - Explicitly use 'ANNUAL LEAVE', 'SICK LEAVE', or 'DAY OFF' as specified in the text.
+    3. ABSENCE REGISTRY (PRIORITY):
+       - Parse the 'Personnel Absence & Requests' box immediately and move requested staff to 'offDuty'.
 
-    4. NO STANDBY LIMBO:
-       - Every staff member for every day must have a definitive state. 
-       - If they are not assigned to a shift AND they are not on leave, they simply don't appear in assignments.
-       - HOWEVER, if they are meant to be OFF (Rule 1, 2, or 3), they MUST be in 'offDuty'.
+    4. NO RESERVE/STANDBY LIMBO:
+       - There is no "Station Reserve". Staff are either:
+         a) Assigned to a specific shift.
+         b) On official Leave/Off-Duty (MUST appear in offDuty).
+       - Ensure every person listed for a day has a definitive assignment or an off-duty record.
 
     5. DAY 1 REST GUARD: 
-       - Check 'Previous Duty Log'. Staff need ${config.minRestHours} hours rest from their previous finish time.
-
-    6. ROLE MATRIX & COVERAGE:
-       - 'Shift Leader' roles are mandatory if requested in 'roleCounts'.
-       - Never drop below 'minStaff' unless it's impossible, then trigger a 'ShortageWarning'.
+       - Minimum ${config.minRestHours} hours rest from previous finish times required.
 
     OUTPUT FORMAT:
     - programs: Array of DailyProgram objects.
     - shortageReport: Array of ShortageWarning if rest/coverage rules are bent.
-    - recommendations: ResourceRecommendation (HireAdvice, HealthScore 0-100).
   `;
 
   const prompt = `
-    Operational Window: ${config.numDays} Days starting from ${config.startDate}
-    
-    Current System Registry:
-    Staff List: ${JSON.stringify(data.staff)}
-    Flight Schedule: ${JSON.stringify(data.flights)}
-    Shift Templates: ${JSON.stringify(data.shifts)}
-    
-    Manual Station Logs (HIGH PRIORITY): 
-    ${constraintsLog}
-    
-    Target Settings:
-    Custom Directives: ${config.customRules}
-    Minimum Rest: ${config.minRestHours} Hours.
+    Window: ${config.numDays} Days from ${config.startDate}
+    Staff: ${JSON.stringify(data.staff)}
+    Flights: ${JSON.stringify(data.flights)}
+    Shifts: ${JSON.stringify(data.shifts)}
+    Logs: ${constraintsLog}
+    Directives: ${config.customRules}
   `;
 
   const response = await ai.models.generateContent({
