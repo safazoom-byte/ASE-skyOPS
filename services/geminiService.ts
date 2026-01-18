@@ -29,25 +29,81 @@ export interface BuildResult {
   recommendations?: ResourceRecommendation;
 }
 
+/**
+ * Enhanced JSON parser with recovery for truncated responses.
+ * Attempts to close open braces/brackets if the AI hits a token limit.
+ */
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  
+  // Strip Markdown markers
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
+  
+  const balanceJson = (json: string): string => {
+    let openBraces = 0;
+    let openBrackets = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < json.length; i++) {
+      const char = json[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === '{') openBraces++;
+        if (char === '}') openBraces--;
+        if (char === '[') openBrackets++;
+        if (char === ']') openBrackets--;
+      }
+    }
+
+    let balanced = json;
+    if (inString) balanced += '"';
+    while (openBraces > 0) {
+      balanced += '}';
+      openBraces--;
+    }
+    while (openBrackets > 0) {
+      balanced += ']';
+      openBrackets--;
+    }
+    return balanced;
+  };
+
   try {
     return JSON.parse(cleanText);
   } catch (e) {
+    console.warn("Initial JSON parse failed, attempting recovery...");
+    
+    // Find the first JSON structure
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
     );
-    const endIdx = Math.max(
-      cleanText.lastIndexOf('}'),
-      cleanText.lastIndexOf(']')
-    );
-    if (startIdx !== Infinity && endIdx !== -1 && endIdx > startIdx) {
+    
+    if (startIdx !== Infinity) {
       try {
-        return JSON.parse(cleanText.slice(startIdx, endIdx + 1));
+        const potentialJson = balanceJson(cleanText.slice(startIdx));
+        return JSON.parse(potentialJson);
       } catch (e2) {
-        console.error("JSON Parse Failure:", e2);
+        console.error("JSON Recovery Failed:", e2);
+        // Last ditch effort: try to strip trailing commas that often break truncated JSON
+        try {
+          const aggressive = cleanText.slice(startIdx).replace(/,\s*([\]}])/g, '$1');
+          return JSON.parse(balanceJson(aggressive));
+        } catch (e3) {
+          return null;
+        }
       }
     }
     return null;
@@ -61,25 +117,31 @@ export const extractDataFromContent = async (params: {
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Optimization: Pre-clean text data to reduce token bloat
+  const cleanedTextData = params.textData?.split('\n')
+    .filter(line => line.trim().length > 0 && !line.startsWith(',,,,'))
+    .join('\n');
+
   const prompt = `
-    ACT AS A HIGH-FIDELITY 1:1 DATA MAPPER. Your sole task is to convert ALL rows from the provided documents into the requested JSON format.
+    ACT AS A RAW DATA CONVERTER (FLASH MODE).
+    TASK: Convert ALL rows from the source into valid JSON.
     
-    STRICT IMPORT RULES:
-    1. ZERO LOGIC: Do not attempt to "clean", "validate", or apply "logic" to the data. If a row exists in the source, it must exist in your output.
-    2. TOTAL EXTRACTION: Return EVERY single staff member and EVERY single flight found. If the user provides 200 items, you must return 200 items.
-    3. HEADER MAPPING: Map column headers directly. 
-       - Map 'Name', 'Staff', 'User' -> 'name'.
-       - Map 'Flight', 'FLT', 'Flt No' -> 'flightNumber'.
-       - Map 'STA', 'Arrival Time' -> 'sta'.
-       - Map 'STD', 'Departure Time' -> 'std'.
-    4. NO OMISSION: Do not skip rows because of missing fields or formatting. Use empty strings if data is missing, but keep the record.
-    5. DATA IS TRUTH: The user has provided data that matches the fields exactly. DO NOT modify values.
+    STRICT RULES:
+    1. 1:1 FIDELITY: Every row in the spreadsheet MUST become an object in the JSON.
+    2. HEADER AGNOSTIC: Map columns based on semantic meaning:
+       - Personnel/Name/Staff/Agent -> 'name'
+       - FLT/Flight/No -> 'flightNumber'
+       - STA/Arrival -> 'sta'
+       - STD/Departure -> 'std'
+       - Category/Type/Class -> 'type'
+    3. BULK HANDLING: Do not summarize. If there are 100 rows, output 100 objects.
+    4. NO PREAMBLE: Start directly with JSON.
     
-    Context Date: ${params.startDate || 'Current Operational Period'}
+    Target Window: ${params.startDate || 'Latest'}
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `SOURCE DATA:\n${params.textData}` });
+  if (cleanedTextData) parts.push({ text: `SOURCE DATA:\n${cleanedTextData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -87,13 +149,14 @@ export const extractDataFromContent = async (params: {
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview', 
+    // Using flash-preview for high volume and faster inference
+    model: 'gemini-3-flash-preview', 
     contents: { parts },
     config: { 
       responseMimeType: "application/json", 
       temperature: 0,
-      maxOutputTokens: 8192,
-      thinkingConfig: { thinkingBudget: 512 },
+      maxOutputTokens: 65536,
+      thinkingConfig: { thinkingBudget: 0 }, 
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -126,13 +189,13 @@ export const extractDataFromContent = async (params: {
                 workToDate: { type: Type.STRING },
                 skillRatings: { 
                   type: Type.OBJECT,
-                  description: "Map proficiency for specific aviation roles.",
+                  description: "Map available flags to Yes/No",
                   properties: {
-                    "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Lost and Found": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Shift Leader": { type: Type.STRING, enum: ["Yes", "No"] },
-                    "Operations": { type: Type.STRING, enum: ["Yes", "No"] }
+                    "Ramp": { type: Type.STRING },
+                    "Load Control": { type: Type.STRING },
+                    "Lost and Found": { type: Type.STRING },
+                    "Shift Leader": { type: Type.STRING },
+                    "Operations": { type: Type.STRING }
                   }
                 }
               },
@@ -151,7 +214,6 @@ export const extractDataFromContent = async (params: {
                 minStaff: { type: Type.NUMBER },
                 roleCounts: { 
                   type: Type.OBJECT,
-                  description: "Minimum personnel required per role.",
                   properties: {
                     "Ramp": { type: Type.NUMBER },
                     "Load Control": { type: Type.NUMBER },

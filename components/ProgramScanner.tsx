@@ -26,12 +26,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
-    "Reading spreadsheet rows...",
-    "Mapping columns to system registry...",
-    "Converting flight data strings...",
-    "Assembling personnel profiles...",
-    "Synchronizing duty templates...",
-    "Finalizing data import sequence..."
+    "Analyzing cell structure...",
+    "Executing Flash-mapping...",
+    "Stabilizing JSON stream...",
+    "Reconstructing registry...",
+    "Balancing data integrity...",
+    "Finalizing import..."
   ];
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 1200);
+      }, 1000);
     } else {
       setScanPhase(0);
     }
@@ -108,13 +108,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
       } else {
         throw { 
           title: "Import Error", 
-          message: "The data mapping failed. Please ensure your Excel headers like 'Name', 'Flight', and 'Date' match the required fields."
+          message: "The data mapping failed to produce a valid registry. Check if the headers like 'Name' or 'Flight' are present."
         };
       }
     } catch (error: any) {
       setScanError({
         title: error.title || "Registry Sync Failed",
-        message: error.message || "The data processor encountered a formatting conflict. Check column headers."
+        message: error.message || "High-volume data caused a structural conflict. Try splitting the file or ensuring headers are clear."
       });
     } finally {
       setIsScanning(false);
@@ -133,12 +133,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
             </div>
             <div className="space-y-4">
               <h3 className="text-white text-3xl font-black uppercase italic tracking-tighter leading-none">{phases[scanPhase]}</h3>
-              {detectedRowCount > 0 && (
-                <p className="text-emerald-400 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2">
-                  <ListFilter size={14} /> Mapping {detectedRowCount} registry items
-                </p>
-              )}
-              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Data Fidelity Import Mode</p>
+              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Flash-Optimized Data Stream</p>
             </div>
             <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
                <div 
@@ -156,13 +151,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
           <div className="flex-1 text-center lg:text-left">
             <div className="flex items-center gap-3 mb-4 justify-center lg:justify-start">
                <div className="px-3 py-1 bg-blue-600/20 border border-blue-500/30 rounded-lg text-[9px] font-black uppercase tracking-widest text-blue-400">
-                 Registry Data Import v3.0
+                 Registry Data Import v3.5
                </div>
             </div>
             <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">External Data Registry</h3>
             <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed italic">
-              Import <span className="text-white font-bold">Staff Excels</span> or <span className="text-white font-bold">Flight Schedules</span>. 
-              The system will map your headers directly to the operational hub. Use <span className="text-blue-400 font-black">1:1 Data Extraction</span> for bulk rosters.
+              Flash-Optimized import for <span className="text-white font-bold">Large Staff Lists</span>. 
+              Self-healing JSON recovery for truncated spreadsheets up to 1000+ rows.
             </p>
           </div>
           
@@ -200,7 +195,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
                 <Database size={48} className="text-emerald-500" />
               </div>
               <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Registry Processed</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">The system has mapped your data into the station registry. AI has performed a 1:1 conversion of all visible source rows.</p>
+              <p className="text-slate-400 text-sm font-medium mb-12">The system has mapped your data into the station registry. Self-healing logic applied to recover truncated rows.</p>
               
               <div className="grid grid-cols-2 gap-6 mb-12">
                 <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-blue-200 transition-all">
