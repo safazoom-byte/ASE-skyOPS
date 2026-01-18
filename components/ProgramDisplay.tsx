@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
@@ -129,14 +128,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             assignmentsByShift[sid].push(a);
           });
 
-          const assignedStaffIds = new Set(program.assignments.map(a => a.staffId));
-          const offDutyStaffIds = new Set((program.offDuty || []).map(o => o.staffId));
-          
-          // Station Reserve = Not working a shift AND Not officially Off-Duty
-          const stationReserve = staff.filter(s => 
-            !assignedStaffIds.has(s.id) && !offDutyStaffIds.has(s.id)
-          );
-
           return (
             <div key={program.day} className="bg-white rounded-[4rem] overflow-hidden border border-slate-200 shadow-2xl group">
               <div className="bg-slate-950 px-12 py-10 flex items-center justify-between text-white border-b border-white/5">
@@ -215,33 +206,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           </tr>
                         );
                       })}
-                      
-                      {/* Station Reserve Visual Row */}
-                      {stationReserve.length > 0 && (
-                        <tr className="bg-indigo-50/30">
-                          <td className="px-8 py-8 border-r border-slate-100 text-center font-black text-indigo-300 italic text-xl">R</td>
-                          <td className="px-8 py-8 border-r border-slate-100" colSpan={2}>
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
-                                <Briefcase size={20} />
-                              </div>
-                              <div>
-                                <p className="font-black italic text-indigo-900 text-xs uppercase tracking-tight">STATION RESERVE / STANDBY</p>
-                                <p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mt-1">Personnel on-duty and available for tasks</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-8 py-8">
-                            <div className="flex flex-wrap gap-2">
-                              {stationReserve.map(s => (
-                                <div key={s.id} className="px-3 py-1.5 bg-white border border-indigo-200 rounded-xl font-black text-[10px] text-indigo-700 italic shadow-sm">
-                                  {formatStaffDisplay(s)}
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
