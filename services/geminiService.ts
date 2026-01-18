@@ -76,6 +76,7 @@ export const extractDataFromContent = async (params: {
     2. 1-TO-1 MAPPING: Each row in the source file must correspond to one entry in the JSON arrays.
     3. NO OMISSION: Even if data seems redundant or extensive, include all records.
     4. DATE FORMAT: Ensure all dates are YYYY-MM-DD.
+    5. SKILLS: Mapping proficiency: If a person is qualified, use "Yes", otherwise "No".
     
     Context Date: ${params.startDate || 'Current Operational Week'}
   `;
@@ -126,7 +127,17 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { type: Type.OBJECT }
+                skillRatings: { 
+                  type: Type.OBJECT,
+                  description: "Proficiency in specific station skills",
+                  properties: {
+                    "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Lost and Found": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Shift Leader": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Operations": { type: Type.STRING, enum: ["Yes", "No"] }
+                  }
+                }
               },
               required: ["name"]
             }
@@ -141,7 +152,17 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { type: Type.OBJECT }
+                roleCounts: { 
+                  type: Type.OBJECT,
+                  description: "Number of staff required for specific roles in this shift",
+                  properties: {
+                    "Ramp": { type: Type.INTEGER },
+                    "Load Control": { type: Type.INTEGER },
+                    "Lost and Found": { type: Type.INTEGER },
+                    "Shift Leader": { type: Type.INTEGER },
+                    "Operations": { type: Type.INTEGER }
+                  }
+                }
               }
             }
           }
