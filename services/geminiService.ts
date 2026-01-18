@@ -118,7 +118,17 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { type: Type.OBJECT }
+                skillRatings: { 
+                  type: Type.OBJECT,
+                  properties: {
+                    'Ramp': { type: Type.STRING, enum: ['Yes', 'No'] },
+                    'Load Control': { type: Type.STRING, enum: ['Yes', 'No'] },
+                    'Lost and Found': { type: Type.STRING, enum: ['Yes', 'No'] },
+                    'Shift Leader': { type: Type.STRING, enum: ['Yes', 'No'] },
+                    'Operations': { type: Type.STRING, enum: ['Yes', 'No'] }
+                  },
+                  description: "Mapping of staff proficiency per role."
+                }
               },
               required: ["name", "initials"]
             }
@@ -133,7 +143,17 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { type: Type.OBJECT }
+                roleCounts: { 
+                  type: Type.OBJECT,
+                  properties: {
+                    'Ramp': { type: Type.NUMBER },
+                    'Load Control': { type: Type.NUMBER },
+                    'Lost and Found': { type: Type.NUMBER },
+                    'Shift Leader': { type: Type.NUMBER },
+                    'Operations': { type: Type.NUMBER }
+                  },
+                  description: "Minimum personnel required for each specific role."
+                }
               }
             }
           }
