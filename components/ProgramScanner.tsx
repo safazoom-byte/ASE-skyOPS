@@ -26,13 +26,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
-    "Initializing High-Res Spatial Scan...",
-    "Decoding Multi-Sheet Roster Logic...",
-    "Extracting Flight STA/STD Patterns...",
-    "Validating Staff Proficiency Matrix...",
-    "Cross-Referencing Shift Coverage...",
-    "Applying Fuzzy Date Synchronization...",
-    "Finalizing Station Logic Assembly..."
+    "Reading spreadsheet rows...",
+    "Mapping columns to system registry...",
+    "Converting flight data strings...",
+    "Assembling personnel profiles...",
+    "Synchronizing duty templates...",
+    "Finalizing data import sequence..."
   ];
 
   useEffect(() => {
@@ -40,7 +39,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 1800);
+      }, 1200);
     } else {
       setScanPhase(0);
     }
@@ -108,14 +107,14 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
         setExtractedData(data);
       } else {
         throw { 
-          title: "Logic Deficit", 
-          message: "The deep scan found the document but couldn't verify aviation-standard patterns. Check file clarity."
+          title: "Import Error", 
+          message: "The data mapping failed. Please ensure your Excel headers like 'Name', 'Flight', and 'Date' match the required fields."
         };
       }
     } catch (error: any) {
       setScanError({
-        title: error.title || "Scan Failed",
-        message: error.message || "The neural engine encountered a format conflict."
+        title: error.title || "Registry Sync Failed",
+        message: error.message || "The data processor encountered a formatting conflict. Check column headers."
       });
     } finally {
       setIsScanning(false);
@@ -136,10 +135,10 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
               <h3 className="text-white text-3xl font-black uppercase italic tracking-tighter leading-none">{phases[scanPhase]}</h3>
               {detectedRowCount > 0 && (
                 <p className="text-emerald-400 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2">
-                  <ListFilter size={14} /> Processing {detectedRowCount} Source Rows
+                  <ListFilter size={14} /> Mapping {detectedRowCount} registry items
                 </p>
               )}
-              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Gemini 3 Deep Extraction Mode</p>
+              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Data Fidelity Import Mode</p>
             </div>
             <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
                <div 
@@ -157,13 +156,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
           <div className="flex-1 text-center lg:text-left">
             <div className="flex items-center gap-3 mb-4 justify-center lg:justify-start">
                <div className="px-3 py-1 bg-blue-600/20 border border-blue-500/30 rounded-lg text-[9px] font-black uppercase tracking-widest text-blue-400">
-                 Neural Deep Scan v2.1
+                 Registry Data Import v3.0
                </div>
             </div>
-            <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">Global Data Scan</h3>
+            <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">External Data Registry</h3>
             <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed italic">
-              Upload <span className="text-white font-bold">PDF Schedules</span>, <span className="text-white font-bold">Excel Manpower</span>, or <span className="text-white font-bold">Roster Photos</span>. 
-              Enhanced engine ensures <span className="text-blue-400 font-black">100% row-by-row extraction</span> for large rosters.
+              Import <span className="text-white font-bold">Staff Excels</span> or <span className="text-white font-bold">Flight Schedules</span>. 
+              The system will map your headers directly to the operational hub. Use <span className="text-blue-400 font-black">1:1 Data Extraction</span> for bulk rosters.
             </p>
           </div>
           
@@ -175,7 +174,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
               disabled={isScanning}
               className="px-10 py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase flex items-center gap-4 shadow-2xl shadow-blue-600/30 transition-all active:scale-95 group/btn"
             >
-              <FileUp size={20} className="group-hover/btn:-translate-y-1 transition-transform" /> START DEEP SCAN
+              <FileUp size={20} className="group-hover/btn:-translate-y-1 transition-transform" /> IMPORT REGISTRY DATA
             </button>
           </div>
         </div>
@@ -200,8 +199,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
               <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-inner border border-emerald-100">
                 <Database size={48} className="text-emerald-500" />
               </div>
-              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Extraction Verified</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">The station logic has been successfully decoded. AI has mapped all available rows from the source.</p>
+              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Registry Processed</h3>
+              <p className="text-slate-400 text-sm font-medium mb-12">The system has mapped your data into the station registry. AI has performed a 1:1 conversion of all visible source rows.</p>
               
               <div className="grid grid-cols-2 gap-6 mb-12">
                 <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-blue-200 transition-all">
@@ -217,12 +216,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4">
-                <button onClick={() => setExtractedData(null)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 tracking-widest italic">Abort Sync</button>
+                <button onClick={() => setExtractedData(null)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 tracking-widest italic">Abort Import</button>
                 <button 
                   onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} 
                   className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl shadow-slate-950/20 hover:bg-emerald-600 transition-all active:scale-95"
                 >
-                  COMMIT TO SYSTEM
+                  COMMIT TO REGISTRY
                 </button>
               </div>
           </div>

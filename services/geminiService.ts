@@ -62,12 +62,17 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    STRICT DATA FIDELITY TASK: Extract ALL staff and flight data from the provided documents.
+    ACT AS A HIGH-FIDELITY 1:1 DATA MAPPER. Your sole task is to convert ALL rows from the provided documents into the requested JSON format.
     
-    INTEGRITY CONSTRAINTS:
-    1. ZERO OMISSION: Extract every single row. If the source has 100 staff, you return 100 staff.
-    2. UNIQUE IDENTIFICATION: Generate unique initials for every staff member.
-    3. ACCURACY: Capture every flight's STA/STD, Sector, and Date exactly.
+    STRICT IMPORT RULES:
+    1. ZERO LOGIC: Do not attempt to "clean", "validate", or apply "logic" to the data. If a row exists in the source, it must exist in your output.
+    2. TOTAL EXTRACTION: Return EVERY single staff member and EVERY single flight found. If the user provides 200 items, you must return 200 items.
+    3. HEADER MAPPING: Map column headers directly. 
+       - Map 'Name', 'Staff', 'User' -> 'name'.
+       - Map 'Flight', 'FLT', 'Flt No' -> 'flightNumber'.
+       - Map 'STA', 'Arrival Time' -> 'sta'.
+       - Map 'STD', 'Departure Time' -> 'std'.
+    4. NO OMISSION: Do not skip rows because of missing fields or formatting. Use empty strings if data is missing, but keep the record.
     
     Context Date: ${params.startDate || 'Current Operational Period'}
   `;
@@ -87,7 +92,7 @@ export const extractDataFromContent = async (params: {
       responseMimeType: "application/json", 
       temperature: 0,
       maxOutputTokens: 8192,
-      thinkingConfig: { thinkingBudget: 2048 },
+      thinkingConfig: { thinkingBudget: 1024 }, // Reduced thinking budget to favor direct mapping
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -118,18 +123,9 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    "Ramp": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Load Control": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Lost and Found": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Shift Leader": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Operations": { type: Type.STRING, enum: ['Yes', 'No'] }
-                  }
-                }
+                skillRatings: { type: Type.OBJECT }
               },
-              required: ["name", "initials"]
+              required: ["name"]
             }
           },
           shifts: {
@@ -142,16 +138,7 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    "Ramp": { type: Type.NUMBER },
-                    "Load Control": { type: Type.NUMBER },
-                    "Lost and Found": { type: Type.NUMBER },
-                    "Shift Leader": { type: Type.NUMBER },
-                    "Operations": { type: Type.NUMBER }
-                  }
-                }
+                roleCounts: { type: Type.OBJECT }
               }
             }
           }
