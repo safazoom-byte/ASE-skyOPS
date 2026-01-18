@@ -61,20 +61,27 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    Aviation Logistics Deep Scan: Exhaustive Data Extraction.
+    Aviation Logistics Deep Scan: Exhaustive Data Extraction for SDU Ground Handling.
     Reference Date: ${params.startDate || 'Current Operational Year'}
+    
+    CONTEXT FOR NEURAL ENGINE:
+    You are processing station schedules for a Ground Handling Company. 
+    Look for specific roles: Ramp, Load Control, Operations, Shift Leader.
+    Data may be in messy grids, flight schedules, or manpower lists.
 
     STRICTNESS MANDATE:
-    1. EXTRACT EVERY ROW: Do not skip rows. Do not summarize. If a row has a flight number or agent name, it MUST be included in the JSON.
-    2. TREAT SEPARATE TIMES AS SEPARATE ENTRIES: If a flight number appears twice with different times (e.g., STA 10:00 and STD 12:00), extract BOTH as distinct items or a combined turnaround. 
-    3. FUZZY HEADERS: Map columns by content if headers are missing.
+    1. EXTRACT EVERY ROW: Do not skip rows even if they look like headers. If a row has a flight number (e.g. SM123, LH456) or agent initials/name, it MUST be captured.
+    2. FUZZY PATTERN RECOGNITION:
+       - FLIGHTS: Matches "XX 123", "XX123", "Service: 123". Even if headers are missing, extract any string that fits a flight number pattern.
+       - STAFF: Matches names or 2-3 character initials in columns next to "Rank", "Position", or "Staff".
+       - TIMES: Capture 4-digit strings (1400) or HH:mm as STA/STD.
+    3. TREAT SEPARATE TIMES AS SEPARATE ENTRIES: If a flight number appears with an arrival time and later with a departure time, treat it as a turnaround flight with both STA and STD.
 
     INTELLIGENT RECOGNITION (NEURAL MAPPING):
-    - FLIGHTS: Look for patterns like "XX123", "SM 456". Even if headers say "Service" or are blank, if it looks like a flight number, extract it.
-    - TIME: Columns with "HH:mm" or "HHmm" are STA/STD.
-    - SECTORS: 3-letter uppercase (DXB, LHR, RUH) are Sectors (From/To).
-    - STAFF: Names (e.g., "John Doe") and Initials (2-3 chars, e.g., "JD", "MZ").
-    - DATES: Normalize to YYYY-MM-DD.
+    - FLIGHTS: Look for "Service", "Carrier", "Leg", "A/C".
+    - TIME: Columns with "STA", "STD", "Arr", "Dep".
+    - SECTORS: 3-letter uppercase (DXB, LHR, RUH).
+    - DATES: Capture DD/MM, DD-MMM, or YYYY-MM-DD. Normalize to YYYY-MM-DD using Reference Date Year.
 
     OUTPUT:
     Return JSON with exhaustive arrays: flights, staff, shifts.
@@ -88,14 +95,15 @@ export const extractDataFromContent = async (params: {
     });
   }
 
+  // Using Gemini 3 Pro for superior fuzzy reasoning to solve 'Logic Deficit' errors.
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-pro-preview',
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
       temperature: 0.1,
       maxOutputTokens: 25000,
-      thinkingConfig: { thinkingBudget: 16000 },
+      thinkingConfig: { thinkingBudget: 20000 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -212,11 +220,13 @@ export const modifyProgramWithAI = async (
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-pro-preview',
     contents: { parts },
     config: { 
       systemInstruction,
       responseMimeType: "application/json",
+      maxOutputTokens: 25000,
+      thinkingConfig: { thinkingBudget: 16000 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
