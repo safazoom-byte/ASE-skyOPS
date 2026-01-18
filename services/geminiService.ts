@@ -64,10 +64,9 @@ export const extractDataFromContent = async (params: {
     STRICT DATA FIDELITY TASK: Extract ALL staff and flight data from the provided documents.
     
     INTEGRITY CONSTRAINTS:
-    1. ZERO OMISSION: Extract every single row without summarization.
-    2. ROW-COUNT VERIFICATION: Total count of staff and flights must match the source.
-    3. UNIQUE IDENTIFICATION: Ensure unique initials for every staff member.
-    4. ACCURACY: Capture flight times (STA/STD) and sector data exactly.
+    1. ZERO OMISSION: Extract every single row. If the source has 100 staff, you return 100 staff.
+    2. UNIQUE IDENTIFICATION: Generate unique initials for every staff member.
+    3. ACCURACY: Capture every flight's STA/STD, Sector, and Date exactly.
     
     Context Date: ${params.startDate || 'Current Operational Period'}
   `;
@@ -118,16 +117,7 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    "Shift Leader": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Operations": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Ramp": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Load Control": { type: Type.STRING, enum: ['Yes', 'No'] },
-                    "Lost and Found": { type: Type.STRING, enum: ['Yes', 'No'] }
-                  }
-                }
+                skillRatings: { type: Type.OBJECT }
               },
               required: ["name", "initials"]
             }
@@ -142,16 +132,7 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    "Shift Leader": { type: Type.INTEGER },
-                    "Operations": { type: Type.INTEGER },
-                    "Ramp": { type: Type.INTEGER },
-                    "Load Control": { type: Type.INTEGER },
-                    "Lost and Found": { type: Type.INTEGER }
-                  }
-                }
+                roleCounts: { type: Type.OBJECT }
               }
             }
           }
@@ -171,41 +152,42 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT MANDATORY RULES.
+    You are the "Aviation Logistics Engine". Create a multi-day staff roster following these STRICT MANDATORY RULES. 
+    FAILURE TO COMPLY WITH THESE RULES IS AN OPERATIONAL BREACH:
     
     1. ROSTER LEAVE (CONTRACT BOUNDS): 
        - Staff of type 'Roster' have 'workFromDate' and 'workToDate'. 
-       - If the program date is NOT within their work period (Date < workFromDate OR Date > workToDate), they MUST be added to the 'offDuty' list with type 'ROSTER LEAVE'.
-       - Never assign them to any shift if they are outside these dates.
+       - IF the program date is BEFORE 'workFromDate' OR AFTER 'workToDate', that staff member MUST be placed in the 'offDuty' list for that day with type 'ROSTER LEAVE'.
+       - They are strictly FORBIDDEN from being assigned to any shift or flight on those dates.
 
     2. LOCAL OFF DAYS (5/2 PATTERN):
-       - Local staff MUST have 2 days OFF (Type: 'DAY OFF') every 7 days.
-       - Do not work Local staff more than 5 consecutive days.
+       - Staff of type 'Local' MUST NOT work more than 5 consecutive days.
+       - They MUST have exactly 2 days OFF (type 'DAY OFF') in the 'offDuty' array after 5 days of work.
 
-    3. ABSENCE REGISTRY (PRIORITY):
-       - Parse the 'Personnel Absence & Requests' box immediately and move requested staff to 'offDuty'.
+    3. ABSENCE REGISTRY (PRIORITY 1):
+       - Check the 'Personnel Absence & Requests' box immediately.
+       - If a staff member is requested OFF, they MUST be in the 'offDuty' array for those dates.
 
-    4. NO RESERVE/STANDBY LIMBO:
-       - There is no "Station Reserve". Staff are either:
-         a) Assigned to a specific shift.
-         b) On official Leave/Off-Duty (MUST appear in offDuty).
-       - Ensure every person listed for a day has a definitive assignment or an off-duty record.
+    4. NO STANDBY LIMBO:
+       - Every staff member for every day must have a clear status.
+       - If they are not assigned to a flight shift, they MUST be in the 'offDuty' array.
+       - NEVER use the term "Station Reserve" or "Standby" in assignments. 
+       - If they aren't working a flight, they are in the Leaves Registry.
 
     5. DAY 1 REST GUARD: 
-       - Minimum ${config.minRestHours} hours rest from previous finish times required.
+       - Check 'Previous Duty Log'. Staff need ${config.minRestHours} hours rest from their previous finish time before their first shift in this new period.
 
     OUTPUT FORMAT:
     - programs: Array of DailyProgram objects.
-    - shortageReport: Array of ShortageWarning if rest/coverage rules are bent.
+    - shortageReport: Array of ShortageWarning.
   `;
 
   const prompt = `
-    Window: ${config.numDays} Days from ${config.startDate}
-    Staff: ${JSON.stringify(data.staff)}
-    Flights: ${JSON.stringify(data.flights)}
-    Shifts: ${JSON.stringify(data.shifts)}
-    Logs: ${constraintsLog}
-    Directives: ${config.customRules}
+    Operational Window: ${config.numDays} Days starting from ${config.startDate}
+    Staff List: ${JSON.stringify(data.staff)}
+    Flight Schedule: ${JSON.stringify(data.flights)}
+    Shift Templates: ${JSON.stringify(data.shifts)}
+    Station Logs: ${constraintsLog}
   `;
 
   const response = await ai.models.generateContent({

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -18,7 +19,8 @@ import {
   CheckCircle2,
   CalendarDays,
   Settings,
-  Check
+  Check,
+  Calendar
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -291,6 +293,14 @@ const App: React.FC = () => {
     setActiveTab('program');
   };
 
+  const navigationTabs = [
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+    { id: 'flights', icon: Activity, label: 'Flights' },
+    { id: 'staff', icon: Users, label: 'Manpower' },
+    { id: 'shifts', icon: Clock, label: 'Duty Master' },
+    { id: 'program', icon: CalendarDays, label: 'Live Program' },
+  ];
+
   const checklistPoints = [
     { label: "Day 1 Rest Guard", desc: "Previous shift finish times analyzed and respected." },
     { label: "Absence Registry", desc: "All 'Off' dates from Absence Box have been strictly applied." },
@@ -314,13 +324,7 @@ const App: React.FC = () => {
         </div>
 
         <nav className="hidden md:flex items-center gap-2">
-          {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
-            { id: 'flights', icon: Activity, label: 'Flights' },
-            { id: 'staff', icon: Users, label: 'Manpower' },
-            { id: 'shifts', icon: Clock, label: 'Duty Master' },
-            { id: 'program', icon: CalendarDays, label: 'Live Program' },
-          ].map(tab => (
+          {navigationTabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
@@ -336,11 +340,48 @@ const App: React.FC = () => {
 
         <button 
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
-          className="md:hidden p-3 bg-white/5 text-white rounded-xl"
+          className="md:hidden p-3 bg-white/5 text-white rounded-xl active:scale-95 transition-all"
         >
           {isMobileMenuOpen ? <X /> : <Menu />}
         </button>
       </header>
+
+      {/* Mobile Menu Overlay */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-3xl md:hidden flex flex-col p-12 animate-in fade-in zoom-in-95 duration-500">
+          <div className="flex justify-between items-center mb-20">
+            <div className="flex items-center gap-4">
+              <Plane className="text-blue-500" size={32} />
+              <h1 className="text-2xl font-black italic text-white uppercase tracking-tighter">SkyOPS</h1>
+            </div>
+            <button onClick={() => setIsMobileMenuOpen(false)} className="p-4 bg-white/5 text-white rounded-2xl">
+              <X size={24} />
+            </button>
+          </div>
+          
+          <nav className="flex flex-col gap-6">
+            {navigationTabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`flex items-center gap-6 text-left py-6 px-8 rounded-[2rem] transition-all ${
+                  activeTab === tab.id ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30' : 'text-slate-500 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <tab.icon size={28} />
+                <span className="text-2xl font-black uppercase italic tracking-tighter leading-none">{tab.label}</span>
+              </button>
+            ))}
+          </nav>
+          
+          <div className="mt-auto pt-12 border-t border-white/5">
+            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em] text-center">Operational Command Hub v3.1</p>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-6 lg:p-12">
         {error && (
@@ -379,7 +420,7 @@ const App: React.FC = () => {
                         <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-amber-200 transition-all">
                            <Clock className="text-amber-500 mb-3" size={20} />
                            <p className="text-3xl font-black text-slate-900 italic leading-none mb-1">{activeShiftsInRange.length}</p>
-                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Duty Slots</p>
+                           <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Weekly Shifts</p>
                         </div>
                         <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 hover:border-indigo-200 transition-all">
                            <ShieldCheck className="text-indigo-500 mb-3" size={20} />
@@ -405,9 +446,42 @@ const App: React.FC = () => {
                       <div className="space-y-10 mb-12">
                         <div className="space-y-4">
                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] block ml-1">Date Window</label>
-                           <div className="flex gap-2">
-                             <input type="date" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl text-[11px] font-black outline-none focus:border-blue-500 transition-all" value={startDate} onChange={e => setStartDate(e.target.value)} />
-                             <input type="date" className="flex-1 bg-white/5 border border-white/10 p-4 rounded-2xl text-[11px] font-black outline-none focus:border-blue-500 transition-all" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                           <div className="grid grid-cols-2 gap-4">
+                             <div className="space-y-2">
+                               <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 opacity-60">Start</label>
+                               <div 
+                                 onClick={() => (document.getElementById('start-date-picker') as any)?.showPicker?.()}
+                                 className="bg-white/5 border border-white/10 p-4 rounded-2xl flex items-center justify-between cursor-pointer hover:bg-white/10 transition-all group"
+                               >
+                                 <span className="text-[11px] font-black text-white">{startDate}</span>
+                                 <Calendar size={14} className="text-slate-500 group-hover:text-blue-400 transition-colors" />
+                                 <input 
+                                   id="start-date-picker"
+                                   type="date" 
+                                   className="sr-only" 
+                                   value={startDate} 
+                                   onChange={e => setStartDate(e.target.value)} 
+                                 />
+                               </div>
+                             </div>
+                             <div className="space-y-2">
+                               <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 opacity-60">End</label>
+                               <div 
+                                 onClick={() => (document.getElementById('end-date-picker') as any)?.showPicker?.()}
+                                 className="bg-white/5 border border-white/10 p-4 rounded-2xl flex items-center justify-between cursor-pointer hover:bg-white/10 transition-all group"
+                               >
+                                 <span className="text-[11px] font-black text-white">{endDate}</span>
+                                 <Calendar size={14} className="text-slate-500 group-hover:text-blue-400 transition-colors" />
+                                 <input 
+                                   id="end-date-picker"
+                                   type="date" 
+                                   className="sr-only" 
+                                   value={endDate} 
+                                   min={startDate}
+                                   onChange={e => setEndDate(e.target.value)} 
+                                 />
+                               </div>
+                             </div>
                            </div>
                         </div>
 
@@ -526,7 +600,7 @@ const App: React.FC = () => {
       {showSuccessChecklist && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-3xl animate-in zoom-in-95 duration-500">
            <div className="bg-white rounded-[5rem] shadow-2xl max-w-2xl w-full p-16 border border-white/10 overflow-hidden relative">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px] pointer-events-none"></div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/5 blur-[80px] pointer-events-none"></div>
               
               <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-inner border border-emerald-100">
                  <CheckCircle2 size={56} className="text-emerald-500" />
