@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -53,6 +52,7 @@ const safeParseJson = (text: string | undefined): any => {
     return JSON.parse(jsonCandidate);
   } catch (e) {
     console.error("Advanced JSON Parse Failure. Payload:", jsonCandidate);
+    // If extraction fails, return empty arrays instead of null to prevent frontend crashes
     return { flights: [], staff: [], shifts: [] };
   }
 };
@@ -68,9 +68,9 @@ export const extractDataFromContent = async (params: {
     CRITICAL EXTRACTION TASK: Convert the provided aviation ground handling documents into structured JSON.
     
     INTELLIGENT MAPPING RULES:
-    1. HEADERS: Map "Employee/Emp/Agent" to 'name'. Map "FLT/Flight/Service" to 'flightNumber'. 
-    2. TIME: Map "STA/Arrival" to 'sta' and "STD/Departure" to 'std'.
-    3. SKILLS: If a person is listed as qualified for a task, set skill to "Yes".
+    1. HEADERS: Map "Employee", "Agent", "Personnel", "Emp", "Name" to 'name'. Map "FLT", "Flt No", "Flight", "Service" to 'flightNumber'. 
+    2. TIME: Map "STA", "Arrival", "ETA" to 'sta' and "STD", "Departure", "ETD" to 'std'.
+    3. SKILLS: If a person is listed as qualified, set skill to "Yes". Interpret "Qualified", "1", "Checkmark", "P" as "Yes".
     4. NO OMISSION: Every row found in the source MUST be in the JSON arrays. 
     5. FALLBACK: If a date is missing, use the context date: ${params.startDate || 'Current Week'}.
     
@@ -92,6 +92,7 @@ export const extractDataFromContent = async (params: {
       responseMimeType: "application/json", 
       temperature: 0, 
       maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 2048 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -124,13 +125,15 @@ export const extractDataFromContent = async (params: {
                 workToDate: { type: Type.STRING },
                 skillRatings: { 
                   type: Type.OBJECT,
+                  description: "Specific station skill proficiencies",
                   properties: {
                     "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
                     "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
                     "Lost and Found": { type: Type.STRING, enum: ["Yes", "No"] },
                     "Shift Leader": { type: Type.STRING, enum: ["Yes", "No"] },
                     "Operations": { type: Type.STRING, enum: ["Yes", "No"] }
-                  }
+                  },
+                  required: ["Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations"]
                 }
               },
               required: ["name"]
@@ -148,13 +151,15 @@ export const extractDataFromContent = async (params: {
                 minStaff: { type: Type.NUMBER },
                 roleCounts: { 
                   type: Type.OBJECT,
+                  description: "Required staff counts per role",
                   properties: {
                     "Ramp": { type: Type.INTEGER },
                     "Load Control": { type: Type.INTEGER },
                     "Lost and Found": { type: Type.INTEGER },
                     "Shift Leader": { type: Type.INTEGER },
                     "Operations": { type: Type.INTEGER }
-                  }
+                  },
+                  required: ["Ramp", "Load Control", "Lost and Found", "Shift Leader", "Operations"]
                 }
               }
             }
