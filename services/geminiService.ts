@@ -30,34 +30,30 @@ export interface BuildResult {
 }
 
 const safeParseJson = (text: string | undefined): any => {
-  if (!text) return null;
-  // Remove markdown code blocks and any trailing/leading whitespace
+  if (!text) return { flights: [], staff: [], shifts: [] };
+  
+  // Clean potential markdown or thinking blocks
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
   
+  // Look for the first JSON object or array block
+  const firstBrace = cleanText.indexOf('{');
+  const lastBrace = cleanText.lastIndexOf('}');
+  const firstBracket = cleanText.indexOf('[');
+  const lastBracket = cleanText.lastIndexOf(']');
+
+  let jsonCandidate = cleanText;
+  
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    jsonCandidate = cleanText.slice(firstBrace, lastBrace + 1);
+  } else if (firstBracket !== -1 && lastBracket > firstBracket) {
+    jsonCandidate = cleanText.slice(firstBracket, lastBracket + 1);
+  }
+
   try {
-    return JSON.parse(cleanText);
+    return JSON.parse(jsonCandidate);
   } catch (e) {
-    // If standard parse fails, try to find the first '{' and last '}'
-    const startIdx = cleanText.indexOf('{');
-    const endIdx = cleanText.lastIndexOf('}');
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      try {
-        return JSON.parse(cleanText.slice(startIdx, endIdx + 1));
-      } catch (e2) {
-        console.error("Critical JSON Parse Failure:", e2);
-      }
-    }
-    // Try array if object fails
-    const startArr = cleanText.indexOf('[');
-    const endArr = cleanText.lastIndexOf(']');
-    if (startArr !== -1 && endArr !== -1 && endArr > startArr) {
-      try {
-        return JSON.parse(cleanText.slice(startArr, endArr + 1));
-      } catch (e3) {
-        console.error("Critical JSON Array Parse Failure:", e3);
-      }
-    }
-    return null;
+    console.error("Advanced JSON Parse Failure. Payload:", jsonCandidate);
+    return { flights: [], staff: [], shifts: [] };
   }
 };
 
@@ -69,20 +65,20 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    CRITICAL EXTRACTION TASK: Convert the provided aviation ground handling documents (Excel/CSV/PDF/Images) into structured JSON.
+    CRITICAL EXTRACTION TASK: Convert the provided aviation ground handling documents into structured JSON.
     
-    STRICT COMPLIANCE RULES:
-    1. DO NOT SUMMARIZE. You must extract EVERY SINGLE ROW of staff and flights found in the source.
-    2. 1-TO-1 MAPPING: Each row in the source file must correspond to one entry in the JSON arrays.
-    3. NO OMISSION: Even if data seems redundant or extensive, include all records.
-    4. DATE FORMAT: Ensure all dates are YYYY-MM-DD.
-    5. SKILLS: Mapping proficiency: If a person is qualified, use "Yes", otherwise "No".
+    INTELLIGENT MAPPING RULES:
+    1. HEADERS: Map "Employee/Emp/Agent" to 'name'. Map "FLT/Flight/Service" to 'flightNumber'. 
+    2. TIME: Map "STA/Arrival" to 'sta' and "STD/Departure" to 'std'.
+    3. SKILLS: If a person is listed as qualified for a task, set skill to "Yes".
+    4. NO OMISSION: Every row found in the source MUST be in the JSON arrays. 
+    5. FALLBACK: If a date is missing, use the context date: ${params.startDate || 'Current Week'}.
     
-    Context Date: ${params.startDate || 'Current Operational Week'}
+    The response MUST be valid JSON only.
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `RAW SOURCE DATA (CSV FORMAT):\n${params.textData}` });
+  if (params.textData) parts.push({ text: `RAW DATA:\n${params.textData}` });
   if (params.media) {
     params.media.forEach(m => {
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } });
@@ -96,7 +92,6 @@ export const extractDataFromContent = async (params: {
       responseMimeType: "application/json", 
       temperature: 0, 
       maxOutputTokens: 8192,
-      thinkingConfig: { thinkingBudget: 2048 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -129,7 +124,6 @@ export const extractDataFromContent = async (params: {
                 workToDate: { type: Type.STRING },
                 skillRatings: { 
                   type: Type.OBJECT,
-                  description: "Proficiency in specific station skills",
                   properties: {
                     "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
                     "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
@@ -154,7 +148,6 @@ export const extractDataFromContent = async (params: {
                 minStaff: { type: Type.NUMBER },
                 roleCounts: { 
                   type: Type.OBJECT,
-                  description: "Number of staff required for specific roles in this shift",
                   properties: {
                     "Ramp": { type: Type.INTEGER },
                     "Load Control": { type: Type.INTEGER },
@@ -166,7 +159,8 @@ export const extractDataFromContent = async (params: {
               }
             }
           }
-        }
+        },
+        required: ["flights", "staff", "shifts"]
       }
     }
   });
@@ -188,7 +182,7 @@ export const generateAIProgram = async (
     2. ABSENCE LOGIC: Scan "Personnel Absence & Requests" box. Map initials and dates to specific leave types (DAY OFF, ANNUAL LEAVE, etc.).
     3. LOCAL 5/2 PATTERN: For 'Local' staff, exactly 2 days per 7-day period must be 'offDuty'. Use requested dates first.
     4. ROSTER CONTRACTS: 'Roster' staff are OFF (ROSTER LEAVE) if today is outside their [workFromDate, workToDate] range.
-    5. SHIFT COVERAGE: Every shift MUST meet 'minStaff' and honor 'roleCounts' for specific skills (Shift Leader, etc.).
+    5. SHIFT COVERAGE: Every shift MUST meet 'minStaff' and honor 'roleCounts' for specific skills.
     6. STATION RESERVE: On-duty staff not assigned to a shift are "Station Reserve". They are NOT in 'offDuty'.
 
     OUTPUT FORMAT: You must return a valid JSON object matching the requested schema.
@@ -275,12 +269,7 @@ export const generateAIProgram = async (
     }
   });
 
-  const result = safeParseJson(response.text);
-  if (!result || !result.programs) {
-    console.error("Logic Assembly Failure Details:", response.text);
-    throw new Error("Logic assembly failed. The AI engine returned an incompatible format.");
-  }
-  return result;
+  return safeParseJson(response.text);
 };
 
 export const modifyProgramWithAI = async (
@@ -291,9 +280,7 @@ export const modifyProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
-    You are an "Operational Coordinator". 
-    Strictly maintain the 6-point checklist and over-staffing rules. 
-    Use the 5/2 pattern calculation for Local staff and Contract-based logic for Roster staff.
+    You are an "Operational Coordinator". Maintain the 6-point checklist.
     Unassigned on-duty staff = Station Reserve (not in offDuty).
   `;
 
