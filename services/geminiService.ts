@@ -73,6 +73,7 @@ export const extractDataFromContent = async (params: {
        - Map 'STA', 'Arrival Time' -> 'sta'.
        - Map 'STD', 'Departure Time' -> 'std'.
     4. NO OMISSION: Do not skip rows because of missing fields or formatting. Use empty strings if data is missing, but keep the record.
+    5. DATA IS TRUTH: The user has provided data that matches the fields exactly. DO NOT modify values.
     
     Context Date: ${params.startDate || 'Current Operational Period'}
   `;
@@ -92,7 +93,7 @@ export const extractDataFromContent = async (params: {
       responseMimeType: "application/json", 
       temperature: 0,
       maxOutputTokens: 8192,
-      thinkingConfig: { thinkingBudget: 1024 }, // Reduced thinking budget to favor direct mapping
+      thinkingConfig: { thinkingBudget: 512 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
@@ -123,7 +124,17 @@ export const extractDataFromContent = async (params: {
                 powerRate: { type: Type.NUMBER },
                 workFromDate: { type: Type.STRING },
                 workToDate: { type: Type.STRING },
-                skillRatings: { type: Type.OBJECT }
+                skillRatings: { 
+                  type: Type.OBJECT,
+                  description: "Map proficiency for specific aviation roles.",
+                  properties: {
+                    "Ramp": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Load Control": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Lost and Found": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Shift Leader": { type: Type.STRING, enum: ["Yes", "No"] },
+                    "Operations": { type: Type.STRING, enum: ["Yes", "No"] }
+                  }
+                }
               },
               required: ["name"]
             }
@@ -138,7 +149,17 @@ export const extractDataFromContent = async (params: {
                 endDate: { type: Type.STRING },
                 endTime: { type: Type.STRING },
                 minStaff: { type: Type.NUMBER },
-                roleCounts: { type: Type.OBJECT }
+                roleCounts: { 
+                  type: Type.OBJECT,
+                  description: "Minimum personnel required per role.",
+                  properties: {
+                    "Ramp": { type: Type.NUMBER },
+                    "Load Control": { type: Type.NUMBER },
+                    "Lost and Found": { type: Type.NUMBER },
+                    "Shift Leader": { type: Type.NUMBER },
+                    "Operations": { type: Type.NUMBER }
+                  }
+                }
               }
             }
           }
