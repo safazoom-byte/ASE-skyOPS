@@ -30,55 +30,24 @@ export interface BuildResult {
 
 /**
  * Advanced JSON repair utility to handle common LLM output errors 
- * like missing commas or markdown wrapping.
  */
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  
-  // 1. Remove markdown formatting if present
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
-  
-  // 2. Direct Parse Attempt
   try {
     return JSON.parse(cleanText);
   } catch (e) {
-    // 3. Extract the actual JSON block (finding first {/[ and last }/])
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
     );
-    const endIdx = Math.max(
-      cleanText.lastIndexOf('}'),
-      cleanText.lastIndexOf(']')
-    );
-    
-    if (startIdx === Infinity || endIdx === -1 || endIdx <= startIdx) return null;
-    
+    const endIdx = Math.max(cleanText.lastIndexOf('}'), cleanText.lastIndexOf(']'));
+    if (startIdx === Infinity || endIdx === -1) return null;
     let jsonCandidate = cleanText.slice(startIdx, endIdx + 1);
-
-    // 4. Aggressive Syntax Repair
-    const repairJson = (str: string) => {
-      let repaired = str.replace(/("[^"]*"\s*|\d+\s*|true\s*|false\s*|null\s*|\]\s*|\}\s*)(?=")/g, (match) => {
-        const trimmed = match.trimEnd();
-        if (!trimmed.endsWith(',') && !trimmed.endsWith('{') && !trimmed.endsWith('[')) {
-          return trimmed + ', ';
-        }
-        return match;
-      });
-      repaired = repaired.replace(/,\s*([\]}])/g, '$1');
-      return repaired;
-    };
-
     try {
       return JSON.parse(jsonCandidate);
     } catch (e2) {
-      try {
-        const fixed = repairJson(jsonCandidate);
-        return JSON.parse(fixed);
-      } catch (e3) {
-        console.error("JSON Repair Failed:", e3);
-        return null;
-      }
+      return null;
     }
   }
 };
@@ -92,46 +61,50 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const target = params.targetType || 'all';
   
-  const prompt = `
-    ACT AS AN AVIATION DATA ARCHITECT.
-    TASK: ${target.toUpperCase()} DATA EXTRACTION.
-    
-    SOURCE DATA MAPPING RULES:
-    
-    1. STAFF SHEETS:
+  const systemInstruction = `
+    ACT AS AN AVIATION LOGISTICS DATA ARCHITECT.
+    OBJECTIVE: Extract and normalize station data from a "Dual Master Sheet" (Combined Shifts & Flights).
+
+    EXTRACTION RULES FOR DUAL SHEETS:
+    If a row contains columns like "Shift Start", "Role Matrix", and "Flight No", you MUST create BOTH a Flight and a Shift object.
+
+    1. SHIFT EXTRACTION:
+       - 'Shift Start Date' -> pickupDate (YYYY-MM-DD)
+       - 'Shift Start Time' -> pickupTime (HH:mm)
+       - 'Shift End Date' -> endDate (YYYY-MM-DD)
+       - 'Shift End Time' -> endTime (HH:mm)
+       - 'Min Staff' / 'Max Staff' -> numeric values
+       - 'Target Power' -> targetPower
+       - 'Role Matrix' (e.g., "Shift Leader: 1, Ramp: 2"): Parse this string into the 'roleCounts' object with counts for each skill.
+       - 'Flight No' -> Add this value to the shift's 'flightIds' array.
+
+    2. FLIGHT EXTRACTION:
+       - 'Flight No' -> flightNumber
+       - 'Value_Date' -> date (YYYY-MM-DD)
+       - 'Value_STA' -> sta (HH:mm, ignore if "NS")
+       - 'Value_STD' -> std (HH:mm, ignore if "NS")
+       - 'Value_FROM' -> from
+       - 'Value_TO' -> to
+       - Flight Type: If both STA and STD exist, use "Turnaround".
+
+    3. STAFF REGISTRY (If provided):
        - 'Full Name' -> name
        - 'Initials' -> initials
-       - 'Category' -> type (Local or Roster)
-       - 'Power Rate' -> powerRate (number)
-       - 'Work From' -> workFromDate (YYYY-MM-DD)
-       - 'Work To' -> workToDate (YYYY-MM-DD)
-       - SKILL COLUMNS ('Shift Leader', 'Operations', 'Ramp', 'Load Contr', 'Lost and Found'): 
-         - Value 'YES' -> 'Yes', 'NO' -> 'No'.
-         - Map 'Load Contr' to 'Load Control' in the JSON object.
+       - 'Power Rate' -> powerRate (numeric)
+       - Discipline columns (Shift Leader, Operations, Ramp, Load Control, Lost and Found): Map "YES"/"NO" to "Yes"/"No".
 
-    2. SHIFT / SLOT SHEETS:
-       - 'Shift Start Date' -> pickupDate
-       - 'Shift Start Time' -> pickupTime
-       - 'Shift End Date' -> endDate
-       - 'Shift End Time' -> endTime
-       - 'Min Staff' -> minStaff
-       - 'Max Staff' -> maxStaff
-       - 'Target Power' -> targetPower
-       - 'Role Matrix' (e.g., "Shift Leader: 1, Ramp: 2"): Parse into roleCounts object.
-       - FLIGHT COUPLING: If a row has 'Flight No' and 'Value_' columns (Value_STA, Value_STD, Value_From, Value_To):
-         - Create a Flight object.
-         - Link the Flight's number to the shift's flightIds array.
+    DATE NORMALIZATION:
+    - Support DD/MM/YYYY and YYYY-MM-DD. Always output YYYY-MM-DD in JSON.
+    - Reference Date for calculations: ${params.startDate || 'today'}.
+  `;
 
-    3. GENERAL FORMATTING:
-       - Reference Date for relative parsing: ${params.startDate || 'today'}.
-       - All dates MUST be YYYY-MM-DD.
-       - All times MUST be HH:mm.
-       
-    RETURN STRICT JSON ONLY.
+  const prompt = `
+    TARGET MODE: ${target.toUpperCase()}
+    SOURCE DATA:
+    ${params.textData || "Analyze provided image for the combined Shift and Flight schedule."}
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `SOURCE DATA:\n${params.textData}` });
   if (Array.isArray(params.media)) {
     params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
@@ -141,6 +114,7 @@ export const extractDataFromContent = async (params: {
       model: 'gemini-3-flash-preview', 
       contents: { parts },
       config: { 
+        systemInstruction,
         responseMimeType: "application/json", 
         temperature: 0.1,
         responseSchema: {
@@ -158,8 +132,7 @@ export const extractDataFromContent = async (params: {
                   std: { type: Type.STRING },
                   date: { type: Type.STRING },
                   type: { type: Type.STRING }
-                },
-                required: ["flightNumber", "date"]
+                }
               }
             },
             staff: {
@@ -183,8 +156,7 @@ export const extractDataFromContent = async (params: {
                       'Lost and Found': { type: Type.STRING }
                     }
                   }
-                },
-                required: ["name"]
+                }
               }
             },
             shifts: {
@@ -210,8 +182,7 @@ export const extractDataFromContent = async (params: {
                       'Lost and Found': { type: Type.NUMBER }
                     }
                   }
-                },
-                required: ["pickupDate", "pickupTime"]
+                }
               }
             }
           }
@@ -232,24 +203,8 @@ export const generateAIProgram = async (
   config: { numDays: number, customRules: string, minRestHours: number, startDate: string }
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const systemInstruction = `
-    You are the "Aviation Logistics Engine". Generate a valid multi-day staff roster in STRICT JSON.
-    RULES:
-    1. Roster Leave: No assignments outside contract dates (workFromDate to workToDate).
-    2. Local Pattern: Enforce 2 days off after 5 work days.
-    3. Absence Box: All staff listed in registry MUST be in offDuty if they are on leave.
-    4. Completeness: Every staff member must appear in assignments or offDuty for EVERY day.
-    5. JSON: Strict syntax, no trailing commas, no conversational text.
-  `;
-
-  const prompt = `
-    Operational Window: ${config.numDays} Days from ${config.startDate}
-    Manpower: ${JSON.stringify(data.staff)}
-    Flights: ${JSON.stringify(data.flights)}
-    Shifts: ${JSON.stringify(data.shifts)}
-    Constraints: ${constraintsLog}
-  `;
+  const systemInstruction = "Aviation Logistics Engine. Build valid multi-day staff rosters in JSON. Respect contract dates and 5/2 local work patterns.";
+  const prompt = `Window: ${config.numDays} days from ${config.startDate}. Data: ${JSON.stringify(data)}. Constraints: ${constraintsLog}`;
 
   try {
     const response = await ai.models.generateContent({
@@ -259,68 +214,11 @@ export const generateAIProgram = async (
         systemInstruction, 
         responseMimeType: "application/json",
         thinkingConfig: { thinkingBudget: 8000 },
-        maxOutputTokens: 16000, 
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["programs", "shortageReport"],
-          properties: {
-            programs: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                required: ["day", "dateString", "assignments", "offDuty"],
-                properties: {
-                  day: { type: Type.NUMBER },
-                  dateString: { type: Type.STRING },
-                  assignments: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["staffId", "role"],
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        flightId: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        shiftId: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  offDuty: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["staffId", "type"],
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        type: { type: Type.STRING }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            shortageReport: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  staffName: { type: Type.STRING },
-                  flightNumber: { type: Type.STRING },
-                  actualRest: { type: Type.NUMBER },
-                  targetRest: { type: Type.NUMBER },
-                  reason: { type: Type.STRING }
-                }
-              }
-            }
-          }
-        }
+        maxOutputTokens: 16000
       }
     });
-
     const result = safeParseJson(response.text);
-    if (!result || !Array.isArray(result.programs)) {
-      throw new Error("Logic engine output failed validation. Please refine constraints and try again.");
-    }
+    if (!result || !result.programs) throw new Error("Output validation failed.");
     return result;
   } catch (error) {
     console.error("Generation Error:", error);
@@ -346,54 +244,9 @@ export const modifyProgramWithAI = async (
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: { parts },
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          required: ["programs", "explanation"],
-          properties: {
-            programs: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                required: ["day", "assignments", "offDuty"],
-                properties: {
-                  day: { type: Type.NUMBER },
-                  dateString: { type: Type.STRING },
-                  assignments: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["staffId", "role"],
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        flightId: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        shiftId: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  offDuty: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      required: ["staffId", "type"],
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        type: { type: Type.STRING }
-                      }
-                    }
-                  }
-                }
-              } 
-            },
-            explanation: { type: Type.STRING }
-          }
-        }
-      }
+      config: { responseMimeType: "application/json" }
     });
-
-    return safeParseJson(response.text) || { programs: data.programs, explanation: "Modification failed due to syntax constraints." };
+    return safeParseJson(response.text) || { programs: data.programs, explanation: "Failed to process modification." };
   } catch (error) {
     console.error("Chat Error:", error);
     throw error;
