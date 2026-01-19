@@ -155,7 +155,16 @@ export const extractDataFromContent = async (params: {
                   initials: { type: Type.STRING },
                   type: { type: Type.STRING },
                   powerRate: { type: Type.NUMBER },
-                  skillRatings: { type: Type.OBJECT }
+                  skillRatings: { 
+                    type: Type.OBJECT,
+                    properties: {
+                      'Shift Leader': { type: Type.STRING },
+                      'Operations': { type: Type.STRING },
+                      'Ramp': { type: Type.STRING },
+                      'Load Control': { type: Type.STRING },
+                      'Lost and Found': { type: Type.STRING }
+                    }
+                  }
                 },
                 required: ["name"]
               }
@@ -312,7 +321,39 @@ export const modifyProgramWithAI = async (
           type: Type.OBJECT,
           required: ["programs", "explanation"],
           properties: {
-            programs: { type: Type.ARRAY, items: { type: Type.OBJECT } },
+            programs: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                required: ["day", "assignments", "offDuty"],
+                properties: {
+                  day: { type: Type.NUMBER },
+                  dateString: { type: Type.STRING },
+                  assignments: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        staffId: { type: Type.STRING },
+                        flightId: { type: Type.STRING },
+                        role: { type: Type.STRING },
+                        shiftId: { type: Type.STRING }
+                      }
+                    }
+                  },
+                  offDuty: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        staffId: { type: Type.STRING },
+                        type: { type: Type.STRING }
+                      }
+                    }
+                  }
+                }
+              } 
+            },
             explanation: { type: Type.STRING }
           }
         }
