@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill } from '../types';
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
 import * as XLSX from 'xlsx';
-import { Clock, Trash2, Edit2, Users, Award, ShieldCheck, Target, Plus, Minus, FileDown, Calendar, Layers, Zap, Plane, Sparkles } from 'lucide-react';
+import { Clock, Trash2, Edit2, Users, Award, ShieldCheck, Target, Plus, Minus, FileDown, Calendar, Layers, Zap, Plane, Sparkles, Link as LinkIcon } from 'lucide-react';
 
 interface Props {
   shifts: ShiftConfig[];
@@ -55,9 +55,10 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     return hh + ':' + mm;
   };
 
-  const dayFlights = useMemo(() => {
-    return flights.filter(f => f.date === formData.pickupDate);
-  }, [flights, formData.pickupDate]);
+  // Show all flights to allow picking a flight to inherit its date, or filter to a reasonable range
+  const availableFlights = useMemo(() => {
+    return [...flights].sort((a, b) => a.date.localeCompare(b.date) || a.flightNumber.localeCompare(b.flightNumber));
+  }, [flights]);
 
   const updateRoleCount = (skill: Skill, delta: number) => {
     const current = formData.roleCounts || {};
@@ -151,6 +152,24 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleFlightToggle = (flight: Flight) => {
+    const current = formData.flightIds || [];
+    const isSelected = current.includes(flight.id);
+    
+    let next = isSelected 
+      ? current.filter(id => id !== flight.id) 
+      : [...current, flight.id];
+
+    // Inheritance logic: If we just added a flight, inherit its date
+    const updates: Partial<ShiftConfig> = { flightIds: next };
+    if (!isSelected) {
+      updates.pickupDate = flight.date;
+      updates.endDate = flight.date;
+    }
+
+    setFormData(prev => ({ ...prev, ...updates }));
+  };
+
   const groupedShifts = useMemo(() => {
     const groups: Record<string, ShiftConfig[]> = {};
     shifts.forEach(s => {
@@ -159,6 +178,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     });
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [shifts]);
+
+  const hasSelectedFlights = (formData.flightIds?.length || 0) > 0;
 
   return (
     <div className="space-y-12 pb-24 animate-in fade-in duration-500">
@@ -198,22 +219,38 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
             <form onSubmit={handleSubmit} className="space-y-12">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Calendar size={14} className="text-blue-500" /> Pickup (Shift Start)
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <Calendar size={14} className="text-blue-500" /> Pickup (Shift Start)
+                    </label>
+                    {hasSelectedFlights && (
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 text-blue-600 rounded-lg border border-blue-100 animate-pulse">
+                        <LinkIcon size={10} />
+                        <span className="text-[8px] font-black uppercase tracking-widest">Date Synced</span>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-3">
-                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
-                    <input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
+                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none transition-all focus:ring-4 focus:ring-blue-600/5" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none focus:ring-4 focus:ring-blue-600/5" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
                   </div>
                 </div>
 
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Calendar size={14} className="text-indigo-500" /> Release (Shift End)
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <Calendar size={14} className="text-indigo-500" /> Release (Shift End)
+                    </label>
+                    {hasSelectedFlights && (
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100 animate-pulse">
+                        <LinkIcon size={10} />
+                        <span className="text-[8px] font-black uppercase tracking-widest">Date Synced</span>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-3">
-                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
-                    <input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
+                    <input type="date" className="flex-[2] p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none transition-all focus:ring-4 focus:ring-indigo-600/5" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-5 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none focus:ring-4 focus:ring-indigo-600/5" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
                   </div>
                 </div>
               </div>
@@ -256,23 +293,24 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
               <div className="pt-10 border-t border-slate-50 space-y-8">
                 <h5 className="text-[10px] font-black text-amber-600 uppercase tracking-[0.2em] flex items-center gap-2"><Plane size={14} /> Flight Coupling</h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {dayFlights.length === 0 ? (
-                    <p className="text-[10px] text-slate-400 italic font-bold">No flights registered for this date.</p>
-                  ) : dayFlights.map(f => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto no-scrollbar pr-2">
+                  {availableFlights.length === 0 ? (
+                    <p className="text-[10px] text-slate-400 italic font-bold">No flights registered in system.</p>
+                  ) : availableFlights.map(f => (
                     <button 
                       key={f.id} type="button" 
-                      onClick={() => {
-                        const current = formData.flightIds || [];
-                        const next = current.includes(f.id) ? current.filter(id => id !== f.id) : [...current, f.id];
-                        setFormData({ ...formData, flightIds: next });
-                      }}
-                      className={`p-4 rounded-2xl border text-[10px] font-black uppercase italic tracking-widest transition-all text-left flex items-center justify-between ${
+                      onClick={() => handleFlightToggle(f)}
+                      className={`p-4 rounded-2xl border text-[10px] font-black uppercase italic tracking-widest transition-all text-left flex flex-col gap-1 ${
                         formData.flightIds?.includes(f.id) ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-indigo-400'
                       }`}
                     >
-                      {f.flightNumber}
-                      {formData.flightIds?.includes(f.id) ? <Plus className="rotate-45" size={12} /> : <Plus size={12} />}
+                      <div className="flex justify-between items-center w-full">
+                        <span>{f.flightNumber}</span>
+                        {formData.flightIds?.includes(f.id) ? <Plus className="rotate-45" size={12} /> : <Plus size={12} />}
+                      </div>
+                      <span className={`text-[8px] font-black opacity-60`}>
+                        {new Date(f.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                      </span>
                     </button>
                   ))}
                 </div>
