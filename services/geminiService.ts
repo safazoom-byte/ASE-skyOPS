@@ -58,20 +58,14 @@ const safeParseJson = (text: string | undefined): any => {
 
     // 4. Aggressive Syntax Repair
     const repairJson = (str: string) => {
-      // Fix missing commas between properties (e.g., "key": "val" "key2": ...)
-      // Look for value ends followed by a quote (next key)
       let repaired = str.replace(/("[^"]*"\s*|\d+\s*|true\s*|false\s*|null\s*|\]\s*|\}\s*)(?=")/g, (match) => {
         const trimmed = match.trimEnd();
-        // Add comma if not already ending in one, and not a container start
         if (!trimmed.endsWith(',') && !trimmed.endsWith('{') && !trimmed.endsWith('[')) {
           return trimmed + ', ';
         }
         return match;
       });
-
-      // Fix trailing commas before closing braces/brackets
       repaired = repaired.replace(/,\s*([\]}])/g, '$1');
-
       return repaired;
     };
 
@@ -98,24 +92,46 @@ export const extractDataFromContent = async (params: {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const target = params.targetType || 'all';
   
-  const typeInstructions = {
-    all: "Extract all flights, staff, and shifts found.",
-    flights: "FOCUS EXCLUSIVELY ON FLIGHTS. Look for flight numbers, sectors, and times.",
-    staff: "FOCUS EXCLUSIVELY ON STAFF. Extract names, initials, and skills.",
-    shifts: "FOCUS EXCLUSIVELY ON SHIFTS. Look for pickup times and role counts."
-  };
-
   const prompt = `
     ACT AS AN AVIATION DATA ARCHITECT.
-    MODE: ${target.toUpperCase()} EXTRACTION.
-    ${typeInstructions[target]}
-    Map skills to: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
-    Operation Start: ${params.startDate || 'today'}.
+    TASK: ${target.toUpperCase()} DATA EXTRACTION.
+    
+    SOURCE DATA MAPPING RULES:
+    
+    1. STAFF SHEETS:
+       - 'Full Name' -> name
+       - 'Initials' -> initials
+       - 'Category' -> type (Local or Roster)
+       - 'Power Rate' -> powerRate (number)
+       - 'Work From' -> workFromDate (YYYY-MM-DD)
+       - 'Work To' -> workToDate (YYYY-MM-DD)
+       - SKILL COLUMNS ('Shift Leader', 'Operations', 'Ramp', 'Load Contr', 'Lost and Found'): 
+         - Value 'YES' -> 'Yes', 'NO' -> 'No'.
+         - Map 'Load Contr' to 'Load Control' in the JSON object.
+
+    2. SHIFT / SLOT SHEETS:
+       - 'Shift Start Date' -> pickupDate
+       - 'Shift Start Time' -> pickupTime
+       - 'Shift End Date' -> endDate
+       - 'Shift End Time' -> endTime
+       - 'Min Staff' -> minStaff
+       - 'Max Staff' -> maxStaff
+       - 'Target Power' -> targetPower
+       - 'Role Matrix' (e.g., "Shift Leader: 1, Ramp: 2"): Parse into roleCounts object.
+       - FLIGHT COUPLING: If a row has 'Flight No' and 'Value_' columns (Value_STA, Value_STD, Value_From, Value_To):
+         - Create a Flight object.
+         - Link the Flight's number to the shift's flightIds array.
+
+    3. GENERAL FORMATTING:
+       - Reference Date for relative parsing: ${params.startDate || 'today'}.
+       - All dates MUST be YYYY-MM-DD.
+       - All times MUST be HH:mm.
+       
     RETURN STRICT JSON ONLY.
   `;
 
   const parts: any[] = [{ text: prompt }];
-  if (params.textData) parts.push({ text: `SOURCE:\n${params.textData}` });
+  if (params.textData) parts.push({ text: `SOURCE DATA:\n${params.textData}` });
   if (Array.isArray(params.media)) {
     params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
@@ -155,6 +171,8 @@ export const extractDataFromContent = async (params: {
                   initials: { type: Type.STRING },
                   type: { type: Type.STRING },
                   powerRate: { type: Type.NUMBER },
+                  workFromDate: { type: Type.STRING },
+                  workToDate: { type: Type.STRING },
                   skillRatings: { 
                     type: Type.OBJECT,
                     properties: {
@@ -178,7 +196,20 @@ export const extractDataFromContent = async (params: {
                   pickupTime: { type: Type.STRING },
                   endDate: { type: Type.STRING },
                   endTime: { type: Type.STRING },
-                  minStaff: { type: Type.NUMBER }
+                  minStaff: { type: Type.NUMBER },
+                  maxStaff: { type: Type.NUMBER },
+                  targetPower: { type: Type.NUMBER },
+                  flightIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  roleCounts: {
+                    type: Type.OBJECT,
+                    properties: {
+                      'Shift Leader': { type: Type.NUMBER },
+                      'Operations': { type: Type.NUMBER },
+                      'Ramp': { type: Type.NUMBER },
+                      'Load Control': { type: Type.NUMBER },
+                      'Lost and Found': { type: Type.NUMBER }
+                    }
+                  }
                 },
                 required: ["pickupDate", "pickupTime"]
               }
@@ -205,9 +236,9 @@ export const generateAIProgram = async (
   const systemInstruction = `
     You are the "Aviation Logistics Engine". Generate a valid multi-day staff roster in STRICT JSON.
     RULES:
-    1. Roster Leave: No assignments outside contract dates.
+    1. Roster Leave: No assignments outside contract dates (workFromDate to workToDate).
     2. Local Pattern: Enforce 2 days off after 5 work days.
-    3. Absence Box: All staff listed in registry MUST be in offDuty.
+    3. Absence Box: All staff listed in registry MUST be in offDuty if they are on leave.
     4. Completeness: Every staff member must appear in assignments or offDuty for EVERY day.
     5. JSON: Strict syntax, no trailing commas, no conversational text.
   `;
@@ -333,6 +364,7 @@ export const modifyProgramWithAI = async (
                     type: Type.ARRAY,
                     items: {
                       type: Type.OBJECT,
+                      required: ["staffId", "role"],
                       properties: {
                         staffId: { type: Type.STRING },
                         flightId: { type: Type.STRING },
@@ -345,6 +377,7 @@ export const modifyProgramWithAI = async (
                     type: Type.ARRAY,
                     items: {
                       type: Type.OBJECT,
+                      required: ["staffId", "type"],
                       properties: {
                         staffId: { type: Type.STRING },
                         type: { type: Type.STRING }
