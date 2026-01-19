@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
+import { extractDataFromContent, identifyMapping, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
 import { 
@@ -14,7 +13,11 @@ import {
   Clipboard, 
   Check, 
   Plane, 
-  Clock 
+  Clock,
+  CalendarDays,
+  Zap, 
+  ArrowRight,
+  Settings2
 } from 'lucide-react';
 
 interface Props {
@@ -40,13 +43,21 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   const [importMode, setImportMode] = useState<'upload' | 'paste'>(initialTarget ? 'paste' : 'upload');
   const [pasteTarget, setPasteTarget] = useState<PasteTarget>(initialTarget || 'flights');
   const [pastedText, setPastedText] = useState('');
+  
+  // Smart-Map State
+  const [pendingMapping, setPendingMapping] = useState<{ 
+    rows: any[][], 
+    target: PasteTarget, 
+    map: Record<string, number> 
+  } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
     "Analyzing document structure...",
     "Identifying column headers fuzzy match...",
     "Mapping staff registry synonyms...",
-    "Normalizing flight timestamps...",
+    "Normalizing power rates and dates...",
     "Validating extracted rows...",
     "Assembling station data..."
   ];
@@ -76,6 +87,69 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     });
   };
 
+  /**
+   * Local Parser: Fast-path for mapped data
+   */
+  const executeLocalMapping = () => {
+    if (!pendingMapping) return;
+    const { rows, target, map } = pendingMapping;
+    
+    // Skip header row if identified
+    const dataRows = rows.slice(1);
+    const result: any = { flights: [], staff: [], shifts: [] };
+
+    dataRows.forEach((row, idx) => {
+      if (!row || row.length === 0) return;
+
+      if (target === 'flights') {
+        const flight: any = {
+          id: Math.random().toString(36).substr(2, 9),
+          flightNumber: String(row[map.flightNumber] || '').trim().toUpperCase(),
+          from: String(row[map.from] || '').trim().toUpperCase(),
+          to: String(row[map.to] || '').trim().toUpperCase(),
+          sta: String(row[map.sta] || '').trim(),
+          std: String(row[map.std] || '').trim(),
+          date: String(row[map.date] || '').trim(),
+          type: 'Turnaround'
+        };
+        if (flight.flightNumber) result.flights.push(flight);
+      } else if (target === 'staff') {
+        const staff: any = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: String(row[map.name] || '').trim(),
+          initials: String(row[map.initials] || '').trim().toUpperCase(),
+          type: String(row[map.type] || '').toLowerCase().includes('rost') ? 'Roster' : 'Local',
+          powerRate: parseInt(String(row[map.powerRate] || '75')) || 75,
+          workFromDate: map.workFromDate !== -1 ? String(row[map.workFromDate] || '') : undefined,
+          workToDate: map.workToDate !== -1 ? String(row[map.workToDate] || '') : undefined,
+          skillRatings: {
+            'Ramp': String(row[map.skill_Ramp] || '').toLowerCase() === 'yes' ? 'Yes' : 'No',
+            'Operations': String(row[map.skill_Operations] || '').toLowerCase() === 'yes' ? 'Yes' : 'No',
+            'Load Control': String(row[map.skill_LoadControl] || '').toLowerCase() === 'yes' ? 'Yes' : 'No',
+            'Shift Leader': String(row[map.skill_ShiftLeader] || '').toLowerCase() === 'yes' ? 'Yes' : 'No'
+          }
+        };
+        if (staff.name) result.staff.push(staff);
+      } else if (target === 'shifts') {
+        const shift: any = {
+          id: Math.random().toString(36).substr(2, 9),
+          pickupDate: String(row[map.pickupDate] || '').trim(),
+          pickupTime: String(row[map.pickupTime] || '').trim(),
+          endDate: String(row[map.endDate] || '').trim(),
+          endTime: String(row[map.endTime] || '').trim(),
+          minStaff: parseInt(String(row[map.minStaff] || '0')) || 4,
+          maxStaff: parseInt(String(row[map.maxStaff] || '0')) || 8,
+          roleCounts: {}
+        };
+        if (shift.pickupDate) result.shifts.push(shift);
+      }
+    });
+
+    setExtractedData(result);
+    setDetectedRowCount(result.flights.length + result.staff.length + result.shifts.length);
+    setPendingMapping(null);
+  };
+
   const processImport = async (textData?: string, mediaParts: ExtractionMedia[] = [], target: 'flights' | 'staff' | 'shifts' | 'all' = 'all') => {
     setIsScanning(true);
     setScanError(null);
@@ -96,13 +170,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       } else {
         throw { 
           title: "Intelligent Mapping Failed", 
-          message: `The AI could not identify columns for your selected category (${target}). Ensure you are pasting relevant data.`
+          message: `The AI could not identify columns for your selected category (${target}). Ensure you are pasting relevant data and checking category headers.`
         };
       }
     } catch (error: any) {
       setScanError({
         title: error.title || "Mapping Error",
-        message: error.message || "The smart parser encountered an unexpected format. Try pasting the data as plain text."
+        message: error.message || "The smart parser encountered an unexpected format. Try providing headers like 'Name', 'Power Rate', and 'Work From'."
       });
     } finally {
       setIsScanning(false);
@@ -119,31 +193,54 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
 
+    const file = files[0];
+    const isExcel = file.name.match(/\.(xlsx|xls|csv)$/i);
+    
+    if (isExcel) {
+      setIsScanning(true);
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+        
+        // Identify target and mapping using AI on first few rows
+        const mappingResponse = await identifyMapping(rows, pasteTarget);
+        
+        setIsScanning(false);
+        if (mappingResponse && mappingResponse.columnMap) {
+          setPendingMapping({ 
+            rows, 
+            target: pasteTarget, 
+            map: mappingResponse.columnMap 
+          });
+        } else {
+          // Fallback to generic AI extraction if mapping fails
+          processImport(XLSX.utils.sheet_to_csv(worksheet), [], pasteTarget);
+        }
+      };
+      reader.readAsBinaryString(file);
+      return;
+    }
+
+    // PDF/Image Fallback
     let combinedTextData = '';
     let mediaParts: ExtractionMedia[] = [];
 
     for (const file of files) {
-      const isExcel = file.name.match(/\.(xlsx|xls|csv)$/i);
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       const isImage = file.type.startsWith('image/');
-      
       const base64 = await fileToBase64(file);
 
-      if (isExcel) {
-        const workbook = XLSX.read(base64, { type: 'base64' });
-        workbook.SheetNames.forEach(sheetName => {
-          const worksheet = workbook.Sheets[sheetName];
-          const csv = XLSX.utils.sheet_to_csv(worksheet);
-          combinedTextData += `### FILE: ${file.name} | SHEET: ${sheetName} ###\n` + csv + '\n\n';
-        });
-      } else if (isPdf) {
+      if (isPdf) {
         mediaParts.push({ data: base64, mimeType: 'application/pdf' });
       } else if (isImage) {
         mediaParts.push({ data: base64, mimeType: file.type });
       }
     }
-
-    processImport(combinedTextData || undefined, mediaParts, 'all');
+    processImport(undefined, mediaParts, 'all');
   };
 
   const getTargetColor = () => {
@@ -206,16 +303,43 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
           <div className="animate-in fade-in slide-in-from-top-4 duration-500">
             {importMode === 'upload' ? (
-              <div className="flex flex-wrap items-center gap-4 w-full">
-                <input type="file" multiple accept="image/*,.xlsx,.xls,.csv,.pdf,.json" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isScanning}
-                  className="w-full lg:w-auto px-10 py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-sm uppercase italic flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/30 transition-all active:scale-95 border border-white/10"
-                >
-                  <FileUp size={24} /> SELECT STATION DOCUMENTS
-                </button>
-                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic ml-auto hidden lg:block">AUTO-IDENTIFY CATEGORIES (ALL)</p>
+              <div className="space-y-8">
+                {/* Category Selector */}
+                <div className="grid grid-cols-3 gap-4">
+                  <button 
+                    onClick={() => setPasteTarget('flights')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'flights' ? 'bg-blue-600 border-blue-400 text-white shadow-xl shadow-blue-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-blue-500/30'}`}
+                  >
+                    <Plane size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">FLIGHTS</span>
+                  </button>
+                  <button 
+                    onClick={() => setPasteTarget('staff')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'staff' ? 'bg-emerald-600 border-emerald-400 text-white shadow-xl shadow-emerald-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-emerald-500/30'}`}
+                  >
+                    <Users size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">STAFF</span>
+                  </button>
+                  <button 
+                    onClick={() => setPasteTarget('shifts')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'shifts' ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl shadow-indigo-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-indigo-500/30'}`}
+                  >
+                    <Clock size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">SHIFTS</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 w-full">
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isScanning}
+                    className="w-full lg:w-auto px-10 py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-sm uppercase italic flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/30 transition-all active:scale-95 border border-white/10"
+                  >
+                    <FileUp size={24} /> SELECT SPREADSHEET
+                  </button>
+                  <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic ml-auto hidden lg:block">SMART-MAP TECHNOLOGY ACTIVE</p>
+                </div>
               </div>
             ) : (
               <div className="space-y-8">
@@ -279,30 +403,81 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         )}
       </div>
 
+      {/* Smart Mapping Confirmation Modal */}
+      {pendingMapping && (
+        <div className="absolute inset-0 z-[2200] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl rounded-[4rem]">
+          <div className="bg-white rounded-[4rem] shadow-2xl max-w-xl w-full p-12 text-center animate-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-indigo-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8">
+              <Settings2 size={40} className="text-indigo-600" />
+            </div>
+            <h3 className="text-2xl font-black italic uppercase mb-2 text-slate-950 tracking-tighter">Confirm AI Column Mapping</h3>
+            <p className="text-slate-400 text-xs font-medium mb-10">AI has identified the following structure in your file.</p>
+            
+            <div className="bg-slate-50 rounded-[2.5rem] p-8 space-y-3 mb-10 text-left">
+              {/* Fix: cast idx to number to avoid "Operator '+' cannot be applied to types 'unknown' and '1'" error */}
+              {Object.entries(pendingMapping.map).filter(([_, idx]) => idx !== -1).map(([field, idx]) => (
+                <div key={field} className="flex items-center justify-between py-2 border-b border-slate-200 last:border-0">
+                  <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{field}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold text-indigo-600">COL {(idx as number) + 1}</span>
+                    <span className="text-[9px] font-black uppercase text-slate-300 italic">"{String(pendingMapping.rows[0][idx as number] || '').substring(0, 10)}..."</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-4">
+              <button onClick={() => setPendingMapping(null)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 italic">Abort</button>
+              <button onClick={executeLocalMapping} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] flex items-center justify-center gap-3">
+                CONFIRM & IMPORT <ArrowRight size={16}/>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {extractedData && (
         <div className="absolute inset-0 z-[2500] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl rounded-[4rem]">
-          <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 text-center animate-in zoom-in-95 duration-300">
-              <div className="w-24 h-24 bg-indigo-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 border border-indigo-100 shadow-inner">
-                <Database size={48} className="text-indigo-500" />
+          <div className="bg-white rounded-[4rem] shadow-2xl max-w-4xl w-full p-12 lg:p-16 text-center animate-in zoom-in-95 duration-300">
+              <div className="w-20 h-20 bg-indigo-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 border border-indigo-100 shadow-inner">
+                <Database size={40} className="text-indigo-500" />
               </div>
-              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Sync Validation Success</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">Confirm the discovered records before committing to the station registry.</p>
+              <h3 className="text-2xl font-black italic uppercase mb-2 text-slate-950 tracking-tighter">Sync Validation Success</h3>
+              <p className="text-slate-400 text-xs font-medium mb-8">Review critical registry data extracted by the engine.</p>
               
-              <div className="grid grid-cols-3 gap-4 mb-12">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 text-left">
                 <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.flights?.length ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
-                  <Plane size={18} className="mx-auto mb-3 text-blue-500" />
-                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.flights?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Flights</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <Plane size={18} className="text-blue-500" />
+                    <span className="text-2xl font-black text-slate-900 italic leading-none">{extractedData.flights?.length || 0}</span>
+                  </div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Discovered Flights</div>
                 </div>
+
                 <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.staff?.length ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
-                  <Users size={18} className="mx-auto mb-3 text-emerald-500" />
-                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.staff?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Staff</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <Users size={18} className="text-emerald-500" />
+                    <span className="text-2xl font-black text-slate-900 italic leading-none">{extractedData.staff?.length || 0}</span>
+                  </div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Personnel Extracted</div>
+                  {extractedData.staff?.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-emerald-100 space-y-2">
+                       <div className="flex items-center gap-2 text-[8px] font-black text-emerald-700 uppercase">
+                          <Zap size={10} /> {extractedData.staff.filter(s => s.powerRate).length} Power Rates Found
+                       </div>
+                       <div className="flex items-center gap-2 text-[8px] font-black text-emerald-700 uppercase">
+                          <CalendarDays size={10} /> {extractedData.staff.filter(s => s.workFromDate).length} Contract Bounds Found
+                       </div>
+                    </div>
+                  )}
                 </div>
+
                 <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.shifts?.length ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
-                  <Clock size={18} className="mx-auto mb-3 text-indigo-500" />
-                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.shifts?.length || 0}</div>
-                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Shifts</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <Clock size={18} className="text-indigo-500" />
+                    <span className="text-2xl font-black text-slate-900 italic leading-none">{extractedData.shifts?.length || 0}</span>
+                  </div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Duty Requirements</div>
                 </div>
               </div>
 

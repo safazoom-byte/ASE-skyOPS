@@ -1,3 +1,4 @@
+// Add React import to fix "Cannot find namespace 'React'" errors
 import React, { useState } from 'react';
 import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types';
 import { AVAILABLE_SKILLS } from '../constants';
@@ -6,18 +7,15 @@ import {
   Users,
   Edit2, 
   Trash2, 
-  GraduationCap, 
   FileSpreadsheet,
   User,
   Fingerprint,
   Plus,
   Eraser,
-  Calendar,
-  AlertTriangle,
-  Briefcase,
-  Zap,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Zap,
+  CalendarDays
 } from 'lucide-react';
 
 interface Props {
@@ -55,19 +53,23 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
   const handleNewStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaff.name) return;
-    const initials = newStaff.initials || generateInitials(newStaff.name);
+    const initials = (newStaff.initials || generateInitials(newStaff.name)).toUpperCase();
     const id = Math.random().toString(36).substring(2, 11);
+    
+    // Only save dates for Roster staff
+    const isRoster = newStaff.type === 'Roster';
+    
     const staffData: Staff = {
       id,
       name: newStaff.name,
-      initials: (initials || "").toUpperCase(),
+      initials,
       type: (newStaff.type as StaffCategory) || 'Local',
-      workPattern: newStaff.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off',
+      workPattern: isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off',
       powerRate: Number(newStaff.powerRate) || 75,
       skillRatings: newStaff.skillRatings || {},
       maxShiftsPerWeek: defaultMaxShifts,
-      workFromDate: newStaff.type === 'Roster' ? newStaff.workFromDate : undefined,
-      workToDate: newStaff.type === 'Roster' ? newStaff.workToDate : undefined
+      workFromDate: isRoster ? newStaff.workFromDate : undefined,
+      workToDate: isRoster ? newStaff.workToDate : undefined
     };
     onUpdate(staffData);
     setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, skillRatings: {}, workFromDate: '', workToDate: '' });
@@ -81,13 +83,26 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       setEditingStaff(prev => {
         if (!prev) return null;
         const update: any = { [name]: finalValue };
-        if (name === 'type') update.workPattern = finalValue === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+        if (name === 'type') {
+          update.workPattern = finalValue === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+          // Clear dates if switching to Local
+          if (finalValue === 'Local') {
+            update.workFromDate = undefined;
+            update.workToDate = undefined;
+          }
+        }
         return { ...prev, ...update };
       });
     } else {
       setNewStaff(prev => {
         const update: any = { [name]: finalValue };
-        if (name === 'type') update.workPattern = finalValue === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+        if (name === 'type') {
+          update.workPattern = finalValue === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off';
+          if (finalValue === 'Local') {
+            update.workFromDate = '';
+            update.workToDate = '';
+          }
+        }
         return { ...prev, ...update };
       });
     }
@@ -114,6 +129,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Category': s.type,
       'Power Rate': `${s.powerRate}%`,
       'Work Pattern': s.workPattern,
+      'From Date': s.type === 'Roster' ? (s.workFromDate || 'N/A') : 'Permanent',
+      'To Date': s.type === 'Roster' ? (s.workToDate || 'N/A') : 'Permanent',
       ...AVAILABLE_SKILLS.reduce((acc, skill) => ({ ...acc, [skill]: (s.skillRatings && s.skillRatings[skill]) || 'No' }), {})
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -174,8 +191,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
             <div className="space-y-3">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
               <select name="type" className="w-full px-6 py-5 bg-slate-50 border border-slate-200 rounded-[2rem] font-bold text-sm outline-none appearance-none" value={newStaff.type} onChange={(e) => handleInputChange(e, false)}>
-                <option value="Local">Local (Fixed)</option>
-                <option value="Roster">Roster (Variable)</option>
+                <option value="Local">Local (Permanent 5/2)</option>
+                <option value="Roster">Roster (Contract-Based)</option>
               </select>
             </div>
             <div className="space-y-3">
@@ -188,18 +205,24 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
               </div>
             </div>
           </div>
+          
           {newStaff.type === 'Roster' && (
-            <div className="grid grid-cols-2 gap-8 p-10 bg-slate-50 rounded-[3rem] border">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-10 bg-indigo-50/30 rounded-[3rem] border border-indigo-100 animate-in slide-in-from-top-4">
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Service From</label>
-                <input type="date" name="workFromDate" className="w-full p-4 border rounded-2xl" value={newStaff.workFromDate} onChange={(e) => handleInputChange(e, false)} />
+                <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <CalendarDays size={14} className="text-indigo-600" /> Contract Start (Work From)
+                </label>
+                <input type="date" name="workFromDate" className="w-full p-4 border rounded-2xl bg-white font-bold" value={newStaff.workFromDate} onChange={(e) => handleInputChange(e, false)} />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Service To</label>
-                <input type="date" name="workToDate" className="w-full p-4 border rounded-2xl" value={newStaff.workToDate} onChange={(e) => handleInputChange(e, false)} />
+                <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <CalendarDays size={14} className="text-rose-600" /> Contract End (Work To)
+                </label>
+                <input type="date" name="workToDate" className="w-full p-4 border rounded-2xl bg-white font-bold" value={newStaff.workToDate} onChange={(e) => handleInputChange(e, false)} />
               </div>
             </div>
           )}
+
           <div className="space-y-4 pt-6 border-t border-slate-50">
             <p className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"> Discipline Matrix</p>
             <div className="flex flex-wrap gap-3">
@@ -229,18 +252,31 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
           staff.map((member) => {
             const skillRatings = member.skillRatings || {};
             const power = member.powerRate || 75;
+            const isRoster = member.type === 'Roster';
             return (
               <div key={member.id} className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 p-10 group hover:shadow-2xl transition-all relative overflow-hidden flex flex-col">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 group-hover:bg-indigo-50 transition-colors rounded-bl-[4rem] -mr-8 -mt-8 flex items-center justify-center pt-8 pr-8">
                    <span className="text-3xl font-black italic text-slate-200 group-hover:text-indigo-200">{member.initials}</span>
                 </div>
                 <div className="mb-8">
-                  <div className={`inline-block px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest mb-4 ${member.type === 'Roster' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
+                  <div className={`inline-block px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest mb-4 ${isRoster ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
                     {member.type} Agent
                   </div>
                   <h5 className="text-xl font-black text-slate-900 leading-tight mb-1 truncate">{member.name}</h5>
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{member.workPattern}</p>
+                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-4">{member.workPattern}</p>
+                  
+                  {isRoster && (member.workFromDate || member.workToDate) && (
+                    <div className="flex flex-col gap-1 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                      <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest">
+                        <span className="text-slate-400">Term:</span>
+                        <span className="text-slate-900 italic">
+                          {member.workFromDate ? new Date(member.workFromDate).toLocaleDateString() : '???'} — {member.workToDate ? new Date(member.workToDate).toLocaleDateString() : '???'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <div className="flex-1 space-y-6">
                   <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="flex items-center gap-3">
@@ -294,15 +330,30 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                   <input type="text" name="initials" className="w-full px-6 py-5 bg-slate-50 border rounded-[2rem] font-black uppercase" value={editingStaff.initials} onChange={(e) => handleInputChange(e, true)} />
                 </div>
               </div>
+              
               <div className="grid grid-cols-2 gap-6">
                 <select name="type" className="w-full px-6 py-5 bg-slate-50 border rounded-[2rem] font-bold appearance-none" value={editingStaff.type} onChange={(e) => handleInputChange(e, true)}>
-                  <option value="Local">Local</option>
-                  <option value="Roster">Roster</option>
+                  <option value="Local">Local (Permanent)</option>
+                  <option value="Roster">Roster (Contract)</option>
                 </select>
                 <div className="px-6 py-5 bg-slate-50 border rounded-[2rem] flex items-center">
                   <input type="range" name="powerRate" min="50" max="100" className="w-full accent-indigo-600" value={editingStaff.powerRate} onChange={(e) => handleInputChange(e, true)} />
                 </div>
               </div>
+
+              {editingStaff.type === 'Roster' && (
+                <div className="grid grid-cols-2 gap-6 animate-in slide-in-from-top-4">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">Contract From</label>
+                    <input type="date" name="workFromDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold" value={editingStaff.workFromDate || ''} onChange={(e) => handleInputChange(e, true)} />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase mb-2 block">Contract To</label>
+                    <input type="date" name="workToDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold" value={editingStaff.workToDate || ''} onChange={(e) => handleInputChange(e, true)} />
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4">
                 <p className="text-[9px] font-black text-slate-400 uppercase"> Discipline Access</p>
                 <div className="flex flex-wrap gap-2">
@@ -328,7 +379,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       {showWipeConfirm && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
            <div className="bg-white rounded-[4rem] shadow-2xl max-w-sm w-full p-12 text-center">
-              <AlertTriangle size={56} className="mx-auto text-rose-500 mb-8" />
+              <ShieldCheck size={56} className="mx-auto text-rose-500 mb-8" />
               <h4 className="text-2xl font-black uppercase italic mb-3">Registry Purge</h4>
               <p className="text-xs text-slate-500 mb-10">Permanently erase all personnel data?</p>
               <div className="flex gap-4">
