@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { Flight } from '../types';
-import { Trash2, Eraser, CalendarX, PlaneTakeoff, Clock, MapPin, Edit3, CalendarDays } from 'lucide-react';
+import { Trash2, Eraser, CalendarX, PlaneTakeoff, Clock, MapPin, Edit3, CalendarDays, Sparkles } from 'lucide-react';
 import { DAYS_OF_WEEK_FULL } from '../constants';
 
 interface Props {
@@ -10,9 +11,10 @@ interface Props {
   onAdd: (f: Flight) => void;
   onUpdate: (f: Flight) => void;
   onDelete: (id: string) => void;
+  onOpenScanner?: () => void;
 }
 
-export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, onAdd, onUpdate, onDelete }) => {
+export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
   const [newFlight, setNewFlight] = useState<Partial<Flight>>({
     flightNumber: '', from: '', to: '', sta: '', std: '', date: startDate || '', type: 'Turnaround'
   });
@@ -114,13 +116,22 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
             </p>
           </div>
         </div>
-        <button 
-          onClick={() => { if(confirm('Wipe all flight data? This cannot be undone.')) flights.forEach(f => onDelete(f.id)) }} 
-          className="px-8 py-5 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/20 rounded-2xl flex items-center gap-3 transition-all"
-        >
-          <Eraser size={20} />
-          <span className="text-[10px] font-black uppercase tracking-widest">Clear Schedule</span>
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={onOpenScanner}
+            className="px-8 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center gap-3 transition-all shadow-xl shadow-indigo-600/20 group"
+          >
+            <Sparkles size={18} className="group-hover:animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest italic">AI Smart Sync</span>
+          </button>
+          <button 
+            onClick={() => { if(confirm('Wipe all flight data? This cannot be undone.')) flights.forEach(f => onDelete(f.id)) }} 
+            className="px-8 py-5 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/20 rounded-2xl flex items-center gap-3 transition-all"
+          >
+            <Eraser size={20} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Clear All</span>
+          </button>
+        </div>
       </div>
 
       {/* Quick Add Form */}

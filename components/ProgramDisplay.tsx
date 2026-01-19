@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
@@ -20,7 +21,7 @@ interface Props {
 
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, startDate, endDate }) => {
   const sortedPrograms = useMemo(() => {
-    return [...programs].sort((a, b) => a.day - b.day);
+    return Array.isArray(programs) ? [...programs].sort((a, b) => a.day - b.day) : [];
   }, [programs]);
 
   const getFlightById = (id: string) => flights.find(f => f.id === id);
@@ -60,7 +61,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, 20);
 
       const assignmentsByShift: Record<string, Assignment[]> = {};
-      program.assignments.forEach(a => {
+      (program.assignments || []).forEach(a => {
         const sid = a.shiftId || 'no-shift';
         if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
         assignmentsByShift[sid].push(a);
@@ -95,7 +96,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     XLSX.writeFile(workbook, `ASE_SkyOPS_Program.xlsx`);
   };
 
-  if (!programs.length) return (
+  if (!sortedPrograms.length) return (
     <div className="py-32 text-center bg-white rounded-[4rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center">
       <Activity size={64} className="text-slate-100 mb-8 animate-pulse" />
       <h5 className="text-2xl font-black text-slate-300 uppercase italic tracking-tighter">Operational Plan Pending</h5>
@@ -122,7 +123,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       <div className="space-y-24">
         {sortedPrograms.map((program) => {
           const assignmentsByShift: Record<string, Assignment[]> = {};
-          program.assignments.forEach(a => {
+          (program.assignments || []).forEach(a => {
             const sid = a.shiftId || 'unassigned';
             if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
             assignmentsByShift[sid].push(a);
@@ -154,7 +155,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
+                      {Object.entries(assignmentsByShift).length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-8 py-12 text-center text-[10px] font-black uppercase text-slate-300 italic">No Assignments Registered</td>
+                        </tr>
+                      ) : Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
                         const sh = getShiftById(sid);
                         const uniqueFlights = (sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)))).map(fid => getFlightById(fid)).filter(Boolean);
                         const uniqueStaff = Array.from(new Set(assigs.map(a => a.staffId)));

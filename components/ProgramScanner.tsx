@@ -3,35 +3,52 @@ import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 import * as XLSX from 'xlsx';
-import { FileUp, Sparkles, Database, AlertCircle, HelpCircle, Search, Clock, Activity, Users, ListFilter } from 'lucide-react';
+import { 
+  FileUp, 
+  Database, 
+  AlertCircle, 
+  Search, 
+  Activity, 
+  Users, 
+  Sparkles, 
+  Clipboard, 
+  Check, 
+  Plane, 
+  Clock 
+} from 'lucide-react';
 
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => void;
   startDate?: string;
   numDays?: number;
+  initialTarget?: 'flights' | 'staff' | 'shifts';
 }
 
 interface ScanError {
   title: string;
   message: string;
-  suggestion?: string;
 }
 
-export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, numDays = 7 }) => {
+type PasteTarget = 'flights' | 'staff' | 'shifts';
+
+export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
   const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] } | null>(null);
   const [scanError, setScanError] = useState<ScanError | null>(null);
   const [detectedRowCount, setDetectedRowCount] = useState(0);
+  const [importMode, setImportMode] = useState<'upload' | 'paste'>(initialTarget ? 'paste' : 'upload');
+  const [pasteTarget, setPasteTarget] = useState<PasteTarget>(initialTarget || 'flights');
+  const [pastedText, setPastedText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const phases = [
-    "Analyzing cell structure...",
-    "Executing Flash-mapping...",
-    "Stabilizing JSON stream...",
-    "Reconstructing registry...",
-    "Balancing data integrity...",
-    "Finalizing import..."
+    "Analyzing document structure...",
+    "Identifying column headers fuzzy match...",
+    "Mapping staff registry synonyms...",
+    "Normalizing flight timestamps...",
+    "Validating extracted rows...",
+    "Assembling station data..."
   ];
 
   useEffect(() => {
@@ -39,7 +56,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     if (isScanning) {
       interval = setInterval(() => {
         setScanPhase(prev => (prev + 1) % phases.length);
-      }, 1000);
+      }, 1200);
     } else {
       setScanPhase(0);
     }
@@ -59,62 +76,33 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     });
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []) as File[];
-    if (files.length === 0) return;
-
+  const processImport = async (textData?: string, mediaParts: ExtractionMedia[] = [], target: 'flights' | 'staff' | 'shifts' | 'all' = 'all') => {
     setIsScanning(true);
     setScanError(null);
     setDetectedRowCount(0);
-    
+
     try {
-      let combinedTextData = '';
-      let mediaParts: ExtractionMedia[] = [];
-      let totalRows = 0;
-
-      for (const file of files) {
-        const isExcel = file.name.match(/\.(xlsx|xls|csv)$/i);
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const isImage = file.type.startsWith('image/');
-        
-        const base64 = await fileToBase64(file);
-
-        if (isExcel) {
-          const workbook = XLSX.read(base64, { type: 'base64' });
-          workbook.SheetNames.forEach(sheetName => {
-            const worksheet = workbook.Sheets[sheetName];
-            const csv = XLSX.utils.sheet_to_csv(worksheet);
-            const rowCount = csv.split('\n').filter(r => r.trim()).length;
-            totalRows += rowCount;
-            combinedTextData += `### FILE: ${file.name} | SHEET: ${sheetName} ###\n` + csv + '\n\n';
-          });
-        } else if (isPdf) {
-          mediaParts.push({ data: base64, mimeType: 'application/pdf' });
-        } else if (isImage) {
-          mediaParts.push({ data: base64, mimeType: file.type });
-        }
-      }
-
-      setDetectedRowCount(totalRows);
-
       const data = await extractDataFromContent({ 
-        textData: combinedTextData || undefined, 
+        textData, 
         media: mediaParts.length > 0 ? mediaParts : undefined,
-        startDate: startDate
+        startDate: startDate,
+        targetType: target
       });
 
-      if (data && (data.flights?.length > 0 || data.staff?.length > 0)) {
+      if (data && (data.flights?.length > 0 || data.staff?.length > 0 || data.shifts?.length > 0)) {
         setExtractedData(data);
+        const count = (data.flights?.length || 0) + (data.staff?.length || 0) + (data.shifts?.length || 0);
+        setDetectedRowCount(count);
       } else {
         throw { 
-          title: "Import Error", 
-          message: "The data mapping failed to produce a valid registry. Check if the headers like 'Name' or 'Flight' are present."
+          title: "Intelligent Mapping Failed", 
+          message: `The AI could not identify columns for your selected category (${target}). Ensure you are pasting relevant data.`
         };
       }
     } catch (error: any) {
       setScanError({
-        title: error.title || "Registry Sync Failed",
-        message: error.message || "High-volume data caused a structural conflict. Try splitting the file or ensuring headers are clear."
+        title: error.title || "Mapping Error",
+        message: error.message || "The smart parser encountered an unexpected format. Try pasting the data as plain text."
       });
     } finally {
       setIsScanning(false);
@@ -122,55 +110,158 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
     }
   };
 
+  const handlePasteSubmit = () => {
+    if (!pastedText.trim()) return;
+    processImport(pastedText, [], pasteTarget);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0) return;
+
+    let combinedTextData = '';
+    let mediaParts: ExtractionMedia[] = [];
+
+    for (const file of files) {
+      const isExcel = file.name.match(/\.(xlsx|xls|csv)$/i);
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isImage = file.type.startsWith('image/');
+      
+      const base64 = await fileToBase64(file);
+
+      if (isExcel) {
+        const workbook = XLSX.read(base64, { type: 'base64' });
+        workbook.SheetNames.forEach(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(worksheet);
+          combinedTextData += `### FILE: ${file.name} | SHEET: ${sheetName} ###\n` + csv + '\n\n';
+        });
+      } else if (isPdf) {
+        mediaParts.push({ data: base64, mimeType: 'application/pdf' });
+      } else if (isImage) {
+        mediaParts.push({ data: base64, mimeType: file.type });
+      }
+    }
+
+    processImport(combinedTextData || undefined, mediaParts, 'all');
+  };
+
+  const getTargetColor = () => {
+    if (importMode === 'upload') return 'border-slate-700';
+    switch (pasteTarget) {
+      case 'flights': return 'border-blue-500/50';
+      case 'staff': return 'border-emerald-500/50';
+      case 'shifts': return 'border-indigo-500/50';
+      default: return 'border-slate-700';
+    }
+  };
+
   return (
-    <div className="relative">
+    <div className="relative h-full">
       {isScanning && (
-        <div className="fixed inset-0 z-[2000] bg-slate-950/98 backdrop-blur-3xl flex items-center justify-center p-6 text-center">
+        <div className="absolute inset-0 z-[2000] bg-slate-950/98 backdrop-blur-3xl flex items-center justify-center p-6 text-center rounded-[4rem]">
           <div className="space-y-12 max-w-md">
-            <div className="relative mx-auto w-24 h-24">
-               <div className="absolute inset-0 bg-blue-500/20 blur-2xl animate-pulse rounded-full"></div>
-               <Search className="relative mx-auto text-blue-400 animate-bounce" size={64} />
+            <div className="relative">
+              <Search className="mx-auto text-blue-400 animate-pulse" size={64} />
+              <Sparkles className="absolute -top-2 -right-2 text-indigo-400 animate-bounce" size={24} />
             </div>
             <div className="space-y-4">
               <h3 className="text-white text-3xl font-black uppercase italic tracking-tighter leading-none">{phases[scanPhase]}</h3>
-              <p className="text-blue-400/60 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Flash-Optimized Data Stream</p>
-            </div>
-            <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/10">
-               <div 
-                 className="h-full bg-blue-500 transition-all duration-1000 ease-in-out" 
-                 style={{ width: `${((scanPhase + 1) / phases.length) * 100}%` }}
-               ></div>
+              <p className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Exhaustive Smart Mapping Active</p>
             </div>
           </div>
         </div>
       )}
 
-      <div className="bg-slate-900 text-white p-10 rounded-[3rem] border border-slate-700 shadow-2xl relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/5 blur-[120px] pointer-events-none group-hover:bg-blue-500/15 transition-all duration-1000"></div>
-        <div className="flex flex-col lg:flex-row items-center justify-between gap-10 relative z-10">
-          <div className="flex-1 text-center lg:text-left">
-            <div className="flex items-center gap-3 mb-4 justify-center lg:justify-start">
-               <div className="px-3 py-1 bg-blue-600/20 border border-blue-500/30 rounded-lg text-[9px] font-black uppercase tracking-widest text-blue-400">
-                 Registry Data Import v3.5
-               </div>
+      <div className={`bg-slate-900 text-white p-10 rounded-[4rem] border-2 shadow-2xl relative overflow-hidden group transition-all duration-500 ${getTargetColor()} h-full`}>
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-[100px] pointer-events-none group-hover:bg-indigo-500/10 transition-all duration-1000"></div>
+        <div className="relative z-10 space-y-10">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-10">
+            <div className="flex-1 text-center lg:text-left">
+              <div className="flex items-center gap-2 mb-4 justify-center lg:justify-start">
+                <Sparkles size={16} className="text-indigo-400" />
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Station Registry Synchronizer v5.3</span>
+              </div>
+              <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">External Data Command</h3>
+              <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed italic">
+                Choose a category and paste directly from your operational spreadsheets to bypass manual entry.
+              </p>
             </div>
-            <h3 className="text-3xl font-black mb-4 tracking-tight italic uppercase leading-none">External Data Registry</h3>
-            <p className="text-slate-400 text-xs max-w-xl font-medium leading-relaxed italic">
-              Flash-Optimized import for <span className="text-white font-bold">Large Staff Lists</span>. 
-              Self-healing JSON recovery for truncated spreadsheets up to 1000+ rows.
-            </p>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
-            <input type="file" multiple accept="image/*,.xlsx,.xls,.csv,.pdf,.json" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
             
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isScanning}
-              className="px-10 py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase flex items-center gap-4 shadow-2xl shadow-blue-600/30 transition-all active:scale-95 group/btn"
-            >
-              <FileUp size={20} className="group-hover/btn:-translate-y-1 transition-transform" /> IMPORT REGISTRY DATA
-            </button>
+            <div className="flex bg-white/5 p-1.5 rounded-[1.5rem] border border-white/10 shrink-0">
+              <button 
+                onClick={() => setImportMode('upload')}
+                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase italic tracking-widest transition-all flex items-center gap-3 ${importMode === 'upload' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-white'}`}
+              >
+                <FileUp size={16} /> UPLOAD FILE
+              </button>
+              <button 
+                onClick={() => setImportMode('paste')}
+                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase italic tracking-widest transition-all flex items-center gap-3 ${importMode === 'paste' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-slate-500 hover:text-white'}`}
+              >
+                <Clipboard size={16} /> PASTE RAW TEXT
+              </button>
+            </div>
+          </div>
+
+          <div className="animate-in fade-in slide-in-from-top-4 duration-500">
+            {importMode === 'upload' ? (
+              <div className="flex flex-wrap items-center gap-4 w-full">
+                <input type="file" multiple accept="image/*,.xlsx,.xls,.csv,.pdf,.json" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isScanning}
+                  className="w-full lg:w-auto px-10 py-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[2rem] font-black text-sm uppercase italic flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/30 transition-all active:scale-95 border border-white/10"
+                >
+                  <FileUp size={24} /> SELECT STATION DOCUMENTS
+                </button>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic ml-auto hidden lg:block">AUTO-IDENTIFY CATEGORIES (ALL)</p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Category Selector */}
+                <div className="grid grid-cols-3 gap-4">
+                  <button 
+                    onClick={() => setPasteTarget('flights')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'flights' ? 'bg-blue-600 border-blue-400 text-white shadow-xl shadow-blue-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-blue-500/30'}`}
+                  >
+                    <Plane size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">FLIGHTS</span>
+                  </button>
+                  <button 
+                    onClick={() => setPasteTarget('staff')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'staff' ? 'bg-emerald-600 border-emerald-400 text-white shadow-xl shadow-emerald-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-emerald-500/30'}`}
+                  >
+                    <Users size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">STAFF</span>
+                  </button>
+                  <button 
+                    onClick={() => setPasteTarget('shifts')}
+                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-[2rem] border transition-all ${pasteTarget === 'shifts' ? 'bg-indigo-600 border-indigo-400 text-white shadow-xl shadow-indigo-600/20' : 'bg-white/5 border-white/10 text-slate-500 hover:border-indigo-500/30'}`}
+                  >
+                    <Clock size={24} />
+                    <span className="text-[10px] font-black uppercase italic tracking-widest">SHIFTS</span>
+                  </button>
+                </div>
+
+                <textarea 
+                  className={`w-full bg-slate-950/50 border border-white/10 p-8 rounded-[2rem] font-mono text-xs text-indigo-100 outline-none focus:ring-4 transition-all min-h-[200px] placeholder:text-slate-700 ${pasteTarget === 'flights' ? 'focus:ring-blue-600/20' : pasteTarget === 'staff' ? 'focus:ring-emerald-600/20' : 'focus:ring-indigo-600/20'}`}
+                  placeholder={`Paste ${pasteTarget} data here... (e.g. from Excel, Google Sheets, or PDF text)`}
+                  value={pastedText}
+                  onChange={e => setPastedText(e.target.value)}
+                />
+                
+                <div className="flex justify-end">
+                  <button 
+                    onClick={handlePasteSubmit}
+                    disabled={isScanning || !pastedText.trim()}
+                    className={`px-12 py-6 text-white rounded-[1.5rem] font-black text-xs uppercase italic flex items-center gap-4 shadow-2xl transition-all active:scale-95 disabled:opacity-50 ${pasteTarget === 'flights' ? 'bg-blue-600 hover:bg-blue-500' : pasteTarget === 'staff' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}
+                  >
+                    <Check size={20} /> SYNC {pasteTarget.toUpperCase()}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -183,38 +274,43 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, nu
                   <p className="text-[10px] text-rose-200/60 font-medium uppercase tracking-widest mt-1">{scanError.message}</p>
                </div>
             </div>
-            <button onClick={() => setScanError(null)} className="p-4 text-rose-400 font-black hover:text-white transition-colors">&times;</button>
+            <button onClick={() => setScanError(null)} className="text-rose-400 font-black hover:text-white transition-colors">&times;</button>
           </div>
         )}
       </div>
 
       {extractedData && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl">
+        <div className="absolute inset-0 z-[2500] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl rounded-[4rem]">
           <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full p-12 lg:p-16 text-center animate-in zoom-in-95 duration-300">
-              <div className="w-24 h-24 bg-emerald-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 shadow-inner border border-emerald-100">
-                <Database size={48} className="text-emerald-500" />
+              <div className="w-24 h-24 bg-indigo-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 border border-indigo-100 shadow-inner">
+                <Database size={48} className="text-indigo-500" />
               </div>
-              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Registry Processed</h3>
-              <p className="text-slate-400 text-sm font-medium mb-12">The system has mapped your data into the station registry. Self-healing logic applied to recover truncated rows.</p>
+              <h3 className="text-3xl font-black italic uppercase mb-4 text-slate-950 tracking-tighter">Sync Validation Success</h3>
+              <p className="text-slate-400 text-sm font-medium mb-12">Confirm the discovered records before committing to the station registry.</p>
               
-              <div className="grid grid-cols-2 gap-6 mb-12">
-                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-blue-200 transition-all">
-                  <Activity size={20} className="mx-auto mb-4 text-blue-400" />
-                  <div className="text-4xl font-black text-slate-900 italic leading-none mb-2">{extractedData.flights?.length || 0}</div>
-                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">FLIGHT SERVICES</div>
+              <div className="grid grid-cols-3 gap-4 mb-12">
+                <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.flights?.length ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
+                  <Plane size={18} className="mx-auto mb-3 text-blue-500" />
+                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.flights?.length || 0}</div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Flights</div>
                 </div>
-                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 group hover:border-emerald-200 transition-all">
-                  <Users size={20} className="mx-auto mb-4 text-emerald-400" />
-                  <div className="text-4xl font-black text-slate-900 italic leading-none mb-2">{extractedData.staff?.length || 0}</div>
-                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PERSONNEL ENTRIES</div>
+                <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.staff?.length ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
+                  <Users size={18} className="mx-auto mb-3 text-emerald-500" />
+                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.staff?.length || 0}</div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Staff</div>
+                </div>
+                <div className={`p-6 rounded-[2rem] border transition-all ${extractedData.shifts?.length ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100 opacity-30'}`}>
+                  <Clock size={18} className="mx-auto mb-3 text-indigo-500" />
+                  <div className="text-3xl font-black text-slate-900 italic leading-none mb-1">{extractedData.shifts?.length || 0}</div>
+                  <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Shifts</div>
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4">
                 <button onClick={() => setExtractedData(null)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 tracking-widest italic">Abort Import</button>
                 <button 
-                  onClick={() => { onDataExtracted(extractedData); setExtractedData(null); }} 
-                  className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl shadow-slate-950/20 hover:bg-emerald-600 transition-all active:scale-95"
+                  onClick={() => { onDataExtracted(extractedData); setExtractedData(null); setPastedText(''); }} 
+                  className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl shadow-slate-950/20 hover:bg-indigo-600 transition-all active:scale-95"
                 >
                   COMMIT TO REGISTRY
                 </button>
