@@ -37,7 +37,7 @@ export const sanitizeRole = (role: string): Skill => {
   if (r.includes('ramp') || r === 'rmp') return 'Ramp';
   if (r.includes('load') || r === 'lc') return 'Load Control';
   if (r.includes('gate') || r.includes('check')) return 'Gate / Check-in';
-  return 'Operations'; 
+  return 'Duty'; // Fallback to Duty as per instructions
 };
 
 const safeParseJson = (text: string | undefined): any => {
@@ -233,17 +233,27 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
-  STRICT ROSTER RULES:
-  1. FULL HEADCOUNT: Every shift MUST be assigned exactly 'minStaff' personnel. 
-     - If the 'roleCounts' for a shift only sum to 4 people but 'minStaff' is 10, you MUST assign 6 additional available staff members with the role 'Operations'.
-     - EVERY assigned person must be listed in the assignments array for that shift.
-  2. ABSENCE CATEGORIZATION: Map all absences from the 'Personnel Requests' (Absence Box) into the 'offDuty' array.
-     - You MUST use one of these 5 types: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', 'LIEU LEAVE'.
-     - Do not invent new leave types.
-  3. PROFESSIONAL TREATMENT: Every staff member is a full agent. There are no "support" or "secondary" staff. Use the role 'Operations' for general headcount filling.
-  4. NO VACANT SLOTS: If a shift requires 10 people and you have 15 available staff, use 10. If you only have 8, report the shortage but still assign all 8.
-  5. REST PERIODS: Observe ${config.minRestHours}h minimum rest.
-  6. Return a DailyProgram array for ${config.numDays} days starting from ${config.startDate}.`;
+  
+  MANDATORY ROLE NAMING:
+  - Specialist Roles: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
+  - Generic Role: ALL other staff members assigned to a shift MUST be labeled as 'Duty'. Never use 'Support' or 'Ops' (use 'Operations' or 'Duty' only).
+  
+  PREVIOUS DAY REST GUARD:
+  - Input Format: "KA-ATZ - AF-ATZ - FG-ATZ (2026-01-23 04:00)".
+  - Logic: Extract initials (KA, AF, FG) and date/time. These staff finished work at the given time.
+  - Calculate rest gap between this finish time and their first Day 1 shift start.
+  - If gap < ${config.minRestHours} hours, they are disqualified from Day 1 shifts and must be in offDuty.
+  
+  100% PERSONNEL REGISTRY:
+  - Every staff member in the 'staff' array MUST appear in the output for every day.
+  - If a staff member is not assigned to a flight shift, they MUST be listed in 'offDuty'.
+  - Categorize absences using: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', 'LIEU LEAVE', or 'NIL'.
+  - Local staff (Permanent) usually get 2 Days Off per 7 days.
+  - Roster staff outside their contract dates MUST be in ROSTER LEAVE.
+  
+  STRICT HEADCOUNT:
+  - Every shift MUST meet 'minStaff'. Fill gaps with 'Duty' role.
+  - Returns a DailyProgram array for ${config.numDays} days starting from ${config.startDate}.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -286,7 +296,7 @@ export const generateAIProgram = async (
                     }
                   }
                 },
-                required: ['day', 'assignments']
+                required: ['day', 'assignments', 'offDuty']
               }
             },
             shortageReport: {
@@ -335,7 +345,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback role.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({

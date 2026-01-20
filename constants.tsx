@@ -12,5 +12,5 @@ export const DAYS_OF_WEEK_FULL = [
 ];
 
 export const AVAILABLE_SKILLS: Skill[] = [
-  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'
+  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in', 'Duty'
 ];
