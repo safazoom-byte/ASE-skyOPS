@@ -86,77 +86,90 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     });
   };
 
+  /**
+   * UTC-Safe Date Parser for Excel Serials
+   */
+  const parseImportDate = (val: any) => {
+    if (val === null || val === undefined || val === '') return '';
+    if (typeof val === 'number') {
+      const date = new Date(0);
+      // Excel serial 45290 -> UTC date
+      date.setUTCMilliseconds(Math.round((val - 25569) * 86400 * 1000));
+      return date.getUTCFullYear() + '-' + 
+             String(date.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+             String(date.getUTCDate()).padStart(2, '0');
+    }
+    const str = String(val).trim();
+    if (str.includes('/') && !str.includes('-')) {
+      const parts = str.split('/');
+      if (parts.length === 3) {
+        let d = parts[0], m = parts[1], y = parts[2];
+        if (d.length === 1) d = '0' + d;
+        if (m.length === 1) m = '0' + m;
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m}-${d}`;
+      }
+    }
+    return str;
+  };
+
+  /**
+   * Smart Time Parser
+   */
+  const parseImportTime = (val: any) => {
+    if (val === null || val === undefined || val === '') return '';
+    if (typeof val === 'number') {
+      const timeFraction = val % 1;
+      const totalMinutes = Math.round(timeFraction * 24 * 60);
+      const hh = Math.floor(totalMinutes / 60);
+      const mm = totalMinutes % 60;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+    let str = String(val).trim();
+    if (/^\d{3,4}$/.test(str)) {
+      str = str.padStart(4, '0');
+      return `${str.slice(0, 2)}:${str.slice(2, 4)}`;
+    }
+    return str;
+  };
+
+  /**
+   * Smart Power Rate Normalizer
+   * 0.75 -> 75, "75%" -> 75
+   */
+  const parsePowerRate = (val: any) => {
+    if (val === undefined || val === null || val === '') return 75;
+    const cleanStr = String(val).replace('%', '').trim();
+    let num = parseFloat(cleanStr);
+    if (isNaN(num)) return 75;
+    if (num > 0 && num <= 1) return Math.round(num * 100);
+    return Math.round(num);
+  };
+
+  /**
+   * Convert time HH:mm to total minutes
+   */
+  const timeToMinutes = (time?: string) => {
+    if (!time || !time.includes(':')) return -1;
+    const [h, m] = time.split(':').map(Number);
+    return (h * 60) + m;
+  };
+
   const executeLocalMapping = () => {
     if (!pendingMapping) return;
     const { rows, map } = pendingMapping;
-    
-    /**
-     * Parse date from import, specifically handling Excel's General/Serial number format.
-     */
-    const parseImportDate = (val: any) => {
-      if (val === null || val === undefined || val === '') return '';
-      
-      // Handle Excel serial numbers (e.g. 45290)
-      if (typeof val === 'number') {
-        // Excel serial numbers represent days since Dec 30, 1899.
-        const date = new Date(Math.round((val - 25569) * 86400 * 1000));
-        return !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : '';
-      }
-      
-      const str = String(val).trim();
-      // Basic check for DD/MM/YYYY or similar if it's not ISO
-      if (str.includes('/') && !str.includes('-')) {
-        const parts = str.split('/');
-        if (parts.length === 3) {
-          // Re-format to ISO YYYY-MM-DD
-          let d = parts[0], m = parts[1], y = parts[2];
-          if (d.length === 1) d = '0' + d;
-          if (m.length === 1) m = '0' + m;
-          if (y.length === 2) y = '20' + y;
-          return `${y}-${m}-${d}`;
-        }
-      }
-      
-      return str;
-    };
-
-    /**
-     * Clean and format time strings to HH:mm, handling Excel fractions.
-     */
-    const parseImportTime = (val: any) => {
-      if (val === null || val === undefined || val === '') return '';
-      
-      // If Excel serial time (fraction of a day, e.g., 0.5 = 12:00)
-      if (typeof val === 'number') {
-        // If it's a date serial (val > 1), we just want the time portion
-        const timeFraction = val % 1;
-        const totalMinutes = Math.round(timeFraction * 24 * 60);
-        const hh = Math.floor(totalMinutes / 60);
-        const mm = totalMinutes % 60;
-        return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-      }
-
-      let str = String(val).trim();
-      // Handle raw "600" as "06:00"
-      if (/^\d{3,4}$/.test(str)) {
-        str = str.padStart(4, '0');
-        return `${str.slice(0, 2)}:${str.slice(2, 4)}`;
-      }
-      
-      return str;
-    };
     
     const dataRows = rows.slice(1);
     const flights: Flight[] = [];
     const staff: Staff[] = [];
     const shifts: ShiftConfig[] = [];
 
-    // First pass: extract all entities
     dataRows.forEach((row) => {
       if (!row || row.length === 0) return;
 
       const hasFlight = map.flightNumber !== undefined && map.flightNumber !== -1 && row[map.flightNumber];
-      const hasShift = map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime];
+      const hasShift = (map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime]) || 
+                      (map.pickupDate !== undefined && map.pickupDate !== -1 && row[map.pickupDate]);
       const hasStaff = map.name !== undefined && map.name !== -1 && row[map.name];
 
       let rowFlightId: string | null = null;
@@ -204,7 +217,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           name: String(row[map.name] || '').trim(),
           initials: String(row[map.initials] || '').trim().toUpperCase(),
           type: String(row[map.type] || '').includes('Rost') ? 'Roster' : 'Local',
-          powerRate: parseInt(row[map.powerRate]) || 75,
+          powerRate: parsePowerRate(row[map.powerRate]),
           workPattern: '5 Days On / 2 Off',
           maxShiftsPerWeek: 5,
           skillRatings: {
@@ -218,13 +231,22 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       }
     });
 
-    // Second pass: Automatic Temporal Linkage
-    // Link flights and shifts if the shift start time matches the flight's STA or STD
+    // SMART TEMPORAL LINKAGE: Match within 30 mins window
     shifts.forEach(s => {
-      // Find all flights that have a matching arrival or departure time with the shift's pickup time
-      const matchingFlights = flights.filter(f => 
-        (f.date === s.pickupDate) && (f.sta === s.pickupTime || f.std === s.pickupTime)
-      );
+      const shiftMinutes = timeToMinutes(s.pickupTime);
+      if (shiftMinutes === -1) return;
+
+      const matchingFlights = flights.filter(f => {
+        if (f.date !== s.pickupDate) return false;
+        
+        const staMin = timeToMinutes(f.sta);
+        const stdMin = timeToMinutes(f.std);
+        
+        const isNearSta = staMin !== -1 && Math.abs(staMin - shiftMinutes) <= 30;
+        const isNearStd = stdMin !== -1 && Math.abs(stdMin - shiftMinutes) <= 30;
+        
+        return isNearSta || isNearStd;
+      });
       
       matchingFlights.forEach(f => {
         if (!s.flightIds?.includes(f.id)) {

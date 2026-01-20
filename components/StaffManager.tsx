@@ -51,25 +51,25 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
   };
 
   /**
-   * Robust Date formatter to handle raw ISO strings or malformed inputs
+   * UTC-Safe Date Formatter
    */
   const formatStaffDate = (dateStr?: string) => {
     if (!dateStr || dateStr === 'N/A' || dateStr === '???') return '???';
     
-    // Attempt standard JS parsing
-    const date = new Date(dateStr);
-    
-    // Final check for the serial number bug
-    if (isNaN(date.getTime()) || date.getFullYear() > 4000) {
-      if (/^\d{5}$/.test(dateStr)) {
-        const serial = parseInt(dateStr);
-        const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
-        return !isNaN(d.getTime()) ? d.toLocaleDateString('en-GB') : dateStr;
-      }
-      return dateStr;
+    let date: Date;
+    if (/^\d{5}$/.test(dateStr)) {
+      const serial = parseInt(dateStr);
+      date = new Date(0);
+      date.setUTCMilliseconds(Math.round((serial - 25569) * 86400 * 1000));
+    } else {
+      date = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00Z'));
     }
-    
-    return date.toLocaleDateString('en-GB'); // Format: DD/MM/YYYY
+
+    if (isNaN(date.getTime())) return dateStr;
+
+    return date.getUTCDate().toString().padStart(2, '0') + '/' + 
+           (date.getUTCMonth() + 1).toString().padStart(2, '0') + '/' + 
+           date.getUTCFullYear();
   };
 
   const handleNewStaffSubmit = (e: React.FormEvent) => {
@@ -78,7 +78,6 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     const initials = (newStaff.initials || generateInitials(newStaff.name)).toUpperCase();
     const id = Math.random().toString(36).substring(2, 11);
     
-    // Only save dates for Roster staff
     const isRoster = newStaff.type === 'Roster';
     
     const staffData: Staff = {
@@ -107,7 +106,6 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
         const update: any = { [name]: finalValue };
         if (name === 'type') {
           update.workPattern = finalValue === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off';
-          // Clear dates if switching to Local
           if (finalValue === 'Local') {
             update.workFromDate = undefined;
             update.workToDate = undefined;

@@ -29,8 +29,7 @@ export interface BuildResult {
 }
 
 /**
- * Sanitizes role strings to ensure "Lost and Found" is always correctly formatted
- * and no abbreviations remain. This prevents production build mangling on Vercel.
+ * Sanitizes role strings to ensure "Lost and Found" is always correctly formatted.
  */
 export const sanitizeRole = (role: string): Skill => {
   const r = role.toLowerCase().trim();
@@ -39,7 +38,7 @@ export const sanitizeRole = (role: string): Skill => {
   if (r.includes('ops') || r.includes('operations') || r === 'op') return 'Operations';
   if (r.includes('ramp') || r === 'rmp') return 'Ramp';
   if (r.includes('load') || r === 'lc') return 'Load Control';
-  return 'Operations'; // Default
+  return 'Operations'; 
 };
 
 const safeParseJson = (text: string | undefined): any => {
@@ -76,7 +75,8 @@ const safeParseJson = (text: string | undefined): any => {
 export const identifyMapping = async (sampleRows: any[][], targetType: 'flights' | 'staff' | 'shifts' | 'all'): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Expert. Identify 0-based column indices. 
-  CRITICAL: Map 'Lost and Found' columns specifically. Use FULL names only.`;
+  Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
+  For powerRate, look for columns containing 'rate', 'power', or '%'.`;
   const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
 
   try {
@@ -135,11 +135,12 @@ export const extractDataFromContent = async (params: {
   targetType?: 'flights' | 'staff' | 'shifts' | 'all'
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Data Architect. 
-  Mission: Extract flight, staff, and shift data.
-  HARD RULE: Always use FULL ROLE NAMES. NO ABBREVIATIONS.
-  - Role Names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
-  - Linkage: If a flight's STA or STD matches a shift's Start Time (pickupTime), link them.`;
+  const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
+  IMPORTANT:
+  1. Role counts in shifts must be numbers.
+  2. powerRate for staff must be 50-100 (if you see 0.75, convert to 75).
+  3. minStaff and maxStaff are crucial for shift coverage logic.
+  4. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -176,6 +177,7 @@ export const extractDataFromContent = async (params: {
                   name: { type: Type.STRING },
                   initials: { type: Type.STRING },
                   type: { type: Type.STRING },
+                  powerRate: { type: Type.NUMBER },
                   skillRatings: { 
                     type: Type.OBJECT, 
                     properties: { 
@@ -198,6 +200,8 @@ export const extractDataFromContent = async (params: {
                   pickupTime: { type: Type.STRING },
                   endDate: { type: Type.STRING },
                   endTime: { type: Type.STRING },
+                  minStaff: { type: Type.NUMBER },
+                  maxStaff: { type: Type.NUMBER },
                   roleCounts: {
                     type: Type.OBJECT,
                     properties: {
@@ -207,8 +211,7 @@ export const extractDataFromContent = async (params: {
                       'Load Control': { type: Type.NUMBER },
                       'Lost and Found': { type: Type.NUMBER }
                     }
-                  },
-                  flightIds: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  }
                 }
               } 
             }
@@ -228,16 +231,16 @@ export const generateAIProgram = async (
   config: { numDays: number, customRules: string, minRestHours: number, startDate: string }
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Roster Engine. STRICT JSON ONLY.
-  Mission: Generate weekly station program.
-  HARD CONSTRAINTS:
-  1. Flight-Shift Linkage: Each shift handles its linked flightIds.
-  2. Roles: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.`;
+  const systemInstruction = `Aviation Roster Engine. Generate the weekly station program.
+  STRICT CONSTRAINTS:
+  1. Role coverage: Respect roleCounts in shifts.
+  2. Staff Capacity: Use powerRate to balance load.
+  3. Rest: Mandatory ${config.minRestHours}h between shifts.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Build roster for period: ${config.startDate} (${config.numDays} days). Data: ${JSON.stringify(data)}`,
+      contents: `Build roster starting ${config.startDate}. Data: ${JSON.stringify(data)}`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
