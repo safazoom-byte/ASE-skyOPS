@@ -239,24 +239,86 @@ export const generateAIProgram = async (
   config: { numDays: number, customRules: string, minRestHours: number, startDate: string }
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Roster Engine. Generate the weekly station program.
-  STRICT CONSTRAINTS:
-  1. Role coverage: Respect roleCounts in shifts.
-  2. Staff Capacity: Use powerRate to balance load.
-  3. Rest: Mandatory ${config.minRestHours}h between shifts.`;
+  
+  const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
+  STRICT RULES:
+  1. Only use provided IDs for staff and flights. DO NOT invent new IDs.
+  2. Respect 'roleCounts' for each shift. If a shift asks for 2 Ramp staff, assign exactly 2.
+  3. Adhere to mandatory ${config.minRestHours}h rest between shifts using previous finishes: ${constraintsLog}.
+  4. Balance workload using powerRate.
+  5. If a staff member is 'OFF' or 'NIL' in the provided logs, they MUST NOT be assigned.
+  6. Return a DailyProgram array where 'day' is a number from 0 to ${config.numDays - 1}.
+  7. Map staff to flights via their staffId and flightId.
+  8. Ensure all assignments have valid IDs.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Build roster starting ${config.startDate}. Data: ${JSON.stringify(data)}`,
+      contents: `Roster Window: ${config.startDate} for ${config.numDays} days. Data: ${JSON.stringify(data)}`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 4096 }
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            programs: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  day: { type: Type.INTEGER },
+                  assignments: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        staffId: { type: Type.STRING },
+                        flightId: { type: Type.STRING },
+                        role: { type: Type.STRING },
+                        shiftId: { type: Type.STRING }
+                      },
+                      required: ['staffId', 'flightId', 'role']
+                    }
+                  }
+                },
+                required: ['day', 'assignments']
+              }
+            },
+            shortageReport: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  staffName: { type: Type.STRING },
+                  flightNumber: { type: Type.STRING },
+                  actualRest: { type: Type.NUMBER },
+                  targetRest: { type: Type.NUMBER },
+                  reason: { type: Type.STRING }
+                }
+              }
+            },
+            recommendations: {
+              type: Type.OBJECT,
+              properties: {
+                idealStaffCount: { type: Type.NUMBER },
+                currentStaffCount: { type: Type.NUMBER },
+                skillGaps: { type: Type.ARRAY, items: { type: Type.STRING } },
+                hireAdvice: { type: Type.STRING },
+                healthScore: { type: Type.NUMBER }
+              }
+            }
+          },
+          required: ['programs']
+        },
+        thinkingConfig: { thinkingBudget: 16384 }
       }
     });
+    
     const result = safeParseJson(response.text);
-    if (!result || !result.programs) throw new Error("No program generated.");
+    if (!result || !result.programs || result.programs.length === 0) {
+      throw new Error("The AI engine could not find a valid solution for the current constraints. Please verify your data and rest rules.");
+    }
     return result;
   } catch (error) {
     throw error;

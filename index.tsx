@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -54,6 +53,12 @@ const STORAGE_KEYS = {
   PERSONNEL_REQUESTS: 'skyops_personnel_requests_v3'
 };
 
+const isValidDateString = (str: string | null): boolean => {
+  if (!str) return false;
+  const d = new Date(str);
+  return !isNaN(d.getTime());
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -63,7 +68,7 @@ const App: React.FC = () => {
 
   const [startDate, setStartDate] = useState<string>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.START_DATE);
-    if (saved) return saved;
+    if (saved && isValidDateString(saved)) return saved;
     const today = new Date();
     const day = today.getDay();
     const diff = (day <= 4) ? (day + 2) : (day - 5);
@@ -74,7 +79,7 @@ const App: React.FC = () => {
 
   const [endDate, setEndDate] = useState<string>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.END_DATE);
-    if (saved) return saved;
+    if (saved && isValidDateString(saved)) return saved;
     const date = new Date(startDate);
     date.setDate(date.getDate() + 6);
     return date.toISOString().split('T')[0];
@@ -133,7 +138,7 @@ const App: React.FC = () => {
   const [showWaiverDialog, setShowWaiverDialog] = useState(false);
 
   const numDays = useMemo(() => {
-    if (!startDate || !endDate) return 7;
+    if (!startDate || !endDate || !isValidDateString(startDate) || !isValidDateString(endDate)) return 7;
     const start = new Date(startDate);
     const end = new Date(endDate);
     const diffTime = Math.abs(end.getTime() - start.getTime());
@@ -251,14 +256,38 @@ const App: React.FC = () => {
     });
   };
 
-  // Fix: Added missing confirmGenerateProgram function to trigger AI program generation logic.
   const confirmGenerateProgram = async () => {
+    // Sanity Checks
+    if (activeFlightsInRange.length === 0) {
+      setError("Mission Aborted: No flights found in current window. Please import flights first.");
+      setShowConfirmDialog(false);
+      return;
+    }
+    if (activeShiftsInRange.length === 0) {
+      setError("Mission Aborted: Duty Master is empty. Please define shift slots first.");
+      setShowConfirmDialog(false);
+      return;
+    }
+    if (staff.length === 0) {
+      setError("Mission Aborted: Manpower registry is empty. Please add staff first.");
+      setShowConfirmDialog(false);
+      return;
+    }
+
     setShowConfirmDialog(false);
     setIsGenerating(true);
     setError(null);
     try {
+      // Create a snapshot of data for the AI
+      const programInputData: ProgramData = {
+        flights: activeFlightsInRange,
+        staff: staff,
+        shifts: activeShiftsInRange,
+        programs: [] // Start fresh
+      };
+
       const result = await generateAIProgram(
-        { flights, staff, shifts, programs },
+        programInputData,
         `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests: ${personnelRequests}\nCustom Rules: ${customRules}`,
         { 
           numDays, 
@@ -281,7 +310,7 @@ const App: React.FC = () => {
         setShowSuccessChecklist(true);
       }
     } catch (err: any) {
-      setError(err.message || "Failed to generate program. Check your data and constraints.");
+      setError(err.message || "Logic engine failed. Verify your data constraints and connectivity.");
     } finally {
       setIsGenerating(false);
     }
@@ -293,15 +322,6 @@ const App: React.FC = () => {
     { id: 'staff', icon: Users, label: 'Manpower' },
     { id: 'shifts', icon: Clock, label: 'Duty Master' },
     { id: 'program', icon: CalendarDays, label: 'Live Program' },
-  ];
-
-  const checklistPoints = [
-    { label: "Day 1 Rest Guard", desc: "Previous shift finish times analyzed and respected." },
-    { label: "Absence Registry", desc: "All 'Off' dates from Absence Box have been strictly applied." },
-    { label: "Local 5/2 Pattern", desc: "Local staff forced to minimum 2 days off per period." },
-    { label: "Contract Validation", desc: "Verified Roster staff stay within contract date bounds." },
-    { label: "Role Matrix", desc: "Shift Leaders and specialties correctly deployed." },
-    { label: "Coverage Minimums", desc: "Shift strengths never fall below station requirements." }
   ];
 
   return (
@@ -447,8 +467,8 @@ const App: React.FC = () => {
                          <div className="space-y-4">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={14} className="text-indigo-600" /> Operational Window</label>
                             <div className="flex gap-2">
-                               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-1/2 p-5 bg-slate-50 border rounded-2xl font-black text-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
-                               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-1/2 p-5 bg-slate-50 border rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
+                               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-1/2 p-5 bg-slate-50 border rounded-2xl font-black text-sm outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" />
+                               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-1/2 p-5 bg-slate-50 border rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" />
                             </div>
                          </div>
                          <div className="space-y-4">
@@ -546,7 +566,6 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* NEW SECTION: Proposed Shift Requirements (Role Matrix) */}
               {pendingVerification.shifts.length > 0 && (
                 <div className="space-y-6">
                   <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Proposed Duty Master (Role Matrix)</h4>
@@ -560,7 +579,6 @@ const App: React.FC = () => {
                          <div className="space-y-2">
                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Requirement Matrix:</p>
                            <div className="flex flex-wrap gap-2">
-                             {/* Fix: count could be unknown when inferred from Object.entries; cast to any for numerical comparison on line 566 */}
                              {Object.entries(sh.roleCounts || {}).filter(([_, count]) => (count as any) > 0).map(([role, count]) => (
                                <span key={role} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-xl text-[8px] font-black uppercase border border-indigo-100">
                                  {role}: {count}
@@ -597,13 +615,6 @@ const App: React.FC = () => {
                   </div>
                 </div>
               )}
-
-              {(!pendingVerification.flights.length && !pendingVerification.staff.length && !pendingVerification.shifts.length) && (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-300">
-                  <Info size={48} className="mb-4" />
-                  <p className="text-sm font-black uppercase italic">No entities detected in this specific input segment.</p>
-                </div>
-              )}
             </div>
 
             <div className="p-10 border-t bg-slate-50 flex gap-4">
@@ -614,7 +625,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Success Modal */}
       {showSuccessChecklist && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-2xl">
            <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full overflow-hidden animate-in slide-in-from-bottom duration-500">
@@ -630,7 +640,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* scanner and other components... */}
       {isScannerOpen && (
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 lg:p-12 bg-slate-950/95 backdrop-blur-3xl">
            <div className="bg-white rounded-[4.5rem] shadow-2xl w-full max-w-5xl h-[85vh] overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-500">
