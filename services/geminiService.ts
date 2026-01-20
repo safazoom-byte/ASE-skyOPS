@@ -29,9 +29,6 @@ export interface BuildResult {
   recommendations?: ResourceRecommendation;
 }
 
-/**
- * Sanitizes role strings to ensure "Lost and Found" is always correctly formatted.
- */
 export const sanitizeRole = (role: string): Skill => {
   const r = role.toLowerCase().trim();
   if (r.includes('found') || r.includes('lost') || r === 'lf' || r === 'l&f' || r === 'lost and found' || r === 'lost&found') return 'Lost and Found';
@@ -79,9 +76,7 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
   const systemInstruction = `Aviation Data Expert. Identify 0-based column indices. 
   Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
   For powerRate, look for columns containing 'rate', 'power', or '%'.
-  For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).
-  IMPORTANT: Look for a "Role Matrix" column that contains text like "Shift Leader: 1, Ramp: 2". Map its index to 'roleMatrix'. 
-  This column might be titled "Requirements", "Matrix", "Staffing", or "Roles".`;
+  For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).`;
   const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
 
   try {
@@ -115,7 +110,6 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
                 skill_Operations: { type: Type.INTEGER },
                 skill_ShiftLeader: { type: Type.INTEGER },
                 'skill_Lost and Found': { type: Type.INTEGER },
-                roleMatrix: { type: Type.INTEGER },
                 pickupDate: { type: Type.INTEGER },
                 pickupTime: { type: Type.INTEGER },
                 endDate: { type: Type.INTEGER },
@@ -142,13 +136,7 @@ export const extractDataFromContent = async (params: {
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
-  IMPORTANT:
-  1. Role counts in shifts must be numbers.
-  2. If you see a text field like "Shift Leader: 1, Operations: 1, Ramp: 2, Load Control: 1, Lost and Found: 1", parse it into the roleCounts object.
-  3. powerRate for staff must be 50-100 (if you see 0.75, convert to 75).
-  4. minStaff and maxStaff are crucial for shift coverage logic.
-  5. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'.
-  6. For Staff, capture 'workFromDate' and 'workToDate' if they are Roster/Contract staff.`;
+  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -245,16 +233,16 @@ export const generateAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
-  STRICT RULES:
-  1. MANDATORY HEADCOUNT: For every shift, you MUST assign the number of staff specified in 'minStaff'. 
-     - If specialized role requirements (Shift Leader, Ramp, etc.) are met but the headcount is still below 'minStaff', you MUST fill the remaining slots with available staff assigned to the 'Operations' role.
-     - DO NOT leave shifts short-staffed if staff are available and not on leave.
-  2. ABSENCE REGISTRY: Map all staff mentioned in 'Personnel Requests' (Absence Box) to the 'offDuty' array.
-     - You MUST categorize each absence into exactly one of these five types: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', or 'LIEU LEAVE'.
-     - If the text says "OFF", map to 'DAY OFF'. If it says "ROSTER", map to 'ROSTER LEAVE'.
-  3. REST PERIODS: Respect ${config.minRestHours}h rest between duties.
-  4. NO SUPPORT LABELS: Do not use labels like "Support". Every staff member is a professional; use 'Operations' as the default role for general headcount.
-  5. Multi-Tasking: One staff can cover multiple roles (e.g. SL + LC) if they have the skills. Create separate assignment entries for each role they cover in that shift.
+  STRICT ROSTER RULES:
+  1. FULL HEADCOUNT: Every shift MUST be assigned exactly 'minStaff' personnel. 
+     - If the 'roleCounts' for a shift only sum to 4 people but 'minStaff' is 10, you MUST assign 6 additional available staff members with the role 'Operations'.
+     - EVERY assigned person must be listed in the assignments array for that shift.
+  2. ABSENCE CATEGORIZATION: Map all absences from the 'Personnel Requests' (Absence Box) into the 'offDuty' array.
+     - You MUST use one of these 5 types: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', 'LIEU LEAVE'.
+     - Do not invent new leave types.
+  3. PROFESSIONAL TREATMENT: Every staff member is a full agent. There are no "support" or "secondary" staff. Use the role 'Operations' for general headcount filling.
+  4. NO VACANT SLOTS: If a shift requires 10 people and you have 15 available staff, use 10. If you only have 8, report the shortage but still assign all 8.
+  5. REST PERIODS: Observe ${config.minRestHours}h minimum rest.
   6. Return a DailyProgram array for ${config.numDays} days starting from ${config.startDate}.`;
 
   try {
@@ -333,7 +321,7 @@ export const generateAIProgram = async (
     
     const result = safeParseJson(response.text);
     if (!result || !result.programs || result.programs.length === 0) {
-      throw new Error("The AI engine could not find a valid solution for the current constraints. Please verify your data and rest rules.");
+      throw new Error("Roster engine failed to solve headcount. Verify availability.");
     }
     return result;
   } catch (error) {

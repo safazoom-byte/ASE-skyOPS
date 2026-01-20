@@ -1,5 +1,5 @@
 
-export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Gate / Check-in' | 'Support';
+export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Gate / Check-in';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
@@ -37,7 +37,7 @@ export interface Staff {
 
 export interface ShiftConfig {
   id: string;
-  day: number; // 0-6 (The target operational day offset)
+  day: number; // 0-6
   pickupDate: string; // YYYY-MM-DD
   pickupTime: string; // HH:mm
   endDate: string; // YYYY-MM-DD
@@ -45,7 +45,7 @@ export interface ShiftConfig {
   pickupDayOffset?: number; 
   minStaff: number;
   maxStaff: number;
-  targetPower?: number; // Combined power sum of assigned staff
+  targetPower?: number; 
   roleCounts?: Partial<Record<Skill, number>>; 
   flightIds?: string[]; 
 }
@@ -56,7 +56,6 @@ export interface Assignment {
   flightId: string;
   role: Skill;
   shiftId?: string; 
-  coveringStaffId?: string; // ID of the person being covered
 }
 
 export interface OffDutyRecord {

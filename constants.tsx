@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Skill } from './types';
 
@@ -11,5 +12,5 @@ export const DAYS_OF_WEEK_FULL = [
 ];
 
 export const AVAILABLE_SKILLS: Skill[] = [
-  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'
+  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'
 ];

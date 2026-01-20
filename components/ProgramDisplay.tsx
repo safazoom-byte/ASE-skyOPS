@@ -1,10 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { CalendarOff, Activity, FileText, Clock, Plane, Shield, UserCheck, MapPin, AlertCircle } from 'lucide-react';
+import { CalendarOff, Activity, FileText, Plane, Shield } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -14,6 +14,7 @@ interface Props {
   startDate?: string;
   endDate?: string;
   onUpdatePrograms?: (updatedPrograms: DailyProgram[]) => void;
+  aiRecommendations?: any;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, startDate, endDate }) => {
@@ -51,7 +52,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formattedStartDate = startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
   const formattedEndDate = endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Not Set";
 
-  // Fixed 5 Categories for the Grid
   const leaveCategories: { type: LeaveType; label: string }[] = [
     { type: 'DAY OFF', label: 'DAYS OFF' },
     { type: 'ROSTER LEAVE', label: 'ROSTER LEAVE' },
@@ -93,7 +93,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           }
         });
 
-        const staffAndRoles = Array.from(staffMap.entries()).map(([init, roles]) => `${init} (${roles.join(' + ')})`).join(' | ');
+        const staffAndRoles = Array.from(staffMap.entries()).map(([init, roles]) => `${init} (${roles.join('+')})`).join(' | ');
         return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList, staffAndRoles];
       });
 
@@ -192,7 +192,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                             <td className="px-6 py-8 border-r border-slate-100 font-black text-slate-900 text-xl italic">{sh?.endTime || '--:--'}</td>
                             <td className="px-6 py-8 border-r border-slate-100 text-center">
                               <div className="flex flex-col items-center gap-1">
-                                <span className="font-black text-lg italic">{assignedIds.length} / {sh?.minStaff || '??'}</span>
+                                <span className={`font-black text-lg italic ${shortage ? 'text-rose-600' : 'text-slate-950'}`}>{assignedIds.length} / {sh?.minStaff || '??'}</span>
                                 {shortage && <span className="text-[7px] font-black text-rose-500 uppercase">Short Staffed</span>}
                               </div>
                             </td>
@@ -211,18 +211,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                 {assignedIds.map(staffId => {
                                   const s = getStaffById(staffId);
                                   const roles = staffRolesMap.get(staffId) || ["Operations"];
-                                  const isSpecialist = roles.some(r => r !== 'Operations');
+                                  const isSpecialist = roles.some(r => r !== 'Operations' && r !== 'OPS');
 
                                   return (
-                                    <div key={staffId} className="px-6 py-4 bg-slate-950 text-white rounded-[2rem] border border-white/5 shadow-lg flex flex-col min-w-[150px]">
+                                    <div key={staffId} className="px-6 py-4 bg-slate-950 text-white rounded-[2rem] border border-white/5 shadow-lg flex flex-col min-w-[140px] transition-transform hover:scale-105">
                                       <div className="flex items-center gap-3">
-                                        <Shield size={14} className={isSpecialist ? 'text-blue-400' : 'text-slate-600'} />
+                                        <Shield size={14} className={isSpecialist ? 'text-blue-400' : 'text-slate-500'} />
                                         <span className="text-lg font-black italic uppercase tracking-tighter">{formatStaffDisplay(s)}</span>
                                       </div>
                                       <div className="flex flex-wrap gap-1 mt-1">
-                                        {roles.map(r => (
-                                          <span key={r} className="text-[8px] font-black uppercase tracking-widest opacity-60">
-                                            {r === 'Operations' ? 'Duty' : r}
+                                        {roles.map((r, i) => (
+                                          <span key={i} className="text-[8px] font-black uppercase tracking-widest opacity-60">
+                                            {r === 'Operations' ? 'OPS' : r}
+                                            {i < roles.length - 1 ? ' +' : ''}
                                           </span>
                                         ))}
                                       </div>
@@ -238,23 +239,23 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                   </table>
                 </div>
 
-                <div className="bg-slate-50/50 p-12 space-y-12">
-                   <h4 className="text-lg font-black uppercase italic tracking-tighter flex items-center gap-4 text-slate-900">
-                     <CalendarOff size={24} className="text-slate-300" /> ABSENCE AND LEAVES REGISTRY
+                <div className="bg-slate-50/50 p-12 space-y-12 border-t border-slate-200">
+                   <h4 className="text-lg font-black uppercase italic tracking-tighter flex items-center gap-4 text-slate-950">
+                     <CalendarOff size={24} className="text-slate-400" /> ABSENCE AND LEAVES REGISTRY
                    </h4>
                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
                       {leaveCategories.map(cat => {
                         const list = (program.offDuty || []).filter(off => off.type === cat.type).map(off => getStaffById(off.staffId)).filter(Boolean);
                         return (
-                          <div key={cat.type} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col gap-4">
-                            <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b pb-3">{cat.label}</h5>
-                            <div className="flex flex-wrap gap-2 min-h-[40px]">
+                          <div key={cat.type} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-xl flex flex-col gap-6 group hover:border-slate-400 transition-colors">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-4 group-hover:text-slate-900 transition-colors">{cat.label}</h5>
+                            <div className="flex flex-wrap gap-2 min-h-[50px]">
                               {list.length > 0 ? list.map((s, i) => (
-                                <div key={i} className="px-4 py-2 bg-slate-950 text-white rounded-xl font-black text-xs italic shadow-md">
-                                  {formatStaffDisplay(s)}
+                                <div key={i} className="px-5 py-3 bg-slate-950 text-white rounded-2xl font-black text-xs italic shadow-lg">
+                                  {formatStaffDisplay(s as Staff)}
                                 </div>
                               )) : (
-                                <span className="text-[9px] font-bold text-slate-200 uppercase italic">Operational</span>
+                                <span className="text-[9px] font-black text-slate-200 uppercase italic self-center">None</span>
                               )}
                             </div>
                           </div>
