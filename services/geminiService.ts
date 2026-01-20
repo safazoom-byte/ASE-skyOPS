@@ -246,15 +246,19 @@ export const generateAIProgram = async (
   2. Respect 'roleCounts' for each shift. If a shift asks for 2 Ramp staff, assign exactly 2.
   3. Adhere to mandatory ${config.minRestHours}h rest between shifts using previous finishes: ${constraintsLog}.
   4. Balance workload using powerRate.
-  5. If a staff member is 'OFF' or 'NIL' in the provided logs, they MUST NOT be assigned.
+  5. Absence Box Parsing: Map ANY staff mentioned in 'Personnel Requests' (Absence Box) to the 'offDuty' array for the corresponding day. 
+     - Format usually: "Name/Initials Type Date" (e.g. "JD OFF 12/05").
+     - Categorize as 'DAY OFF', 'ANNUAL LEAVE', etc.
   6. Return a DailyProgram array where 'day' is a number from 0 to ${config.numDays - 1}.
-  7. Map staff to flights via their staffId and flightId.
+  7. Multi-Tasking Optimization: It is OK if a staff member covers TWO roles (e.g., 'Shift Leader' AND 'Load Control') if they have the skills. 
+     - Create two assignment entries for the same staffId in the same shift if they are covering both. 
+     - Use this to solve "Short Staff" scenarios.
   8. Ensure all assignments have valid IDs.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Roster Window: ${config.startDate} for ${config.numDays} days. Data: ${JSON.stringify(data)}`,
+      contents: `Roster Window: ${config.startDate} for ${config.numDays} days. Data: ${JSON.stringify(data)}. Constraints: ${constraintsLog}`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
@@ -279,6 +283,16 @@ export const generateAIProgram = async (
                         shiftId: { type: Type.STRING }
                       },
                       required: ['staffId', 'flightId', 'role']
+                    }
+                  },
+                  offDuty: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        staffId: { type: Type.STRING },
+                        type: { type: Type.STRING }
+                      }
                     }
                   }
                 },

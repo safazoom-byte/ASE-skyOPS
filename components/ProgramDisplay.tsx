@@ -85,10 +85,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const sh = getShiftById(sid);
         const flightIds = sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)));
         const flightList = flightIds.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
-        const staffAndRoles = Array.from(new Set(assigs.map(a => {
+        
+        // Group by staff for table rows
+        const staffMap = new Map<string, string[]>();
+        assigs.forEach(a => {
           const s = getStaffById(a.staffId);
-          return `${s?.initials || '??'} (${a.role})`;
-        }))).join(' | ');
+          if (s) {
+            const current = staffMap.get(s.initials) || [];
+            if (!current.includes(a.role)) current.push(a.role);
+            staffMap.set(s.initials, current);
+          }
+        });
+
+        const staffAndRoles = Array.from(staffMap.entries()).map(([init, roles]) => `${init} (${roles.join(' + ')})`).join(' | ');
         return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList, staffAndRoles];
       });
 
@@ -189,7 +198,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       ) : Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
                         const sh = getShiftById(sid);
                         const uniqueFlights = (sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)))).map(fid => getFlightById(fid)).filter(Boolean);
-                        const uniqueStaffIds = Array.from(new Set(assigs.map(a => a.staffId)));
+                        
+                        // Map staff to their consolidated roles
+                        const staffRolesMap = new Map<string, string[]>();
+                        assigs.forEach(a => {
+                          const current = staffRolesMap.get(a.staffId) || [];
+                          if (!current.includes(a.role)) current.push(a.role);
+                          staffRolesMap.set(a.staffId, current);
+                        });
+
+                        const uniqueStaffIds = Array.from(staffRolesMap.keys());
                         const isUnderMin = sh && uniqueStaffIds.length < sh.minStaff;
                         const isFull = sh && uniqueStaffIds.length >= sh.maxStaff;
 
@@ -234,9 +252,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                               <div className="flex flex-wrap gap-4">
                                 {uniqueStaffIds.map(staffId => {
                                   const s = getStaffById(staffId);
-                                  const staffAssignments = assigs.filter(as => as.staffId === staffId);
-                                  const primaryRole = staffAssignments[0]?.role || "Operational";
-                                  const isLeader = primaryRole === 'Shift Leader';
+                                  const roles = staffRolesMap.get(staffId) || ["Operational"];
+                                  const isLeader = roles.includes('Shift Leader');
+                                  const isMulti = roles.length > 1;
 
                                   return (
                                     <div key={staffId} className={`px-6 py-5 rounded-[2.5rem] font-black text-[10px] flex flex-col gap-3 border shadow-md min-w-[140px] ${isLeader ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-900 text-white border-slate-950'}`}>
@@ -245,9 +263,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                           {isLeader && <Shield size={14} className="text-blue-200" />}
                                           <span className="text-xl italic uppercase tracking-tighter">{formatStaffDisplay(s)}</span>
                                         </div>
-                                        <span className={`text-[8px] font-black uppercase tracking-widest mt-0.5 ${isLeader ? 'text-blue-100' : 'text-slate-400'}`}>
-                                          {primaryRole}
-                                        </span>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                          {roles.map(r => (
+                                            <span key={r} className={`text-[7px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg ${isLeader ? 'bg-white/10 text-blue-100' : 'bg-white/5 text-slate-400'}`}>
+                                              {r}
+                                            </span>
+                                          ))}
+                                        </div>
                                       </div>
                                     </div>
                                   );

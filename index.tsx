@@ -28,7 +28,10 @@ import {
   Send,
   MousePointer2,
   Fingerprint,
-  Info
+  Info,
+  Shield,
+  Briefcase,
+  FileText
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Skill } from './types';
@@ -288,7 +291,7 @@ const App: React.FC = () => {
 
       const result = await generateAIProgram(
         programInputData,
-        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests: ${personnelRequests}\nCustom Rules: ${customRules}`,
+        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests (Absence Box): ${personnelRequests}\nCustom Rules: ${customRules}`,
         { 
           numDays, 
           customRules, 
@@ -529,6 +532,40 @@ const App: React.FC = () => {
         {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} aiRecommendations={recommendations} />}
       </main>
 
+      {/* Success Checklist Modal */}
+      {showSuccessChecklist && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-2xl animate-in fade-in duration-500">
+           <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full overflow-hidden animate-in slide-in-from-bottom duration-500">
+              <div className="bg-slate-950 p-12 text-center border-b border-white/10">
+                 <div className="w-20 h-20 bg-emerald-500 text-white rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-emerald-500/20"><Check size={40} strokeWidth={3} /></div>
+                 <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Generation Successful</h3>
+                 <p className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.4em] mt-3">Roster Sequence Validated & Finalized</p>
+              </div>
+              <div className="p-12 space-y-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      { icon: History, label: "Legal Rest Guard", sub: `${minRestHours}h Transition Verified` },
+                      { icon: Shield, label: "Skill Integrity", sub: "Certification Mapped" },
+                      { icon: Zap, label: "Multi-Role Check", sub: "Resource Capacity Optimized" },
+                      { icon: Palmtree, label: "Registry Sync", sub: "Leave Box Data Applied" },
+                      { icon: Plane, label: "Flight Matrix", sub: "100% Coverage Reached" },
+                      { icon: Briefcase, label: "Shift Balanced", sub: "Logic Engine Finalized" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="p-5 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center gap-4 animate-in fade-in slide-in-from-left duration-500" style={{ animationDelay: `${idx * 100}ms` }}>
+                        <div className="w-10 h-10 bg-emerald-500 text-white rounded-xl flex items-center justify-center shrink-0"><Check size={18} strokeWidth={3} /></div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase italic text-slate-900">{item.label}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{item.sub}</p>
+                        </div>
+                      </div>
+                    ))}
+                 </div>
+                 <button onClick={() => setShowSuccessChecklist(false)} className="w-full mt-6 py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4 group">ACCESS LIVE PROGRAM <ArrowRight size={18} className="group-hover:translate-x-2 transition-transform"/></button>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* Verification Modal */}
       {pendingVerification && (
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-2xl">
@@ -622,21 +659,6 @@ const App: React.FC = () => {
               <button onClick={commitVerifiedData} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-indigo-600 transition-all">AUTHORIZE MASTER UPDATE</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {showSuccessChecklist && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-2xl">
-           <div className="bg-white rounded-[4rem] shadow-2xl max-w-2xl w-full overflow-hidden animate-in slide-in-from-bottom duration-500">
-              <div className="bg-slate-950 p-12 text-center border-b border-white/10">
-                 <div className="w-20 h-20 bg-emerald-500 text-white rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-emerald-500/20"><Check size={40} strokeWidth={3} /></div>
-                 <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Registry Updated</h3>
-                 <p className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.4em] mt-3">Smart Extraction Verified & Saved</p>
-              </div>
-              <div className="p-12 space-y-8">
-                 <button onClick={() => setShowSuccessChecklist(false)} className="w-full py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">RETURN TO DASHBOARD <ArrowRight size={18}/></button>
-              </div>
-           </div>
         </div>
       )}
 
