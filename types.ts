@@ -1,9 +1,9 @@
 
-export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
+export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Gate / Check-in' | 'Support';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
-export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'LIEU LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'NIL';
+export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'LIEU LEAVE';
 
 export interface StaffSkill {
   skill: Skill;

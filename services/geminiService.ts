@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -38,6 +39,7 @@ export const sanitizeRole = (role: string): Skill => {
   if (r.includes('ops') || r.includes('operations') || r === 'op') return 'Operations';
   if (r.includes('ramp') || r === 'rmp') return 'Ramp';
   if (r.includes('load') || r === 'lc') return 'Load Control';
+  if (r.includes('gate') || r.includes('check')) return 'Gate / Check-in';
   return 'Operations'; 
 };
 
@@ -145,7 +147,7 @@ export const extractDataFromContent = async (params: {
   2. If you see a text field like "Shift Leader: 1, Operations: 1, Ramp: 2, Load Control: 1, Lost and Found: 1", parse it into the roleCounts object.
   3. powerRate for staff must be 50-100 (if you see 0.75, convert to 75).
   4. minStaff and maxStaff are crucial for shift coverage logic.
-  5. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
+  5. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'.
   6. For Staff, capture 'workFromDate' and 'workToDate' if they are Roster/Contract staff.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
@@ -193,7 +195,8 @@ export const extractDataFromContent = async (params: {
                       Operations: { type: Type.STRING }, 
                       'Load Control': { type: Type.STRING }, 
                       'Shift Leader': { type: Type.STRING },
-                      'Lost and Found': { type: Type.STRING }
+                      'Lost and Found': { type: Type.STRING },
+                      'Gate / Check-in': { type: Type.STRING }
                     } 
                   }
                 }
@@ -217,7 +220,8 @@ export const extractDataFromContent = async (params: {
                       'Operations': { type: Type.NUMBER },
                       'Ramp': { type: Type.NUMBER },
                       'Load Control': { type: Type.NUMBER },
-                      'Lost and Found': { type: Type.NUMBER }
+                      'Lost and Found': { type: Type.NUMBER },
+                      'Gate / Check-in': { type: Type.NUMBER }
                     }
                   }
                 }
@@ -242,18 +246,16 @@ export const generateAIProgram = async (
   
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
   STRICT RULES:
-  1. Only use provided IDs for staff and flights. DO NOT invent new IDs.
-  2. Respect 'roleCounts' for each shift. If a shift asks for 2 Ramp staff, assign exactly 2.
-  3. Adhere to mandatory ${config.minRestHours}h rest between shifts using previous finishes: ${constraintsLog}.
-  4. Balance workload using powerRate.
-  5. Absence Box Parsing: Map ANY staff mentioned in 'Personnel Requests' (Absence Box) to the 'offDuty' array for the corresponding day. 
-     - Format usually: "Name/Initials Type Date" (e.g. "JD OFF 12/05").
-     - Categorize as 'DAY OFF', 'ANNUAL LEAVE', etc.
-  6. Return a DailyProgram array where 'day' is a number from 0 to ${config.numDays - 1}.
-  7. Multi-Tasking Optimization: It is OK if a staff member covers TWO roles (e.g., 'Shift Leader' AND 'Load Control') if they have the skills. 
-     - Create two assignment entries for the same staffId in the same shift if they are covering both. 
-     - Use this to solve "Short Staff" scenarios.
-  8. Ensure all assignments have valid IDs.`;
+  1. MANDATORY HEADCOUNT: For every shift, you MUST assign the number of staff specified in 'minStaff'. 
+     - If specialized role requirements (Shift Leader, Ramp, etc.) are met but the headcount is still below 'minStaff', you MUST fill the remaining slots with available staff assigned to the 'Operations' role.
+     - DO NOT leave shifts short-staffed if staff are available and not on leave.
+  2. ABSENCE REGISTRY: Map all staff mentioned in 'Personnel Requests' (Absence Box) to the 'offDuty' array.
+     - You MUST categorize each absence into exactly one of these five types: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', or 'LIEU LEAVE'.
+     - If the text says "OFF", map to 'DAY OFF'. If it says "ROSTER", map to 'ROSTER LEAVE'.
+  3. REST PERIODS: Respect ${config.minRestHours}h rest between duties.
+  4. NO SUPPORT LABELS: Do not use labels like "Support". Every staff member is a professional; use 'Operations' as the default role for general headcount.
+  5. Multi-Tasking: One staff can cover multiple roles (e.g. SL + LC) if they have the skills. Create separate assignment entries for each role they cover in that shift.
+  6. Return a DailyProgram array for ${config.numDays} days starting from ${config.startDate}.`;
 
   try {
     const response = await ai.models.generateContent({
