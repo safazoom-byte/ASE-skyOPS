@@ -11,6 +11,11 @@ export const DAYS_OF_WEEK_FULL = [
   'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 ];
 
+/**
+ * AVAILABLE_SKILLS defines the specialist roles used for manual entry 
+ * in the Staff Discipline Matrix and Shift Role Matrix.
+ * 'Duty' is excluded as it is the system's automated baseline role.
+ */
 export const AVAILABLE_SKILLS: Skill[] = [
-  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in', 'Duty'
+  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'
 ];

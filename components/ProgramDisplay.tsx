@@ -4,7 +4,7 @@ import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from 
 import { DAYS_OF_WEEK } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { CalendarOff, Activity, FileText, Plane, Shield } from 'lucide-react';
+import { CalendarOff, Activity, FileText, Plane, Shield, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -35,15 +35,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       'Operations': 'OPS'
     };
     
-    // Any role not in the specialist list or explicitly labeled 'Duty' will show as 'Duty'
     const matrixRoles = roles.map(r => {
       const trimmed = r.trim();
       if (specialistMap[trimmed]) return specialistMap[trimmed];
-      if (trimmed === 'Duty') return 'Duty';
       return 'Duty';
     });
     
-    // Deduplicate and filter out redundant 'Duty' if specialists exist
     const unique = Array.from(new Set(matrixRoles));
     if (unique.length > 1) {
        const specialistsOnly = unique.filter(u => u !== 'Duty');
@@ -86,14 +83,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
-    doc.setFontSize(16);
-    doc.text(`SkyOPS Program: ${formattedStartDate} - ${formattedEndDate}`, 14, 15);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`SkyOPS Station Handling Program`, 14, 15);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${formattedStartDate} — ${formattedEndDate}`, 14, 20);
 
     sortedPrograms.forEach((program, pIdx) => {
       if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
-      doc.setFontSize(12);
-      doc.setTextColor(15, 23, 42);
-      doc.text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, 20);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      const dayHeader = `${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`;
+      doc.text(dayHeader, 14, 30);
 
       const assignmentsByShift: Record<string, Assignment[]> = {};
       (program.assignments || []).forEach(a => {
@@ -102,7 +104,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         assignmentsByShift[sid].push(a);
       });
 
-      const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
+      const assignmentTableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
         const sh = getShiftById(sid);
         const flightIds = sh?.flightIds || Array.from(new Set(assigs.map(a => a.flightId)));
         const flightList = flightIds.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
@@ -117,19 +119,64 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           }
         });
 
-        const staffAndRoles = Array.from(staffMap.entries()).map(([init, roles]) => `${init} (${getRoleLabel(roles)})`).join(' | ');
-        return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList, staffAndRoles];
+        const staffAndRoles = Array.from(staffMap.entries())
+          .map(([init, roles]) => `${init} (${getRoleLabel(roles)})`)
+          .join(' | ');
+        
+        const headcount = `${Array.from(staffMap.keys()).length} / ${sh?.maxStaff || sh?.minStaff || '?'}`;
+        return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList, headcount, staffAndRoles];
       });
 
       autoTable(doc, {
-        startY: 25,
-        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'PERSONNEL (ROLE)']],
-        body: tableData,
-        headStyles: { fillColor: [15, 23, 42] },
-        theme: 'striped'
+        startY: 35,
+        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC/MAX', 'PERSONNEL & ASSIGNED ROLES']],
+        body: assignmentTableData,
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 3 },
+        margin: { bottom: 10 }
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY || 35;
+      const leaveHeaderY = finalY + 15;
+      
+      if (leaveHeaderY > 185) {
+        doc.addPage('l', 'mm', 'a4');
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`ABSENCE AND LEAVES REGISTRY - ${dayHeader}`, 14, 20);
+      } else {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ABSENCE AND LEAVES REGISTRY', 14, leaveHeaderY);
+      }
+
+      const leaveTableData = leaveCategories.map(cat => {
+        const list = (program.offDuty || [])
+          .filter(off => off.type === cat.type)
+          .map(off => getStaffById(off.staffId))
+          .filter(Boolean)
+          .map(s => formatStaffDisplay(s as Staff))
+          .join(', ');
+        
+        return [cat.label, list || 'NONE'];
+      });
+
+      autoTable(doc, {
+        startY: (leaveHeaderY > 185 ? 25 : leaveHeaderY + 5),
+        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
+        body: leaveTableData,
+        headStyles: { fillColor: [71, 85, 105] },
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: 50, fontStyle: 'bold' },
+          1: { cellWidth: 'auto' }
+        },
+        theme: 'grid'
       });
     });
-    doc.save(`SkyOPS_Program_${formattedStartDate}.pdf`);
+
+    doc.save(`SkyOPS_Station_Program_${formattedStartDate}.pdf`);
   };
 
   if (!sortedPrograms.length) return (
@@ -144,7 +191,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   return (
     <div className="space-y-16 animate-in fade-in duration-700 pb-32">
       <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-10">
-        <div><h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Station Weekly Program</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formattedStartDate} — {formattedEndDate}</p></div>
+        <div><h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Station Handling Program</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formattedStartDate} — {formattedEndDate}</p></div>
         <button onClick={exportPDF} className="px-8 py-5 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 shadow-xl active:scale-95 transition-all"><FileText size={20} /> PDF EXPORT</button>
       </div>
 
@@ -157,6 +204,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             assignmentsByShift[sid].push(a);
           });
 
+          const dateString = getDayDate(program.day);
+          const flightsOnThisDay = flights.filter(f => {
+            const fDate = new Date(f.date + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            return fDate === dateString;
+          });
+          const assignedFlightIds = new Set(program.assignments.map(a => a.flightId));
+          const unassignedFlights = flightsOnThisDay.filter(f => !assignedFlightIds.has(f.id));
+
           return (
             <div key={program.day} className="bg-white rounded-[4rem] overflow-hidden border border-slate-200 shadow-2xl">
               <div className="bg-slate-950 px-12 py-10 flex items-center justify-between text-white border-b border-white/5">
@@ -164,6 +219,25 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
               </div>
 
               <div className="flex flex-col">
+                {unassignedFlights.length > 0 && (
+                  <div className="bg-rose-500/10 p-8 border-b border-rose-500/20 animate-pulse flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="flex items-center gap-4 text-rose-600">
+                      <AlertTriangle size={24} />
+                      <div>
+                        <p className="text-xs font-black uppercase italic tracking-tighter">ALERT: UNCOVERED FLIGHTS</p>
+                        <p className="text-[9px] font-bold uppercase tracking-widest opacity-60">Missing from Handling Sequence</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {unassignedFlights.map(f => (
+                        <div key={f.id} className="bg-rose-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase italic shadow-lg shadow-rose-600/20">
+                          {f.flightNumber}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="overflow-x-auto no-scrollbar border-b border-slate-100">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 text-[10px]">
@@ -171,7 +245,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                         <th className="px-6 py-6 border-r border-slate-100 text-center w-16">S/N</th>
                         <th className="px-6 py-6 border-r border-slate-100 w-32">PICKUP</th>
                         <th className="px-6 py-6 border-r border-slate-100 w-32">RELEASE</th>
-                        <th className="px-6 py-6 border-r border-slate-100 w-32 text-center">HEADCOUNT</th>
+                        <th className="px-6 py-6 border-r border-slate-100 w-32 text-center">HC / MAX</th>
                         <th className="px-8 py-6 border-r border-slate-100">FLIGHTS</th>
                         <th className="px-8 py-6">PERSONNEL & ROLES</th>
                       </tr>
@@ -187,13 +261,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           staffRolesMap.set(a.staffId, current);
                         });
                         const assignedIds = Array.from(staffRolesMap.keys());
+                        const isAtMax = sh && assignedIds.length >= sh.maxStaff;
 
                         return (
                           <tr key={sid} className="hover:bg-slate-50/50 transition-colors align-top">
                             <td className="px-6 py-8 border-r border-slate-100 text-center font-black text-slate-300 italic text-xl">{idx + 1}</td>
                             <td className="px-6 py-8 border-r border-slate-100 font-black text-slate-900 text-xl italic">{sh?.pickupTime || '--:--'}</td>
                             <td className="px-6 py-8 border-r border-slate-100 font-black text-slate-900 text-xl italic">{sh?.endTime || '--:--'}</td>
-                            <td className="px-6 py-8 border-r border-slate-100 text-center"><span className="font-black text-lg italic">{assignedIds.length} / {sh?.minStaff || '??'}</span></td>
+                            <td className="px-6 py-8 border-r border-slate-100 text-center">
+                              <div className={`flex flex-col items-center ${isAtMax ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                <span className="font-black text-lg italic leading-none">{assignedIds.length} / {sh?.maxStaff || '?'}</span>
+                                {isAtMax && <CheckCircle2 size={12} className="mt-1" />}
+                                <span className="text-[7px] font-black uppercase tracking-widest mt-1 opacity-40">Target Reached</span>
+                              </div>
+                            </td>
                             <td className="px-8 py-8 border-r border-slate-100"><div className="space-y-3">{uniqueFlights.map(f => (<div key={f!.id} className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-600 bg-slate-100/50 px-3 py-2 rounded-xl border border-slate-100"><Plane size={12} className="text-indigo-400" />{f!.flightNumber}</div>))}</div></td>
                             <td className="px-8 py-8"><div className="flex flex-wrap gap-3">{assignedIds.map(staffId => {
                                   const s = getStaffById(staffId);

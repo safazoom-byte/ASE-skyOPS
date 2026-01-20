@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill } from '../types';
-import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
+import { DAYS_OF_WEEK_FULL } from '../constants';
 import * as XLSX from 'xlsx';
 import { Clock, Trash2, Edit2, Plus, Minus, FileDown, Calendar, Layers, Sparkles, Plane, ShieldCheck } from 'lucide-react';
 
@@ -13,6 +14,11 @@ interface Props {
   onDelete: (id: string) => void;
   onOpenScanner?: () => void;
 }
+
+// Restricted Specialist Roles for Manual Entry as per requirements
+const SPECIALIST_ENTRY_ROLES: Skill[] = [
+  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'
+];
 
 export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], startDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -146,15 +152,16 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                   <div className="p-4 bg-slate-50 rounded-2xl"><label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Max Staff</label><input type="number" className="w-full bg-white border p-2 rounded-xl font-black text-center" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} /></div>
                 </div>
                 <div className="space-y-4 pt-4 border-t border-slate-50">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest"><ShieldCheck size={14} className="inline mr-2" /> Role Matrix</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest"><ShieldCheck size={14} className="inline mr-2" /> Specialist Matrix</label>
                   <div className="space-y-3">
-                    {AVAILABLE_SKILLS.map(skill => (
+                    {SPECIALIST_ENTRY_ROLES.map(skill => (
                       <div key={skill} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border">
                         <span className="text-[9px] font-black uppercase text-slate-500">{skill}</span>
                         <div className="flex items-center gap-3"><button type="button" onClick={() => updateRoleCount(skill, -1)} className="w-6 h-6 flex items-center justify-center bg-white border rounded-lg hover:bg-slate-100"><Minus size={12}/></button><span className="text-xs font-black text-slate-900 w-4 text-center">{formData.roleCounts?.[skill] || 0}</span><button type="button" onClick={() => updateRoleCount(skill, 1)} className="w-6 h-6 flex items-center justify-center bg-slate-950 text-white rounded-lg hover:bg-blue-600"><Plus size={12}/></button></div>
                       </div>
                     ))}
                   </div>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Note: General 'Duty' headcount is automatically filled by the AI up to Max Staff capacity.</p>
                 </div>
               <button type="submit" className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.3em] shadow-2xl transition-all">Save Slot</button>
             </form>

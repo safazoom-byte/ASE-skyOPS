@@ -30,7 +30,8 @@ import {
   Fingerprint,
   Shield,
   Briefcase,
-  FileText
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -123,6 +124,8 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showLinkWarning, setShowLinkWarning] = useState(false);
+  const [unlinkedFlightsList, setUnlinkedFlightsList] = useState<Flight[]>([]);
   const [showSuccessChecklist, setShowSuccessChecklist] = useState(false);
 
   const [pendingVerification, setPendingVerification] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] } | null>(null);
@@ -202,6 +205,18 @@ const App: React.FC = () => {
     setShowSuccessChecklist(true);
   };
 
+  const checkLinkageAndInitiate = () => {
+    const linkedFlightIds = new Set(activeShiftsInRange.flatMap(s => s.flightIds || []));
+    const unlinked = activeFlightsInRange.filter(f => !linkedFlightIds.has(f.id));
+    
+    if (unlinked.length > 0) {
+      setUnlinkedFlightsList(unlinked);
+      setShowLinkWarning(true);
+    } else {
+      setShowConfirmDialog(true);
+    }
+  };
+
   const confirmGenerateProgram = async () => {
     if (activeFlightsInRange.length === 0) {
       setError("Mission Aborted: No flights found in current window.");
@@ -209,6 +224,7 @@ const App: React.FC = () => {
       return;
     }
     setShowConfirmDialog(false);
+    setShowLinkWarning(false);
     setIsGenerating(true);
     setError(null);
     try {
@@ -309,7 +325,7 @@ const App: React.FC = () => {
                          </div>
                       </div>
 
-                      <button onClick={() => { setError(null); activeFlightsInRange.length ? setShowConfirmDialog(true) : setError("No flights."); }} disabled={isGenerating} className="w-full py-8 bg-slate-950 text-white rounded-[3rem] font-black uppercase italic tracking-[0.4em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-6 group disabled:opacity-50"><Sparkles /> INITIATE BUILD SEQUENCE <ChevronRight /></button>
+                      <button onClick={() => { setError(null); activeFlightsInRange.length ? checkLinkageAndInitiate() : setError("No flights."); }} disabled={isGenerating} className="w-full py-8 bg-slate-950 text-white rounded-[3rem] font-black uppercase italic tracking-[0.4em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-6 group disabled:opacity-50"><Sparkles /> INITIATE BUILD SEQUENCE <ChevronRight /></button>
                    </div>
                 </div>
 
@@ -386,6 +402,29 @@ const App: React.FC = () => {
               <h3 className="text-3xl font-black italic uppercase mb-4 tracking-tighter">Engage Logic Engine?</h3>
               <p className="text-slate-500 text-sm font-medium mb-10">Building roster for {activeFlightsInRange.length} flights.</p>
               <div className="flex gap-4"><button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 italic">Abort</button><button onClick={confirmGenerateProgram} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic tracking-[0.3em] shadow-2xl">CONFIRM MISSION</button></div>
+           </div>
+        </div>
+      )}
+
+      {showLinkWarning && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-2xl">
+           <div className="bg-white rounded-[4rem] p-12 max-w-2xl w-full animate-in slide-in-from-top duration-500">
+              <div className="flex items-center gap-6 mb-10"><div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-[1.5rem] flex items-center justify-center shrink-0 border border-rose-100"><AlertTriangle size={32} /></div><div><h3 className="text-2xl font-black uppercase italic tracking-tighter">Flight Linkage Warning</h3><p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mt-1">Flights Not Mapped to Duty Master</p></div></div>
+              <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-200 max-h-[300px] overflow-y-auto mb-10">
+                <p className="text-xs font-medium text-slate-600 mb-6 italic">The following flights are registered but not assigned to any shift in your Duty Master. If you proceed, the AI will attempt to generate handling shifts automatically.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {unlinkedFlightsList.map((f, idx) => (
+                    <div key={idx} className="p-4 bg-white border border-slate-200 rounded-2xl flex items-center gap-3">
+                      <Plane size={14} className="text-rose-500" />
+                      <div><p className="text-[10px] font-black text-slate-900">{f.flightNumber}</p><p className="text-[8px] font-bold text-slate-400">{f.date}</p></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <button onClick={() => setShowLinkWarning(false)} className="flex-1 py-6 text-[11px] font-black uppercase text-slate-400 italic">Go Back & Link</button>
+                <button onClick={() => setShowConfirmDialog(true)} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] text-xs font-black uppercase italic shadow-2xl">I UNDERSTAND, PROCEED</button>
+              </div>
            </div>
         </div>
       )}

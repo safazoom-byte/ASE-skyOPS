@@ -36,8 +36,7 @@ export const sanitizeRole = (role: string): Skill => {
   if (r.includes('ops') || r.includes('operations') || r === 'op') return 'Operations';
   if (r.includes('ramp') || r === 'rmp') return 'Ramp';
   if (r.includes('load') || r === 'lc') return 'Load Control';
-  if (r.includes('gate') || r.includes('check')) return 'Gate / Check-in';
-  return 'Duty'; // Fallback to Duty as per instructions
+  return 'Duty'; 
 };
 
 const safeParseJson = (text: string | undefined): any => {
@@ -136,7 +135,7 @@ export const extractDataFromContent = async (params: {
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
-  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Gate / Check-in'.`;
+  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -182,9 +181,8 @@ export const extractDataFromContent = async (params: {
                       Ramp: { type: Type.STRING }, 
                       Operations: { type: Type.STRING }, 
                       'Load Control': { type: Type.STRING }, 
-                      'Shift Leader': { type: Type.STRING },
-                      'Lost and Found': { type: Type.STRING },
-                      'Gate / Check-in': { type: Type.STRING }
+                      'Shift Leader': { type: Type.STRING }, 
+                      'Lost and Found': { type: Type.STRING }
                     } 
                   }
                 }
@@ -208,8 +206,7 @@ export const extractDataFromContent = async (params: {
                       'Operations': { type: Type.NUMBER },
                       'Ramp': { type: Type.NUMBER },
                       'Load Control': { type: Type.NUMBER },
-                      'Lost and Found': { type: Type.NUMBER },
-                      'Gate / Check-in': { type: Type.NUMBER }
+                      'Lost and Found': { type: Type.NUMBER }
                     }
                   }
                 }
@@ -234,26 +231,23 @@ export const generateAIProgram = async (
   
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
   
-  MANDATORY ROLE NAMING:
-  - Specialist Roles: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
-  - Generic Role: ALL other staff members assigned to a shift MUST be labeled as 'Duty'. Never use 'Support' or 'Ops' (use 'Operations' or 'Duty' only).
+  MAXIMUM STAFF UTILIZATION POLICY:
+  - DO NOT leave staff idle (NIL) if shifts have not reached 'maxStaff'.
+  - Assign staff to active shifts until 'maxStaff' is met.
+  - Prioritize specialist roles: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
+  - Fill remaining headcount up to 'maxStaff' with generic 'Duty' role.
+  - A person is only 'NIL' (Available) if ALL concurrent shifts have reached 'maxStaff'.
   
-  PREVIOUS DAY REST GUARD:
-  - Input Format: "KA-ATZ - AF-ATZ - FG-ATZ (2026-01-23 04:00)".
-  - Logic: Extract initials (KA, AF, FG) and date/time. These staff finished work at the given time.
-  - Calculate rest gap between this finish time and their first Day 1 shift start.
-  - If gap < ${config.minRestHours} hours, they are disqualified from Day 1 shifts and must be in offDuty.
+  MANDATORY FLIGHT COVERAGE:
+  - Every flight in 'data.flights' MUST be covered.
+  
+  MANDATORY ROLE NAMING:
+  - Specialists: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
+  - Non-Specialists: 'Duty'.
   
   100% PERSONNEL REGISTRY:
-  - Every staff member in the 'staff' array MUST appear in the output for every day.
-  - If a staff member is not assigned to a flight shift, they MUST be listed in 'offDuty'.
-  - Categorize absences using: 'DAY OFF', 'ROSTER LEAVE', 'ANNUAL LEAVE', 'SICK LEAVE', 'LIEU LEAVE', or 'NIL'.
-  - Local staff (Permanent) usually get 2 Days Off per 7 days.
-  - Roster staff outside their contract dates MUST be in ROSTER LEAVE.
-  
-  STRICT HEADCOUNT:
-  - Every shift MUST meet 'minStaff'. Fill gaps with 'Duty' role.
-  - Returns a DailyProgram array for ${config.numDays} days starting from ${config.startDate}.`;
+  - Every staff member MUST be listed in assignments or offDuty every day.
+  - Include ABSENCE AND LEAVES REGISTRY entries.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -345,7 +339,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback role.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback. Specialists: SL, OPS, Ramp, LC, LF.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
