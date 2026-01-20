@@ -29,11 +29,15 @@ export interface BuildResult {
 }
 
 /**
- * Advanced JSON repair utility to handle common LLM output errors 
+ * Enhanced JSON parser that attempts to repair truncated or malformed JSON 
+ * by balancing brackets and stripping markdown noise.
  */
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
+  
+  // Try standard parse first
   try {
     return JSON.parse(cleanText);
   } catch (e) {
@@ -41,42 +45,53 @@ const safeParseJson = (text: string | undefined): any => {
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
     );
-    const endIdx = Math.max(cleanText.lastIndexOf('}'), cleanText.lastIndexOf(']'));
-    if (startIdx === Infinity || endIdx === -1) return null;
-    let jsonCandidate = cleanText.slice(startIdx, endIdx + 1);
+    
+    if (startIdx === Infinity) return null;
+    
+    let candidate = cleanText.slice(startIdx);
+    const stack: string[] = [];
+    let lastValidIdx = 0;
+    
+    for (let i = 0; i < candidate.length; i++) {
+      const char = candidate[i];
+      if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}' || char === ']') {
+        const last = stack.pop();
+        if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
+          if (stack.length === 0) lastValidIdx = i + 1;
+        }
+      }
+    }
+    
+    if (lastValidIdx > 0) {
+      try {
+        return JSON.parse(candidate.slice(0, lastValidIdx));
+      } catch (e2) {}
+    }
+
+    let repaired = candidate;
+    const repairStack = [...stack];
+    while (repairStack.length > 0) {
+      const last = repairStack.pop();
+      repaired += (last === '{' ? '}' : ']');
+    }
+
     try {
-      return JSON.parse(jsonCandidate);
-    } catch (e2) {
+      return JSON.parse(repaired);
+    } catch (e3) {
+      console.error("JSON Repair Failed:", e3);
       return null;
     }
   }
 };
 
-/**
- * New Smart-Map Service: Identifies column indexes for local parsing
- */
 export const identifyMapping = async (sampleRows: any[][], targetType: 'flights' | 'staff' | 'shifts' | 'all'): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const systemInstruction = `
-    ACT AS AN AVIATION DATA MAPPING SPECIALIST.
-    GIVEN A SAMPLE OF SPREADSHEET ROWS, IDENTIFY THE COLUMN INDEX (0-based) FOR EACH REQUIRED FIELD.
-
-    REQUIRED FIELDS BY TARGET:
-    - FLIGHTS: flightNumber, from, to, sta, std, date
-    - STAFF: name, initials, type, powerRate, workFromDate, workToDate, skill_Ramp, skill_LoadControl, skill_Operations, skill_ShiftLeader
-    - SHIFTS: pickupDate, pickupTime, endDate, endTime, minStaff, maxStaff
-
-    OUTPUT JSON ONLY.
-  `;
-
-  const prompt = `
-    TARGET CATEGORY: ${targetType.toUpperCase()}
-    SAMPLE ROWS (First row is usually headers):
-    ${JSON.stringify(sampleRows.slice(0, 5))}
-
-    Identify which column index maps to which required field. Return -1 if not found.
-  `;
+  const systemInstruction = `Aviation Data Expert. Identify 0-based column indices for the provided data. 
+  If a column is not clearly found or is empty, return -1 for that field. 
+  STRICT JSON ONLY.`;
+  const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
 
   try {
     const response = await ai.models.generateContent({
@@ -92,14 +107,12 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
             columnMap: { 
               type: Type.OBJECT,
               properties: {
-                // Flights fields
                 flightNumber: { type: Type.INTEGER },
                 from: { type: Type.INTEGER },
                 to: { type: Type.INTEGER },
                 sta: { type: Type.INTEGER },
                 std: { type: Type.INTEGER },
                 date: { type: Type.INTEGER },
-                // Staff fields
                 name: { type: Type.INTEGER },
                 initials: { type: Type.INTEGER },
                 type: { type: Type.INTEGER },
@@ -110,15 +123,14 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
                 skill_LoadControl: { type: Type.INTEGER },
                 skill_Operations: { type: Type.INTEGER },
                 skill_ShiftLeader: { type: Type.INTEGER },
-                // Shifts fields
+                'skill_Lost and Found': { type: Type.INTEGER },
                 pickupDate: { type: Type.INTEGER },
                 pickupTime: { type: Type.INTEGER },
                 endDate: { type: Type.INTEGER },
                 endTime: { type: Type.INTEGER },
                 minStaff: { type: Type.INTEGER },
                 maxStaff: { type: Type.INTEGER },
-              },
-              required: ["flightNumber", "name", "pickupDate"] // Ensure some properties are identified as required keys in the response object
+              }
             }
           },
           required: ["detectedTarget", "columnMap"]
@@ -127,7 +139,6 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
     });
     return safeParseJson(response.text);
   } catch (error) {
-    console.error("Mapping Identification Error:", error);
     return null;
   }
 };
@@ -140,39 +151,22 @@ export const extractDataFromContent = async (params: {
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const target = params.targetType || 'all';
-  
-  const systemInstruction = `
-    ACT AS AN AVIATION LOGISTICS DATA ARCHITECT.
-    OBJECTIVE: Extract and normalize station data from images/text into strict JSON.
+  const systemInstruction = `Aviation Data Architect. 
+  Mission: Extract structured flight, staff, and shift data.
+  HARD RULE: Always use FULL ROLE NAMES. NO ABBREVIATIONS.
+  - Role Names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
+  - If the user says "Tomorrow", calculate date based on system current window start: ${params.startDate || 'today'}.
+  - Relational Mapping: If a shift is linked to a flight number, extract the flight number in the shift object.
+  - Use YYYY-MM-DD for dates and HH:mm for times.
+  - PowerRate: Default to 75.
+  STRICT JSON ONLY.`;
 
-    1. STAFF REGISTRY NORMALIZATION:
-       - 'Full Name' -> name (String)
-       - 'Initials' -> initials (String)
-       - 'Category' -> type ('Local' or 'Roster'). Match "Permanent", "Fixed", "Local", "Full Time" to 'Local'. Match "Variable", "Rostered", "External", "Contractor" to 'Roster'.
-       - 'Power Rate' -> powerRate (Number). Look for headers: "Power %", "Efficiency", "Rate", "Performance", "Power". Strip percentage signs and map "100" or "0.95" to numbers like 100 or 95. Default to 75.
-       - 'Work From' -> workFromDate (String, YYYY-MM-DD). ONLY FOR ROSTER STAFF. Match headers: "Contract Start", "Start Date", "From", "Work From". Convert from formats like DD/MM/YYYY or MM/DD/YYYY.
-       - 'Work To' -> workToDate (String, YYYY-MM-DD). ONLY FOR ROSTER STAFF. Match headers: "Contract End", "End Date", "To", "Work To". Convert from formats like DD/MM/YYYY or MM/DD/YYYY.
-       - LOCAL STAFF: If type is 'Local', explicitly IGNORE any 'Work From' or 'Work To' dates as they work a permanent 5/2 cycle.
-       - Skills: Map "YES"/"NO", "TRUE"/"FALSE", or "X" marks to "Yes"/"No".
+  const promptText = `Extract station data. 
+  Current Window Start: ${params.startDate}.
+  Input: ${params.textData || "Images attached."}`;
 
-    2. DUAL SHEET (Combined Shifts + Flights):
-       - If a row has "Shift Start" AND "Flight No", create BOTH a Flight and a Shift object.
-       - Use 'Role Matrix' (e.g., "Ramp: 2") to populate roleCounts.
-
-    3. DATE/TIME STANDARDS:
-       - All dates MUST be YYYY-MM-DD.
-       - All times MUST be HH:mm (24h).
-       - Reference Year: ${params.startDate?.split('-')[0] || new Date().getFullYear()}.
-  `;
-
-  const prompt = `
-    TARGET MODE: ${target.toUpperCase()}
-    SOURCE DATA:
-    ${params.textData || "Analyze provided content for operational data."}
-  `;
-
-  const parts: any[] = [{ text: prompt }];
-  if (Array.isArray(params.media)) {
+  const parts: any[] = [{ text: promptText }];
+  if (params.media) {
     params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
 
@@ -187,9 +181,9 @@ export const extractDataFromContent = async (params: {
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            flights: {
-              type: Type.ARRAY,
-              items: {
+            flights: { 
+              type: Type.ARRAY, 
+              items: { 
                 type: Type.OBJECT,
                 properties: {
                   flightNumber: { type: Type.STRING },
@@ -199,38 +193,34 @@ export const extractDataFromContent = async (params: {
                   std: { type: Type.STRING },
                   date: { type: Type.STRING },
                   type: { type: Type.STRING }
-                },
-                required: ["flightNumber", "date"]
-              }
+                }
+              } 
             },
-            staff: {
-              type: Type.ARRAY,
-              items: {
+            staff: { 
+              type: Type.ARRAY, 
+              items: { 
                 type: Type.OBJECT,
                 properties: {
                   name: { type: Type.STRING },
                   initials: { type: Type.STRING },
                   type: { type: Type.STRING },
                   powerRate: { type: Type.NUMBER },
-                  workFromDate: { type: Type.STRING },
-                  workToDate: { type: Type.STRING },
                   skillRatings: { 
-                    type: Type.OBJECT,
-                    properties: {
+                    type: Type.OBJECT, 
+                    properties: { 
+                      Ramp: { type: Type.STRING }, 
+                      Operations: { type: Type.STRING }, 
+                      'Load Control': { type: Type.STRING }, 
                       'Shift Leader': { type: Type.STRING },
-                      'Operations': { type: Type.STRING },
-                      'Ramp': { type: Type.STRING },
-                      'Load Control': { type: Type.STRING },
                       'Lost and Found': { type: Type.STRING }
-                    }
+                    } 
                   }
-                },
-                required: ["name", "initials"]
-              }
+                }
+              } 
             },
-            shifts: {
-              type: Type.ARRAY,
-              items: {
+            shifts: { 
+              type: Type.ARRAY, 
+              items: { 
                 type: Type.OBJECT,
                 properties: {
                   pickupDate: { type: Type.STRING },
@@ -239,8 +229,6 @@ export const extractDataFromContent = async (params: {
                   endTime: { type: Type.STRING },
                   minStaff: { type: Type.NUMBER },
                   maxStaff: { type: Type.NUMBER },
-                  targetPower: { type: Type.NUMBER },
-                  flightIds: { type: Type.ARRAY, items: { type: Type.STRING } },
                   roleCounts: {
                     type: Type.OBJECT,
                     properties: {
@@ -251,19 +239,15 @@ export const extractDataFromContent = async (params: {
                       'Lost and Found': { type: Type.NUMBER }
                     }
                   }
-                },
-                required: ["pickupDate", "pickupTime"]
-              }
+                }
+              } 
             }
           }
         }
       }
     });
-
-    const parsed = safeParseJson(response.text);
-    return parsed || { flights: [], staff: [], shifts: [] };
+    return safeParseJson(response.text);
   } catch (error) {
-    console.error("Extraction Error:", error);
     throw error;
   }
 };
@@ -275,38 +259,29 @@ export const generateAIProgram = async (
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const systemInstruction = `
-    ACT AS A HIGH-PRECISION AVIATION ROSTERING ENGINE.
-    GOAL: Generate a multi-day staff roster in valid JSON.
+  const systemInstruction = `Aviation Roster Engine. STRICT JSON ONLY.
+  Mission: Generate weekly station program covering flights handling.
+  HARD CONSTRAINTS:
+  1. Flight-Shift Linkage: Each shift is EXPLICITLY LINKED to specific flightIds. Personnel assigned to a shift MUST cover those linked flights.
+  2. Full Role Names: Use full names only: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
+  3. Skill Matching: Only assign staff to roles if their skillRating is 'Yes'.
+  4. Role Requirements: Respect roleCounts in each shift strictly.
+  5. Scarcity: Prioritize 'Shift Leader' and 'Operations' as they are compliance-critical.
+  6. Rest: Minimum ${config.minRestHours}h rest between shifts.`;
 
-    CONSTRAINTS:
-    1. CATEGORY LOGIC:
-       - LOCAL STAFF: Work a permanent 5-on/2-off pattern. Ignore workFrom/To dates.
-       - ROSTER STAFF: Availability is STRICTLY limited to [workFromDate, workToDate]. Do not assign outside these bounds.
-    2. MINIMUM REST: Every staff member MUST have at least ${config.minRestHours} hours of rest between shifts.
-    3. ROLE MATRIX: Honor the 'roleCounts' for each shift. Assign personnel with appropriate 'skillRatings'.
-    4. POWER RATE: Prioritize staff with higher power rates (e.g., 90-100%) for complex turnaround shifts.
-    5. ABSENCE BOX: Strictly follow the OFF/NIL requests in the provided constraints.
-
-    OUTPUT FORMAT: Strictly follow the responseSchema.
-  `;
-
-  const prompt = `
-    OPERATIONAL WINDOW: ${config.numDays} days starting from ${config.startDate}.
-    INPUT DATA: ${JSON.stringify(data)}
-    CONSTRAINTS/LOGS: ${constraintsLog}
-    CUSTOM RULES: ${config.customRules}
-  `;
+  const promptText = `Build roster. Data: ${JSON.stringify(data)}.
+  Respect explicit flightIds linkage in shifts.
+  Population Period: ${config.numDays} days from ${config.startDate}.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: prompt,
+      contents: promptText,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 12000 },
-        maxOutputTokens: 20000,
+        thinkingConfig: { thinkingBudget: 8192 },
+        maxOutputTokens: 16384,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -316,10 +291,9 @@ export const generateAIProgram = async (
                 type: Type.OBJECT,
                 properties: {
                   day: { type: Type.NUMBER },
-                  dateString: { type: Type.STRING },
-                  assignments: {
-                    type: Type.ARRAY,
-                    items: {
+                  assignments: { 
+                    type: Type.ARRAY, 
+                    items: { 
                       type: Type.OBJECT,
                       properties: {
                         id: { type: Type.STRING },
@@ -329,26 +303,26 @@ export const generateAIProgram = async (
                         shiftId: { type: Type.STRING }
                       },
                       required: ["staffId", "flightId", "role"]
-                    }
+                    } 
                   },
-                  offDuty: {
-                    type: Type.ARRAY,
-                    items: {
+                  offDuty: { 
+                    type: Type.ARRAY, 
+                    items: { 
                       type: Type.OBJECT,
                       properties: {
                         staffId: { type: Type.STRING },
                         type: { type: Type.STRING }
                       },
                       required: ["staffId", "type"]
-                    }
+                    } 
                   }
                 },
                 required: ["day", "assignments"]
               }
             },
-            shortageReport: {
-              type: Type.ARRAY,
-              items: {
+            shortageReport: { 
+              type: Type.ARRAY, 
+              items: { 
                 type: Type.OBJECT,
                 properties: {
                   staffName: { type: Type.STRING },
@@ -358,9 +332,9 @@ export const generateAIProgram = async (
                   reason: { type: Type.STRING }
                 },
                 required: ["staffName", "reason"]
-              }
+              } 
             },
-            recommendations: {
+            recommendations: { 
               type: Type.OBJECT,
               properties: {
                 idealStaffCount: { type: Type.NUMBER },
@@ -369,7 +343,7 @@ export const generateAIProgram = async (
                 hireAdvice: { type: Type.STRING },
                 healthScore: { type: Type.NUMBER }
               },
-              required: ["healthScore"]
+              required: ["idealStaffCount", "healthScore"]
             }
           },
           required: ["programs", "shortageReport"]
@@ -378,10 +352,12 @@ export const generateAIProgram = async (
     });
 
     const result = safeParseJson(response.text);
-    if (!result || !result.programs) throw new Error("Logic Engine output missing required roster structure.");
+    if (!result || !result.programs) {
+      throw new Error("Logic Engine: No programs returned.");
+    }
     return result;
-  } catch (error) {
-    console.error("Generation Error:", error);
+  } catch (error: any) {
+    console.error("Roster Engine Critical Failure:", error);
     throw error;
   }
 };
@@ -396,7 +372,7 @@ export const modifyProgramWithAI = async (
     { text: `Roster State: ${JSON.stringify(data.programs)}` },
     { text: `Instruction: ${instruction}` }
   ];
-  if (Array.isArray(media)) {
+  if (media) {
     media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
 
@@ -404,11 +380,52 @@ export const modifyProgramWithAI = async (
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: { parts },
-      config: { responseMimeType: "application/json" }
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            programs: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  day: { type: Type.NUMBER },
+                  assignments: { 
+                    type: Type.ARRAY, 
+                    items: { 
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        staffId: { type: Type.STRING },
+                        flightId: { type: Type.STRING },
+                        role: { type: Type.STRING },
+                        shiftId: { type: Type.STRING }
+                      }
+                    } 
+                  },
+                  offDuty: { 
+                    type: Type.ARRAY, 
+                    items: { 
+                      type: Type.OBJECT,
+                      properties: {
+                        staffId: { type: Type.STRING },
+                        type: { type: Type.STRING }
+                      }
+                    } 
+                  }
+                }
+              } 
+            },
+            explanation: { type: Type.STRING }
+          },
+          required: ["programs", "explanation"]
+        }
+      }
     });
-    return safeParseJson(response.text) || { programs: data.programs, explanation: "Failed to process modification." };
+    const result = safeParseJson(response.text);
+    return result || { programs: data.programs, explanation: "Modification error." };
   } catch (error) {
-    console.error("Chat Error:", error);
     throw error;
   }
 };

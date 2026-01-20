@@ -50,6 +50,28 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
+  /**
+   * Robust Date formatter to handle raw ISO strings or malformed inputs
+   */
+  const formatStaffDate = (dateStr?: string) => {
+    if (!dateStr || dateStr === 'N/A' || dateStr === '???') return '???';
+    
+    // Attempt standard JS parsing
+    const date = new Date(dateStr);
+    
+    // Final check for the serial number bug (if it leaked into storage somehow)
+    if (isNaN(date.getTime()) || date.getFullYear() > 4000) {
+      if (/^\d{5}$/.test(dateStr)) {
+        const serial = parseInt(dateStr);
+        const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+        return !isNaN(d.getTime()) ? d.toLocaleDateString('en-GB') : dateStr;
+      }
+      return dateStr;
+    }
+    
+    return date.toLocaleDateString('en-GB'); // Format: DD/MM/YYYY
+  };
+
   const handleNewStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaff.name) return;
@@ -268,9 +290,9 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                   {isRoster && (member.workFromDate || member.workToDate) && (
                     <div className="flex flex-col gap-1 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
                       <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest">
-                        <span className="text-slate-400">Term:</span>
-                        <span className="text-slate-900 italic">
-                          {member.workFromDate ? new Date(member.workFromDate).toLocaleDateString() : '???'} — {member.workToDate ? new Date(member.workToDate).toLocaleDateString() : '???'}
+                        <span className="text-slate-400">TERM:</span>
+                        <span className="text-slate-900 italic font-black">
+                          {formatStaffDate(member.workFromDate)} — {formatStaffDate(member.workToDate)}
                         </span>
                       </div>
                     </div>

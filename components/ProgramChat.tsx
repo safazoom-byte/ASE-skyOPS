@@ -1,13 +1,7 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { modifyProgramWithAI, ExtractionMedia } from '../services/geminiService';
 import { ProgramData, DailyProgram } from '../types';
 import { X, Send, MessageSquare, Sparkles, Check, RotateCcw, HelpCircle, AlertCircle, Paperclip, FileText } from 'lucide-react';
-
-interface Props {
-  data: ProgramData;
-  onUpdate: (updatedPrograms: DailyProgram[]) => void;
-}
 
 interface Message {
   id: string;
@@ -17,6 +11,11 @@ interface Message {
   type?: 'standard' | 'pending' | 'error' | 'clarification';
   suggestedPhrases?: string[];
   hasAttachment?: boolean;
+}
+
+interface Props {
+  data: ProgramData;
+  onUpdate: (updatedPrograms: DailyProgram[]) => void;
 }
 
 export const ProgramChat: React.FC<Props> = ({ data, onUpdate }) => {
@@ -87,6 +86,10 @@ export const ProgramChat: React.FC<Props> = ({ data, onUpdate }) => {
 
       const result = await modifyProgramWithAI(instruction, data, media);
       
+      if (!result) {
+        throw new Error("AI returned no response.");
+      }
+
       // Detection for "No Changes Made" - check if program data is identical
       const isIdentical = JSON.stringify(result.programs) === JSON.stringify(data.programs);
       
@@ -98,7 +101,7 @@ export const ProgramChat: React.FC<Props> = ({ data, onUpdate }) => {
         type: isIdentical ? 'clarification' : 'pending'
       };
       
-      if (!isIdentical) {
+      if (!isIdentical && result.programs) {
         setPendingUpdate(result.programs);
       }
       
