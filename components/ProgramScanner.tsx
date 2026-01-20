@@ -140,13 +140,10 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   const parseRoleString = (str: any): Partial<Record<Skill, number>> => {
     const counts: Partial<Record<Skill, number>> = {};
     if (!str || typeof str !== 'string') return counts;
-    // Split by comma, newline, or semicolon
     const parts = str.split(/[,\n;]/);
     parts.forEach(part => {
-      // Handle separators: :, -, =, or just a space between role and number
       const segments = part.split(/[:\-= ]+/).filter(Boolean);
       if (segments.length >= 2) {
-        // Find the numeric part (usually at the end)
         const count = parseInt(segments[segments.length - 1]);
         const nameParts = segments.slice(0, segments.length - 1);
         const name = nameParts.join(' ').trim();
@@ -182,7 +179,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       const hasShiftTime = map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime];
       const hasRoleMatrix = map.roleMatrix !== undefined && map.roleMatrix !== -1 && row[map.roleMatrix];
 
-      // Explicit Check for Shift Row
       const isShiftRow = !!hasShiftTime || !!hasRoleMatrix;
 
       let rowFlightId: string | null = null;
@@ -204,19 +200,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       if (isShiftRow) {
         const shiftId = Math.random().toString(36).substr(2, 9);
         let roleCounts: Partial<Record<Skill, number>> = {};
+        if (hasRoleMatrix) roleCounts = parseRoleString(row[map.roleMatrix]);
         
-        // Method 1: Matrix String Parsing
-        if (hasRoleMatrix) {
-          roleCounts = parseRoleString(row[map.roleMatrix]);
-        }
-        
-        // Method 2: Individual Column Mapping (Merge with existing)
         const tryMergeSkill = (skill: Skill, colIndex: number | undefined) => {
           if (colIndex !== undefined && colIndex !== -1) {
             const val = parseInt(row[colIndex]);
-            if (!isNaN(val) && val > 0) {
-              roleCounts[skill] = (roleCounts[skill] || 0) + val;
-            }
+            if (!isNaN(val) && val > 0) roleCounts[skill] = (roleCounts[skill] || 0) + val;
           }
         };
         
@@ -245,35 +234,44 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           id: Math.random().toString(36).substr(2, 9),
           name: String(row[map.name] || '').trim(),
           initials: String(row[map.initials] || '').trim().toUpperCase(),
-          type: String(row[map.type] || '').includes('Rost') ? 'Roster' : 'Local',
+          type: String(row[map.type] || '').toLowerCase().includes('rost') ? 'Roster' : 'Local',
           powerRate: parsePowerRate(row[map.powerRate]),
-          workPattern: '5 Days On / 2 Off',
+          workPattern: String(row[map.type] || '').toLowerCase().includes('rost') ? 'Continuous (Roster)' : '5 Days On / 2 Off',
           maxShiftsPerWeek: 5,
           workFromDate: map.workFromDate !== undefined && map.workFromDate !== -1 ? parseImportDate(row[map.workFromDate]) : undefined,
           workToDate: map.workToDate !== undefined && map.workToDate !== -1 ? parseImportDate(row[map.workToDate]) : undefined,
           skillRatings: {
-            'Ramp': (map.skill_Ramp !== -1 && (String(row[map.skill_Ramp]).toLowerCase().includes('yes') || String(row[map.skill_Ramp]) === '1')) ? 'Yes' : 'No',
-            'Operations': (map.skill_Operations !== -1 && (String(row[map.skill_Operations]).toLowerCase().includes('yes') || String(row[map.skill_Operations]) === '1')) ? 'Yes' : 'No',
-            'Load Control': (map.skill_LoadControl !== -1 && (String(row[map.skill_LoadControl]).toLowerCase().includes('yes') || String(row[map.skill_LoadControl]) === '1')) ? 'Yes' : 'No',
-            'Shift Leader': (map.skill_ShiftLeader !== -1 && (String(row[map.skill_ShiftLeader]).toLowerCase().includes('yes') || String(row[map.skill_ShiftLeader]) === '1')) ? 'Yes' : 'No',
-            'Lost and Found': (map['skill_Lost and Found'] !== -1 && (String(row[map['skill_Lost and Found']]).toLowerCase().includes('yes') || String(row[map['skill_Lost and Found']]) === '1')) ? 'Yes' : 'No'
+            'Ramp': (map.skill_Ramp !== undefined && map.skill_Ramp !== -1 && (String(row[map.skill_Ramp]).toLowerCase().includes('yes') || String(row[map.skill_Ramp]) === '1')) ? 'Yes' : 'No',
+            'Operations': (map.skill_Operations !== undefined && map.skill_Operations !== -1 && (String(row[map.skill_Operations]).toLowerCase().includes('yes') || String(row[map.skill_Operations]) === '1')) ? 'Yes' : 'No',
+            'Load Control': (map.skill_LoadControl !== undefined && map.skill_LoadControl !== -1 && (String(row[map.skill_LoadControl]).toLowerCase().includes('yes') || String(row[map.skill_LoadControl]) === '1')) ? 'Yes' : 'No',
+            'Shift Leader': (map.skill_ShiftLeader !== undefined && map.skill_ShiftLeader !== -1 && (String(row[map.skill_ShiftLeader]).toLowerCase().includes('yes') || String(row[map.skill_ShiftLeader]) === '1')) ? 'Yes' : 'No',
+            'Lost and Found': (map['skill_Lost and Found'] !== undefined && map['skill_Lost and Found'] !== -1 && (String(row[map['skill_Lost and Found']]).toLowerCase().includes('yes') || String(row[map['skill_Lost and Found']]) === '1')) ? 'Yes' : 'No'
           }
         });
       }
     });
 
-    // Smart Linkage for Shift-Flight Engagement
+    // AUTO-LINKAGE ENGINE: Link all flights occurring during shift times on the same date
     shifts.forEach(s => {
-      const shiftMinutes = timeToMinutes(s.pickupTime);
-      if (shiftMinutes === -1) return;
+      const shiftStart = timeToMinutes(s.pickupTime);
+      const shiftEnd = timeToMinutes(s.endTime);
+      
       const matchingFlights = flights.filter(f => {
         if (f.date !== s.pickupDate) return false;
-        const staMin = timeToMinutes(f.sta);
-        const stdMin = timeToMinutes(f.std);
-        return (staMin !== -1 && Math.abs(staMin - shiftMinutes) <= 60) || (stdMin !== -1 && Math.abs(stdMin - shiftMinutes) <= 60);
+        const flightTime = timeToMinutes(f.sta || f.std);
+        if (flightTime === -1) return false;
+        
+        // Flight is linked if it falls within the shift window (with 15 min buffer)
+        const inWindow = shiftEnd > shiftStart 
+          ? (flightTime >= shiftStart - 15 && flightTime <= shiftEnd + 15)
+          : (flightTime >= shiftStart - 15 || flightTime <= shiftEnd + 15); // Overnight wrap
+        
+        return inWindow;
       });
+
       matchingFlights.forEach(f => {
-        if (!s.flightIds?.includes(f.id)) s.flightIds = [...(s.flightIds || []), f.id];
+        if (!s.flightIds) s.flightIds = [];
+        if (!s.flightIds.includes(f.id)) s.flightIds.push(f.id);
       });
     });
 

@@ -237,7 +237,7 @@ const App: React.FC = () => {
 
       const result = await generateAIProgram(
         programInputData,
-        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests (Absence Box): ${personnelRequests}`,
+        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests (Absence Box): ${personnelRequests}\nSPECIAL RULE: Do not automatically assign staff to unlinked flights. If a flight is not linked to a shift, leave it as NIL coverage.`,
         { numDays, customRules: '', minRestHours, startDate }
       );
 
@@ -409,9 +409,9 @@ const App: React.FC = () => {
       {showLinkWarning && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-2xl">
            <div className="bg-white rounded-[4rem] p-12 max-w-2xl w-full animate-in slide-in-from-top duration-500">
-              <div className="flex items-center gap-6 mb-10"><div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-[1.5rem] flex items-center justify-center shrink-0 border border-rose-100"><AlertTriangle size={32} /></div><div><h3 className="text-2xl font-black uppercase italic tracking-tighter">Flight Linkage Warning</h3><p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mt-1">Flights Not Mapped to Duty Master</p></div></div>
+              <div className="flex items-center gap-6 mb-10"><div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-[1.5rem] flex items-center justify-center shrink-0 border border-rose-100"><AlertTriangle size={32} /></div><div><h3 className="text-2xl font-black uppercase italic tracking-tighter">Coverage Summary</h3><p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mt-1">Flights Not Mapped to Duty Master</p></div></div>
               <div className="bg-slate-50 rounded-[2.5rem] p-8 border border-slate-200 max-h-[300px] overflow-y-auto mb-10">
-                <p className="text-xs font-medium text-slate-600 mb-6 italic">The following flights are registered but not assigned to any shift in your Duty Master. If you proceed, the AI will attempt to generate handling shifts automatically.</p>
+                <p className="text-xs font-medium text-slate-600 mb-6 italic">The following flights are not linked to any handling shift. If you proceed, they will remain unassigned in the roster. Please ensure this is intended.</p>
                 <div className="grid grid-cols-2 gap-3">
                   {unlinkedFlightsList.map((f, idx) => (
                     <div key={idx} className="p-4 bg-white border border-slate-200 rounded-2xl flex items-center gap-3">

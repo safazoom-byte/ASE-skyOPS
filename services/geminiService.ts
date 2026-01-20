@@ -232,25 +232,26 @@ export const generateAIProgram = async (
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const systemInstruction = `Aviation Roster Engine. Generate a daily station program.
+  const systemInstruction = `Aviation Roster Engine. Generate a daily station program with ABSOLUTE compliance.
   
-  MAXIMUM STAFF UTILIZATION POLICY:
-  - DO NOT leave staff idle (NIL) if shifts have not reached 'maxStaff'.
-  - Assign staff to active shifts until 'maxStaff' is met.
-  - Prioritize specialist roles: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
-  - Fill remaining headcount up to 'maxStaff' with generic 'Duty' role.
-  - A person is only 'NIL' (Available) if ALL concurrent shifts have reached 'maxStaff'.
+  1. MASTER TRUTH - THE ABSENCE BOX (Personnel Requests):
+  - You MUST scan the 'Personnel Requests (Absence Box)' text carefully for overrides.
+  - If a staff member (Name or Initials) is mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'LIEU', 'ROSTER' for a date, they MUST be added to the 'offDuty' array for that specific day.
+  - CRITICAL: DO NOT list these staff as 'NIL' (Available). They are on leave and cannot be assigned or listed as present at the station.
   
-  MANDATORY FLIGHT COVERAGE:
-  - Every flight in 'data.flights' MUST be covered.
+  2. ROSTER STAFF CONTRACT PROTECTION:
+  - 'Roster' staff have 'workFromDate' (Start) and 'workToDate' (End).
+  - If a roster day is BEFORE their 'workFromDate' or AFTER their 'workToDate', they ARE NOT AT STATION.
+  - Move them to 'offDuty' with status 'ROSTER LEAVE' for those days.
+  - DO NOT list them as 'NIL' (Available) outside their contract window.
   
-  MANDATORY ROLE NAMING:
-  - Specialists: 'Shift Leader', 'Load Control', 'Ramp', 'Lost and Found', 'Operations'.
-  - Non-Specialists: 'Duty'.
+  3. AVAILABLE (NIL) DEFINITION:
+  - 'NIL' is ONLY for staff who:
+    a) Are NOT mentioned in the Absence Box.
+    b) Are WITHIN their contract dates.
+    c) Were not needed for a shift because shifts were already at 'maxStaff' capacity.
   
-  100% PERSONNEL REGISTRY:
-  - Every staff member MUST be listed in assignments or offDuty every day.
-  - Include ABSENCE AND LEAVES REGISTRY entries.`;
+  EVERY staff member in the database MUST be accounted for either in 'assignments' OR 'offDuty' for every single day.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -327,9 +328,6 @@ export const generateAIProgram = async (
     });
     
     const result = safeParseJson(response.text);
-    if (!result || !result.programs || result.programs.length === 0) {
-      throw new Error("Roster engine failed to solve headcount. Verify availability.");
-    }
     return result;
   } catch (error) {
     throw error;

@@ -17,7 +17,9 @@ import {
   CheckCircle2,
   AlertCircle,
   MapPin,
-  ArrowRight
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface Props {
@@ -44,16 +46,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     roleCounts: {}
   });
 
-  // Filter flights available on the selected shift date
-  const availableFlights = useMemo(() => {
-    return flights.filter(f => f.date === formData.pickupDate);
-  }, [flights, formData.pickupDate]);
-
-  const getDayLabel = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return isNaN(date.getTime()) ? 'Invalid Date' : DAYS_OF_WEEK_FULL[date.getDay()];
-  };
-
   const getDayOffset = (dateStr: string) => {
     if (!startDate) return 0;
     const start = new Date(startDate);
@@ -64,6 +56,21 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  // Filter flights available in a 3-day sliding window (Yesterday, Today, Tomorrow)
+  const availableFlights = useMemo(() => {
+    if (!formData.pickupDate) return [];
+    const targetOffset = getDayOffset(formData.pickupDate);
+    return flights.filter(f => {
+      const flightOffset = getDayOffset(f.date);
+      return Math.abs(flightOffset - targetOffset) <= 1;
+    });
+  }, [flights, formData.pickupDate]);
+
+  const getDayLabel = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? 'Invalid Date' : DAYS_OF_WEEK_FULL[date.getDay()];
+  };
+
   const formatTimeInput = (value: string) => {
     const cleaned = value.replace(/[^0-9]/g, '');
     if (cleaned.length <= 2) return cleaned;
@@ -72,6 +79,27 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     if (parseInt(hh) > 23) hh = '23';
     if (parseInt(mm) > 59) mm = '59';
     return hh + ':' + mm;
+  };
+
+  const calculateDuration = () => {
+    if (!formData.pickupTime || !formData.endTime) return null;
+    const [h1, m1] = formData.pickupTime.split(':').map(Number);
+    const [h2, m2] = formData.endTime.split(':').map(Number);
+    const startMins = h1 * 60 + m1;
+    let endMins = h2 * 60 + m2;
+    
+    // Day wrapping logic: if end date is different from start date
+    if (formData.endDate && formData.pickupDate && formData.endDate > formData.pickupDate) {
+      endMins += 1440;
+    } else if (endMins < startMins) {
+      // Automatic day wrap if times suggest it and date isn't explicitly tomorrow
+      endMins += 1440;
+    }
+    
+    const diff = endMins - startMins;
+    const hours = Math.floor(diff / 60);
+    const mins = diff % 60;
+    return `${hours}h ${mins}m`;
   };
 
   const getRoleSummary = (roleCounts: Partial<Record<Skill, number>> | undefined) => {
@@ -158,6 +186,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
+  const durationText = calculateDuration();
+
   return (
     <div className="space-y-12 pb-24 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-10 lg:p-14 rounded-[3rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
@@ -192,40 +222,50 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
             
             <form onSubmit={handleSubmit} className="space-y-8">
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Calendar size={14} className="text-blue-600" /> Pickup (Shift Start)
-                  </label>
-                  <div className="flex gap-3">
-                    <input type="date" className="flex-[2] p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
-                    <input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
+                  <div className="flex justify-between items-center px-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <Calendar size={14} className="text-blue-600" /> Pickup (Start)
+                    </label>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="06:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
                   </div>
                 </div>
 
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Calendar size={14} className="text-indigo-600" /> Release (Shift End)
-                  </label>
-                  <div className="flex gap-3">
-                    <input type="date" className="flex-[2] p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
-                    <input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
+                  <div className="flex justify-between items-center px-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <Calendar size={14} className="text-indigo-600" /> Release (End)
+                    </label>
+                    {durationText && <span className="text-[9px] font-black text-blue-600 uppercase bg-blue-50 px-2 py-1 rounded-lg">Duration: {durationText}</span>}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="14:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
                   </div>
                 </div>
 
                 {/* FLIGHT ENGAGEMENT MATRIX */}
                 <div className="space-y-4 pt-4 border-t border-slate-50">
                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Plane size={14} className="text-indigo-600" /> Flight Engagement
+                    <Plane size={14} className="text-indigo-600" /> Contextual Flights (+/- 1D)
                   </label>
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto no-scrollbar">
+                  <div className="space-y-3 max-h-[350px] overflow-y-auto no-scrollbar pr-1">
                     {availableFlights.length === 0 ? (
                       <div className="p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center">
                         <AlertCircle size={20} className="mx-auto text-slate-300 mb-2" />
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No flights on this date</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No flights available in window</p>
                       </div>
                     ) : (
                       availableFlights.map(flight => {
                         const isEngaged = formData.flightIds?.includes(flight.id);
                         const isHandledByOther = shifts.some(s => s.id !== editingId && s.flightIds?.includes(flight.id));
+                        const flightOffset = getDayOffset(flight.date);
+                        const targetOffset = getDayOffset(formData.pickupDate!);
+                        const diff = flightOffset - targetOffset;
+                        
+                        const dayLabel = diff === -1 ? 'Yesterday' : diff === 1 ? 'Tomorrow' : 'Today';
 
                         return (
                           <button
@@ -240,7 +280,12 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                           >
                             <div className="flex justify-between items-start mb-2">
                               <span className="text-sm font-black italic uppercase tracking-tighter">{flight.flightNumber}</span>
-                              {isEngaged ? <CheckCircle2 size={16} className="text-emerald-400" /> : isHandledByOther ? <AlertCircle size={14} className="text-amber-500" /> : null}
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded ${
+                                  diff === 0 ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'
+                                }`}>{dayLabel}</span>
+                                {isEngaged ? <CheckCircle2 size={16} className="text-emerald-400" /> : isHandledByOther ? <AlertCircle size={14} className="text-amber-500" /> : null}
+                              </div>
                             </div>
                             <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest opacity-60">
                               <span>STA {flight.sta || '--:--'}</span>
@@ -257,7 +302,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                       })
                     )}
                   </div>
-                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Engage specific flights to ensure handling coverage.</p>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Link flights across dates for night shift coverage.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -348,11 +393,15 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                           </td>
                           <td className="px-6 py-8 border-r border-slate-100 bg-blue-50/30">
                              <div className="flex flex-wrap gap-2">
-                               {engagedFlights.map(f => (
-                                 <div key={f!.id} className="px-3 py-1.5 bg-slate-950 text-white rounded-lg text-[10px] font-black uppercase italic flex items-center gap-2">
-                                   <Plane size={10} className="text-blue-400" /> {f!.flightNumber}
-                                 </div>
-                               ))}
+                               {engagedFlights.map(f => {
+                                  const diff = getDayOffset(f!.date) - getDayOffset(s.pickupDate);
+                                  const label = diff === -1 ? '(-1D)' : diff === 1 ? '(+1D)' : '';
+                                  return (
+                                    <div key={f!.id} className="px-3 py-1.5 bg-slate-950 text-white rounded-lg text-[10px] font-black uppercase italic flex items-center gap-2">
+                                      <Plane size={10} className="text-blue-400" /> {f!.flightNumber} {label}
+                                    </div>
+                                  );
+                               })}
                                {engagedFlights.length === 0 && <span className="text-[9px] font-black text-slate-300 uppercase italic">No Engagement</span>}
                              </div>
                           </td>
@@ -367,7 +416,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                           </td>
                           <td className="px-6 py-8 border-r border-slate-100">
                              <div className="flex flex-wrap gap-1.5">
-                                {/* Fix: cast 'c' to number to avoid 'unknown' comparison error */}
                                {Object.entries(s.roleCounts || {}).filter(([_, c]) => (c as number) > 0).map(([role, count]) => (
                                  <span key={role} className="px-3 py-1 bg-slate-100 rounded-lg text-[9px] font-black text-slate-500 uppercase">
                                    {role}: {count}
