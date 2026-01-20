@@ -59,7 +59,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     // Attempt standard JS parsing
     const date = new Date(dateStr);
     
-    // Final check for the serial number bug (if it leaked into storage somehow)
+    // Final check for the serial number bug
     if (isNaN(date.getTime()) || date.getFullYear() > 4000) {
       if (/^\d{5}$/.test(dateStr)) {
         const serial = parseInt(dateStr);
@@ -310,12 +310,12 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                   <div className="space-y-3">
                     <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Qualified Disciplines</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {AVAILABLE_SKILLS.filter(s => String(skillRatings[s]).toLowerCase() === 'yes').map(s => (
+                      {AVAILABLE_SKILLS.filter(s => String(skillRatings[s as any]).toLowerCase() === 'yes').map(s => (
                         <span key={s} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-[8px] font-black uppercase border border-indigo-100">
                           {s}
                         </span>
                       ))}
-                      {AVAILABLE_SKILLS.every(s => String(skillRatings[s]).toLowerCase() !== 'yes') && (
+                      {AVAILABLE_SKILLS.every(s => String(skillRatings[s as any]).toLowerCase() !== 'yes') && (
                         <span className="text-[8px] font-bold text-slate-300 italic">No specializations</span>
                       )}
                     </div>
@@ -380,7 +380,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                 <p className="text-[9px] font-black text-slate-400 uppercase"> Discipline Access</p>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_SKILLS.map(skill => {
-                    const active = String(editingStaff.skillRatings?.[skill]).toLowerCase() === 'yes';
+                    const active = String(editingStaff.skillRatings?.[skill as any]).toLowerCase() === 'yes';
                     return (
                       <button key={skill} type="button" onClick={() => toggleSkill(skill, true)} className={`px-5 py-3 rounded-xl text-[9px] font-black uppercase transition-all border ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
                         {skill}

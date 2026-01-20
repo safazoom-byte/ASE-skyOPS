@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
@@ -187,7 +186,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
               <div className="bg-slate-950 px-12 py-10 flex items-center justify-between text-white border-b border-white/5">
                 <div className="flex items-center gap-10">
                    <div className="w-20 h-20 bg-white/5 rounded-[2.5rem] flex items-center justify-center font-black italic text-3xl border border-white/10 shadow-inner">
-                     {program.day + 1}
+                     {/* Fix: Explicitly cast day to number/any to avoid '+' operator errors on 'unknown' types on line 278 */}
+                     {(program.day as any) + 1}
                    </div>
                    <div>
                      <h3 className="text-3xl font-black uppercase italic tracking-tight mb-1">{getDayName(program.day)}</h3>
