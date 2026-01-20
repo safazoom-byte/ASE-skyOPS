@@ -32,7 +32,7 @@ import {
   Info
 } from 'lucide-react';
 
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Skill } from './types';
 import { FlightManager } from './components/FlightManager';
 import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
@@ -540,6 +540,35 @@ const App: React.FC = () => {
                           <span className="text-slate-200">|</span>
                           <span className="text-indigo-600">STA {f.sta || '??'}</span>
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* NEW SECTION: Proposed Shift Requirements (Role Matrix) */}
+              {pendingVerification.shifts.length > 0 && (
+                <div className="space-y-6">
+                  <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Proposed Duty Master (Role Matrix)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pendingVerification.shifts.map((sh, i) => (
+                      <div key={i} className="p-6 bg-slate-50 border border-slate-200 rounded-[2rem] relative">
+                         <div className="flex justify-between items-center mb-4">
+                            <span className="text-[10px] font-black uppercase text-indigo-600">{sh.pickupDate} @ {sh.pickupTime}</span>
+                            <span className="text-[8px] font-black uppercase bg-white px-2 py-1 rounded-lg border">Duration: {sh.endTime} Release</span>
+                         </div>
+                         <div className="space-y-2">
+                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Requirement Matrix:</p>
+                           <div className="flex flex-wrap gap-2">
+                             {/* Fix: count could be unknown when inferred from Object.entries; cast to any for numerical comparison on line 566 */}
+                             {Object.entries(sh.roleCounts || {}).filter(([_, count]) => (count as any) > 0).map(([role, count]) => (
+                               <span key={role} className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-xl text-[8px] font-black uppercase border border-indigo-100">
+                                 {role}: {count}
+                               </span>
+                             ))}
+                             {(!sh.roleCounts || Object.keys(sh.roleCounts).length === 0) && <span className="text-[8px] text-slate-300 italic">No Roles Specified</span>}
+                           </div>
+                         </div>
                       </div>
                     ))}
                   </div>

@@ -147,6 +147,29 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   };
 
   /**
+   * Helper to parse "Shift Leader: 1, Ramp: 2" format
+   */
+  const parseRoleString = (str: any): Partial<Record<Skill, number>> => {
+    const counts: Partial<Record<Skill, number>> = {};
+    if (!str || typeof str !== 'string') return counts;
+    
+    // Split by comma, semicolon, or newline for robustness
+    const parts = str.split(/[,\n;]/);
+    parts.forEach(part => {
+      const segments = part.split(':');
+      if (segments.length === 2) {
+        const name = segments[0].trim();
+        const count = parseInt(segments[1].trim());
+        if (name && !isNaN(count)) {
+          const sanitized = sanitizeRole(name);
+          counts[sanitized] = count;
+        }
+      }
+    });
+    return counts;
+  };
+
+  /**
    * Convert time HH:mm to total minutes
    */
   const timeToMinutes = (time?: string) => {
@@ -168,8 +191,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       if (!row || row.length === 0) return;
 
       const hasFlight = map.flightNumber !== undefined && map.flightNumber !== -1 && row[map.flightNumber];
+      
+      // FALLBACK: If pickupDate is missing, try mapping to generic 'date'
+      const shiftDateCol = (map.pickupDate !== undefined && map.pickupDate !== -1) ? map.pickupDate : map.date;
+      
       const hasShift = (map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime]) || 
-                      (map.pickupDate !== undefined && map.pickupDate !== -1 && row[map.pickupDate]);
+                      (shiftDateCol !== undefined && shiftDateCol !== -1 && row[shiftDateCol]);
       const hasStaff = map.name !== undefined && map.name !== -1 && row[map.name];
 
       let rowFlightId: string | null = null;
@@ -190,16 +217,32 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
       if (hasShift) {
         const shiftId = Math.random().toString(36).substr(2, 9);
-        const roleCounts: Partial<Record<Skill, number>> = {};
-        if (map.skill_ShiftLeader !== -1) roleCounts['Shift Leader'] = parseInt(row[map.skill_ShiftLeader]) || 0;
-        if (map.skill_Operations !== -1) roleCounts['Operations'] = parseInt(row[map.skill_Operations]) || 0;
-        if (map.skill_Ramp !== -1) roleCounts['Ramp'] = parseInt(row[map.skill_Ramp]) || 0;
-        if (map.skill_LoadControl !== -1) roleCounts['Load Control'] = parseInt(row[map.skill_LoadControl]) || 0;
-        if (map['skill_Lost and Found'] !== -1) roleCounts['Lost and Found'] = parseInt(row[map['skill_Lost and Found']]) || 0;
+        let roleCounts: Partial<Record<Skill, number>> = {};
+        
+        // 1. Try single role matrix string first
+        if (map.roleMatrix !== undefined && map.roleMatrix !== -1) {
+          roleCounts = parseRoleString(row[map.roleMatrix]);
+        }
+        
+        // 2. Supplement with individual columns ONLY if they have a non-zero value
+        const tryMergeSkill = (skill: Skill, colIndex: number | undefined) => {
+          if (colIndex !== undefined && colIndex !== -1) {
+            const val = parseInt(row[colIndex]);
+            if (!isNaN(val) && val > 0) {
+              roleCounts[skill] = val;
+            }
+          }
+        };
+
+        tryMergeSkill('Shift Leader', map.skill_ShiftLeader);
+        tryMergeSkill('Operations', map.skill_Operations);
+        tryMergeSkill('Ramp', map.skill_Ramp);
+        tryMergeSkill('Load Control', map.skill_LoadControl);
+        tryMergeSkill('Lost and Found', map['skill_Lost and Found']);
 
         shifts.push({
           id: shiftId,
-          pickupDate: parseImportDate(row[map.pickupDate]),
+          pickupDate: parseImportDate(row[shiftDateCol]),
           pickupTime: parseImportTime(row[map.pickupTime]),
           endDate: parseImportDate(row[map.endDate]),
           endTime: parseImportTime(row[map.endTime]),
@@ -220,6 +263,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           powerRate: parsePowerRate(row[map.powerRate]),
           workPattern: '5 Days On / 2 Off',
           maxShiftsPerWeek: 5,
+          workFromDate: map.workFromDate !== undefined && map.workFromDate !== -1 ? parseImportDate(row[map.workFromDate]) : undefined,
+          workToDate: map.workToDate !== undefined && map.workToDate !== -1 ? parseImportDate(row[map.workToDate]) : undefined,
           skillRatings: {
             'Ramp': String(row[map.skill_Ramp]).toLowerCase().includes('yes') ? 'Yes' : 'No',
             'Operations': String(row[map.skill_Operations]).toLowerCase().includes('yes') ? 'Yes' : 'No',

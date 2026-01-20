@@ -76,7 +76,10 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Expert. Identify 0-based column indices. 
   Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
-  For powerRate, look for columns containing 'rate', 'power', or '%'.`;
+  For powerRate, look for columns containing 'rate', 'power', or '%'.
+  For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).
+  IMPORTANT: Look for a "Role Matrix" column that contains text like "Shift Leader: 1, Ramp: 2". Map its index to 'roleMatrix'. 
+  This column might be titled "Requirements", "Matrix", "Staffing", or "Roles".`;
   const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
 
   try {
@@ -110,6 +113,7 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
                 skill_Operations: { type: Type.INTEGER },
                 skill_ShiftLeader: { type: Type.INTEGER },
                 'skill_Lost and Found': { type: Type.INTEGER },
+                roleMatrix: { type: Type.INTEGER },
                 pickupDate: { type: Type.INTEGER },
                 pickupTime: { type: Type.INTEGER },
                 endDate: { type: Type.INTEGER },
@@ -138,9 +142,11 @@ export const extractDataFromContent = async (params: {
   const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
   IMPORTANT:
   1. Role counts in shifts must be numbers.
-  2. powerRate for staff must be 50-100 (if you see 0.75, convert to 75).
-  3. minStaff and maxStaff are crucial for shift coverage logic.
-  4. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.`;
+  2. If you see a text field like "Shift Leader: 1, Operations: 1, Ramp: 2, Load Control: 1, Lost and Found: 1", parse it into the roleCounts object.
+  3. powerRate for staff must be 50-100 (if you see 0.75, convert to 75).
+  4. minStaff and maxStaff are crucial for shift coverage logic.
+  5. Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
+  6. For Staff, capture 'workFromDate' and 'workToDate' if they are Roster/Contract staff.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -178,6 +184,8 @@ export const extractDataFromContent = async (params: {
                   initials: { type: Type.STRING },
                   type: { type: Type.STRING },
                   powerRate: { type: Type.NUMBER },
+                  workFromDate: { type: Type.STRING },
+                  workToDate: { type: Type.STRING },
                   skillRatings: { 
                     type: Type.OBJECT, 
                     properties: { 
