@@ -32,10 +32,10 @@ export interface BuildResult {
 export const sanitizeRole = (role: string): Skill => {
   const r = role.toLowerCase().trim();
   if (r.includes('found') || r.includes('lost') || r === 'lf' || r === 'l&f' || r === 'lost and found' || r === 'lost&found') return 'Lost and Found';
-  if (r.includes('leader') || r === 'sl') return 'Shift Leader';
-  if (r.includes('ops') || r.includes('operations') || r === 'op') return 'Operations';
+  if (r.includes('leader') || r === 'sl' || r === 'shiftleader') return 'Shift Leader';
+  if (r.includes('ops') || r.includes('operations') || r === 'op' || r === 'operation') return 'Operations';
   if (r.includes('ramp') || r === 'rmp') return 'Ramp';
-  if (r.includes('load') || r === 'lc') return 'Load Control';
+  if (r.includes('load') || r === 'lc' || r === 'loadcontrol') return 'Load Control';
   return 'Duty'; 
 };
 
@@ -74,6 +74,8 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Expert. Identify 0-based column indices. 
   Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
+  Special: Look for 'Role Matrix' or 'Specialist Requirements' or 'Skill Matrix' column that lists required specialist counts.
+  Also look for individual skill columns like 'Ramp', 'OPS', 'SL', etc.
   For powerRate, look for columns containing 'rate', 'power', or '%'.
   For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).`;
   const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
@@ -104,6 +106,7 @@ export const identifyMapping = async (sampleRows: any[][], targetType: 'flights'
                 powerRate: { type: Type.INTEGER },
                 workFromDate: { type: Type.INTEGER },
                 workToDate: { type: Type.INTEGER },
+                roleMatrix: { type: Type.INTEGER },
                 skill_Ramp: { type: Type.INTEGER },
                 skill_LoadControl: { type: Type.INTEGER },
                 skill_Operations: { type: Type.INTEGER },

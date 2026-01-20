@@ -1,6 +1,8 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, identifyMapping, ExtractionMedia, sanitizeRole } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
+import { AVAILABLE_SKILLS } from '../constants';
 import * as XLSX from 'xlsx';
 import { 
   FileUp, 
@@ -86,14 +88,10 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     });
   };
 
-  /**
-   * UTC-Safe Date Parser for Excel Serials
-   */
   const parseImportDate = (val: any) => {
     if (val === null || val === undefined || val === '') return '';
     if (typeof val === 'number') {
       const date = new Date(0);
-      // Excel serial 45290 -> UTC date
       date.setUTCMilliseconds(Math.round((val - 25569) * 86400 * 1000));
       return date.getUTCFullYear() + '-' + 
              String(date.getUTCMonth() + 1).padStart(2, '0') + '-' + 
@@ -113,9 +111,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     return str;
   };
 
-  /**
-   * Smart Time Parser
-   */
   const parseImportTime = (val: any) => {
     if (val === null || val === undefined || val === '') return '';
     if (typeof val === 'number') {
@@ -133,10 +128,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     return str;
   };
 
-  /**
-   * Smart Power Rate Normalizer
-   * 0.75 -> 75, "75%" -> 75
-   */
   const parsePowerRate = (val: any) => {
     if (val === undefined || val === null || val === '') return 75;
     const cleanStr = String(val).replace('%', '').trim();
@@ -146,20 +137,19 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     return Math.round(num);
   };
 
-  /**
-   * Helper to parse "Shift Leader: 1, Ramp: 2" format
-   */
   const parseRoleString = (str: any): Partial<Record<Skill, number>> => {
     const counts: Partial<Record<Skill, number>> = {};
     if (!str || typeof str !== 'string') return counts;
-    
-    // Split by comma, semicolon, or newline for robustness
+    // Split by comma, newline, or semicolon
     const parts = str.split(/[,\n;]/);
     parts.forEach(part => {
-      const segments = part.split(':');
-      if (segments.length === 2) {
-        const name = segments[0].trim();
-        const count = parseInt(segments[1].trim());
+      // Handle separators: :, -, =, or just a space between role and number
+      const segments = part.split(/[:\-= ]+/).filter(Boolean);
+      if (segments.length >= 2) {
+        // Find the numeric part (usually at the end)
+        const count = parseInt(segments[segments.length - 1]);
+        const nameParts = segments.slice(0, segments.length - 1);
+        const name = nameParts.join(' ').trim();
         if (name && !isNaN(count)) {
           const sanitized = sanitizeRole(name);
           counts[sanitized] = count;
@@ -169,9 +159,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     return counts;
   };
 
-  /**
-   * Convert time HH:mm to total minutes
-   */
   const timeToMinutes = (time?: string) => {
     if (!time || !time.includes(':')) return -1;
     const [h, m] = time.split(':').map(Number);
@@ -181,7 +168,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   const executeLocalMapping = () => {
     if (!pendingMapping) return;
     const { rows, map } = pendingMapping;
-    
     const dataRows = rows.slice(1);
     const flights: Flight[] = [];
     const staff: Staff[] = [];
@@ -189,18 +175,18 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
     dataRows.forEach((row) => {
       if (!row || row.length === 0) return;
-
-      const hasFlight = map.flightNumber !== undefined && map.flightNumber !== -1 && row[map.flightNumber];
       
-      // FALLBACK: If pickupDate is missing, try mapping to generic 'date'
+      const hasFlightNo = map.flightNumber !== undefined && map.flightNumber !== -1 && row[map.flightNumber];
+      const hasStaffName = map.name !== undefined && map.name !== -1 && row[map.name];
       const shiftDateCol = (map.pickupDate !== undefined && map.pickupDate !== -1) ? map.pickupDate : map.date;
-      
-      const hasShift = (map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime]) || 
-                      (shiftDateCol !== undefined && shiftDateCol !== -1 && row[shiftDateCol]);
-      const hasStaff = map.name !== undefined && map.name !== -1 && row[map.name];
+      const hasShiftTime = map.pickupTime !== undefined && map.pickupTime !== -1 && row[map.pickupTime];
+      const hasRoleMatrix = map.roleMatrix !== undefined && map.roleMatrix !== -1 && row[map.roleMatrix];
+
+      // Explicit Check for Shift Row
+      const isShiftRow = !!hasShiftTime || !!hasRoleMatrix;
 
       let rowFlightId: string | null = null;
-      if (hasFlight) {
+      if (hasFlightNo) {
         rowFlightId = Math.random().toString(36).substr(2, 9);
         flights.push({
           id: rowFlightId,
@@ -215,25 +201,25 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         });
       }
 
-      if (hasShift) {
+      if (isShiftRow) {
         const shiftId = Math.random().toString(36).substr(2, 9);
         let roleCounts: Partial<Record<Skill, number>> = {};
         
-        // 1. Try single role matrix string first
-        if (map.roleMatrix !== undefined && map.roleMatrix !== -1) {
+        // Method 1: Matrix String Parsing
+        if (hasRoleMatrix) {
           roleCounts = parseRoleString(row[map.roleMatrix]);
         }
         
-        // 2. Supplement with individual columns ONLY if they have a non-zero value
+        // Method 2: Individual Column Mapping (Merge with existing)
         const tryMergeSkill = (skill: Skill, colIndex: number | undefined) => {
           if (colIndex !== undefined && colIndex !== -1) {
             const val = parseInt(row[colIndex]);
             if (!isNaN(val) && val > 0) {
-              roleCounts[skill] = val;
+              roleCounts[skill] = (roleCounts[skill] || 0) + val;
             }
           }
         };
-
+        
         tryMergeSkill('Shift Leader', map.skill_ShiftLeader);
         tryMergeSkill('Operations', map.skill_Operations);
         tryMergeSkill('Ramp', map.skill_Ramp);
@@ -244,7 +230,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           id: shiftId,
           pickupDate: parseImportDate(row[shiftDateCol]),
           pickupTime: parseImportTime(row[map.pickupTime]),
-          endDate: parseImportDate(row[map.endDate]),
+          endDate: parseImportDate(row[map.endDate] || row[shiftDateCol]),
           endTime: parseImportTime(row[map.endTime]),
           minStaff: parseInt(row[map.minStaff]) || 2,
           maxStaff: parseInt(row[map.maxStaff]) || 8,
@@ -254,7 +240,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         });
       }
 
-      if (hasStaff) {
+      if (hasStaffName) {
         staff.push({
           id: Math.random().toString(36).substr(2, 9),
           name: String(row[map.name] || '').trim(),
@@ -266,37 +252,28 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           workFromDate: map.workFromDate !== undefined && map.workFromDate !== -1 ? parseImportDate(row[map.workFromDate]) : undefined,
           workToDate: map.workToDate !== undefined && map.workToDate !== -1 ? parseImportDate(row[map.workToDate]) : undefined,
           skillRatings: {
-            'Ramp': String(row[map.skill_Ramp]).toLowerCase().includes('yes') ? 'Yes' : 'No',
-            'Operations': String(row[map.skill_Operations]).toLowerCase().includes('yes') ? 'Yes' : 'No',
-            'Load Control': String(row[map.skill_LoadControl]).toLowerCase().includes('yes') ? 'Yes' : 'No',
-            'Shift Leader': String(row[map.skill_ShiftLeader]).toLowerCase().includes('yes') ? 'Yes' : 'No',
-            'Lost and Found': String(row[map['skill_Lost and Found']]).toLowerCase().includes('yes') ? 'Yes' : 'No'
+            'Ramp': (map.skill_Ramp !== -1 && (String(row[map.skill_Ramp]).toLowerCase().includes('yes') || String(row[map.skill_Ramp]) === '1')) ? 'Yes' : 'No',
+            'Operations': (map.skill_Operations !== -1 && (String(row[map.skill_Operations]).toLowerCase().includes('yes') || String(row[map.skill_Operations]) === '1')) ? 'Yes' : 'No',
+            'Load Control': (map.skill_LoadControl !== -1 && (String(row[map.skill_LoadControl]).toLowerCase().includes('yes') || String(row[map.skill_LoadControl]) === '1')) ? 'Yes' : 'No',
+            'Shift Leader': (map.skill_ShiftLeader !== -1 && (String(row[map.skill_ShiftLeader]).toLowerCase().includes('yes') || String(row[map.skill_ShiftLeader]) === '1')) ? 'Yes' : 'No',
+            'Lost and Found': (map['skill_Lost and Found'] !== -1 && (String(row[map['skill_Lost and Found']]).toLowerCase().includes('yes') || String(row[map['skill_Lost and Found']]) === '1')) ? 'Yes' : 'No'
           }
         });
       }
     });
 
-    // SMART TEMPORAL LINKAGE: Match within 30 mins window
+    // Smart Linkage for Shift-Flight Engagement
     shifts.forEach(s => {
       const shiftMinutes = timeToMinutes(s.pickupTime);
       if (shiftMinutes === -1) return;
-
       const matchingFlights = flights.filter(f => {
         if (f.date !== s.pickupDate) return false;
-        
         const staMin = timeToMinutes(f.sta);
         const stdMin = timeToMinutes(f.std);
-        
-        const isNearSta = staMin !== -1 && Math.abs(staMin - shiftMinutes) <= 30;
-        const isNearStd = stdMin !== -1 && Math.abs(stdMin - shiftMinutes) <= 30;
-        
-        return isNearSta || isNearStd;
+        return (staMin !== -1 && Math.abs(staMin - shiftMinutes) <= 60) || (stdMin !== -1 && Math.abs(stdMin - shiftMinutes) <= 60);
       });
-      
       matchingFlights.forEach(f => {
-        if (!s.flightIds?.includes(f.id)) {
-          s.flightIds = [...(s.flightIds || []), f.id];
-        }
+        if (!s.flightIds?.includes(f.id)) s.flightIds = [...(s.flightIds || []), f.id];
       });
     });
 

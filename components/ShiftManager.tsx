@@ -1,9 +1,24 @@
 
 import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill } from '../types';
-import { DAYS_OF_WEEK_FULL } from '../constants';
+import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
 import * as XLSX from 'xlsx';
-import { Clock, Trash2, Edit2, Plus, Minus, FileDown, Calendar, Layers, Sparkles, Plane, ShieldCheck } from 'lucide-react';
+import { 
+  Clock, 
+  Trash2, 
+  Edit2, 
+  Plus, 
+  Minus, 
+  FileDown, 
+  Calendar, 
+  Sparkles, 
+  Plane, 
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  MapPin,
+  ArrowRight
+} from 'lucide-react';
 
 interface Props {
   shifts: ShiftConfig[];
@@ -14,11 +29,6 @@ interface Props {
   onDelete: (id: string) => void;
   onOpenScanner?: () => void;
 }
-
-// Restricted Specialist Roles for Manual Entry as per requirements
-const SPECIALIST_ENTRY_ROLES: Skill[] = [
-  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'
-];
 
 export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], startDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -33,6 +43,11 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     flightIds: [],
     roleCounts: {}
   });
+
+  // Filter flights available on the selected shift date
+  const availableFlights = useMemo(() => {
+    return flights.filter(f => f.date === formData.pickupDate);
+  }, [flights, formData.pickupDate]);
 
   const getDayLabel = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -76,6 +91,14 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     }));
   };
 
+  const toggleFlightEngagement = (flightId: string) => {
+    const current = formData.flightIds || [];
+    const next = current.includes(flightId) 
+      ? current.filter(id => id !== flightId) 
+      : [...current, flightId];
+    setFormData(prev => ({ ...prev, flightIds: next }));
+  };
+
   const getFlightById = (id: string) => flights.find(f => f.id === id);
 
   const exportToExcel = () => {
@@ -104,115 +127,269 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalData = { ...formData as ShiftConfig, day: getDayOffset(formData.pickupDate!), id: editingId || Math.random().toString(36).substr(2, 9) };
+    const finalData = { 
+      ...formData as ShiftConfig, 
+      day: getDayOffset(formData.pickupDate!), 
+      id: editingId || Math.random().toString(36).substr(2, 9) 
+    };
     if (editingId) onUpdate(finalData);
     else onAdd(finalData);
     resetForm();
   };
 
   const resetForm = () => {
-    setFormData({ pickupDate: startDate || new Date().toISOString().split('T')[0], pickupTime: '06:00', endDate: startDate || new Date().toISOString().split('T')[0], endTime: '14:00', minStaff: 2, maxStaff: 8, targetPower: 75, flightIds: [], roleCounts: {} });
+    setFormData({ 
+      pickupDate: startDate || new Date().toISOString().split('T')[0], 
+      pickupTime: '06:00', 
+      endDate: startDate || new Date().toISOString().split('T')[0], 
+      endTime: '14:00', 
+      minStaff: 2, 
+      maxStaff: 8, 
+      targetPower: 75, 
+      flightIds: [], 
+      roleCounts: {} 
+    });
     setEditingId(null);
   };
 
-  const startEdit = (shift: ShiftConfig) => { setEditingId(shift.id); setFormData({ ...shift }); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-
-  const handleFlightToggle = (flight: Flight) => {
-    const current = formData.flightIds || [];
-    const isSelected = current.includes(flight.id);
-    const next = isSelected ? current.filter(id => id !== flight.id) : [...current, flight.id];
-    setFormData(prev => ({ ...prev, flightIds: next }));
+  const startEdit = (shift: ShiftConfig) => { 
+    setEditingId(shift.id); 
+    setFormData({ ...shift }); 
+    window.scrollTo({ top: 0, behavior: 'smooth' }); 
   };
 
   return (
     <div className="space-y-12 pb-24 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-10 lg:p-14 rounded-[3rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
-        <div className="flex items-center gap-6"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center"><Clock size={32} /></div><div><h3 className="text-3xl font-black uppercase italic tracking-tighter text-white">Duty Master</h3><p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Operational Registry</p></div></div>
+        <div className="flex items-center gap-6">
+          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+            <Clock size={32} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-black uppercase italic tracking-tighter text-white">Duty Master</h3>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Operational Registry</p>
+          </div>
+        </div>
         <div className="flex gap-4">
-          <button onClick={onOpenScanner} className="px-8 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center gap-3 transition-all group"><Sparkles size={18} className="group-hover:animate-pulse" /><span className="text-[10px] font-black uppercase tracking-widest italic">AI Smart Sync</span></button>
-          <button onClick={exportToExcel} className="px-8 py-5 bg-white/5 border border-white/10 rounded-2xl flex items-center gap-3"><FileDown size={20} className="text-emerald-400" /><span className="text-[10px] font-black uppercase tracking-widest text-white">Full Export</span></button>
+          <button onClick={onOpenScanner} className="px-8 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center gap-3 transition-all group shadow-xl shadow-indigo-600/20">
+            <Sparkles size={18} className="group-hover:animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest italic">AI Smart Sync</span>
+          </button>
+          <button onClick={exportToExcel} className="px-8 py-5 bg-white/5 border border-white/10 rounded-2xl flex items-center gap-3 hover:bg-white/10 transition-all">
+            <FileDown size={20} className="text-emerald-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-white">Full Export</span>
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-10">
         <div className="xl:col-span-1 space-y-10">
-          <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
-            <h4 className="text-xl font-black italic uppercase mb-10 flex items-center gap-3 text-slate-900">{editingId ? <Edit2 size={24} className="text-indigo-600" /> : <Plus size={24} className="text-blue-600" />}{editingId ? 'Refine Slot' : 'Engineer Slot'}</h4>
+          <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100 sticky top-32">
+            <h4 className="text-xl font-black italic uppercase mb-10 flex items-center gap-3 text-slate-900">
+              {editingId ? <Edit2 size={24} className="text-indigo-600" /> : <Plus size={24} className="text-blue-600" />}
+              {editingId ? 'Refine Slot' : 'Engineer Slot'}
+            </h4>
+            
             <form onSubmit={handleSubmit} className="space-y-8">
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest"><Calendar size={14} className="inline mr-2" /> Pickup (Shift Start)</label>
-                  <div className="flex gap-3"><input type="date" className="flex-[2] p-4 bg-slate-50 border rounded-2xl font-black text-xs" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required /><input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-4 bg-slate-50 border rounded-2xl font-black text-lg text-center" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required /></div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <Calendar size={14} className="text-blue-600" /> Pickup (Shift Start)
+                  </label>
+                  <div className="flex gap-3">
+                    <input type="date" className="flex-[2] p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-blue-500/5 transition-all" value={formData.pickupDate} onChange={e => setFormData(prev => ({ ...prev, pickupDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="06:00" className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.pickupTime} onChange={e => setFormData(prev => ({ ...prev, pickupTime: formatTimeInput(e.target.value) }))} required />
+                  </div>
                 </div>
+
                 <div className="space-y-4">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest"><Calendar size={14} className="inline mr-2" /> Release (Shift End)</label>
-                  <div className="flex gap-3"><input type="date" className="flex-[2] p-4 bg-slate-50 border rounded-2xl font-black text-xs" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required /><input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-4 bg-slate-50 border rounded-2xl font-black text-lg text-center" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required /></div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <Calendar size={14} className="text-indigo-600" /> Release (Shift End)
+                  </label>
+                  <div className="flex gap-3">
+                    <input type="date" className="flex-[2] p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none" value={formData.endDate} onChange={e => setFormData(prev => ({ ...prev, endDate: e.target.value }))} required />
+                    <input type="text" maxLength={5} placeholder="14:00" className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-lg text-center outline-none" value={formData.endTime} onChange={e => setFormData(prev => ({ ...prev, endTime: formatTimeInput(e.target.value) }))} required />
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-slate-50 rounded-2xl"><label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Min Staff</label><input type="number" className="w-full bg-white border p-2 rounded-xl font-black text-center" value={formData.minStaff} onChange={e => setFormData({ ...formData, minStaff: parseInt(e.target.value) || 0 })} /></div>
-                  <div className="p-4 bg-slate-50 rounded-2xl"><label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Max Staff</label><input type="number" className="w-full bg-white border p-2 rounded-xl font-black text-center" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} /></div>
-                </div>
+
+                {/* FLIGHT ENGAGEMENT MATRIX */}
                 <div className="space-y-4 pt-4 border-t border-slate-50">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest"><ShieldCheck size={14} className="inline mr-2" /> Specialist Matrix</label>
+                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <Plane size={14} className="text-indigo-600" /> Flight Engagement
+                  </label>
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto no-scrollbar">
+                    {availableFlights.length === 0 ? (
+                      <div className="p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center">
+                        <AlertCircle size={20} className="mx-auto text-slate-300 mb-2" />
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">No flights on this date</p>
+                      </div>
+                    ) : (
+                      availableFlights.map(flight => {
+                        const isEngaged = formData.flightIds?.includes(flight.id);
+                        const isHandledByOther = shifts.some(s => s.id !== editingId && s.flightIds?.includes(flight.id));
+
+                        return (
+                          <button
+                            key={flight.id}
+                            type="button"
+                            onClick={() => toggleFlightEngagement(flight.id)}
+                            className={`w-full p-4 rounded-2xl border text-left transition-all relative overflow-hidden group ${
+                              isEngaged 
+                                ? 'bg-slate-950 border-slate-900 text-white shadow-lg' 
+                                : 'bg-white border-slate-100 hover:border-slate-300 text-slate-900'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-sm font-black italic uppercase tracking-tighter">{flight.flightNumber}</span>
+                              {isEngaged ? <CheckCircle2 size={16} className="text-emerald-400" /> : isHandledByOther ? <AlertCircle size={14} className="text-amber-500" /> : null}
+                            </div>
+                            <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest opacity-60">
+                              <span>STA {flight.sta || '--:--'}</span>
+                              <span>STD {flight.std || '--:--'}</span>
+                            </div>
+                            <div className="mt-2 flex items-center gap-1 text-[8px] font-black uppercase tracking-widest opacity-40">
+                              <MapPin size={10} /> {flight.from} <ArrowRight size={8} /> {flight.to}
+                            </div>
+                            {isHandledByOther && !isEngaged && (
+                              <div className="absolute top-0 right-0 h-1 bg-amber-500 w-full opacity-30" />
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Engage specific flights to ensure handling coverage.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Min Staff</label>
+                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center" value={formData.minStaff} onChange={e => setFormData({ ...formData, minStaff: parseInt(e.target.value) || 0 })} />
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Max Staff</label>
+                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} />
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-slate-50">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                    <ShieldCheck size={14} className="text-blue-600" /> Specialist Matrix
+                  </label>
                   <div className="space-y-3">
-                    {SPECIALIST_ENTRY_ROLES.map(skill => (
-                      <div key={skill} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border">
+                    {AVAILABLE_SKILLS.map(skill => (
+                      <div key={skill} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
                         <span className="text-[9px] font-black uppercase text-slate-500">{skill}</span>
-                        <div className="flex items-center gap-3"><button type="button" onClick={() => updateRoleCount(skill, -1)} className="w-6 h-6 flex items-center justify-center bg-white border rounded-lg hover:bg-slate-100"><Minus size={12}/></button><span className="text-xs font-black text-slate-900 w-4 text-center">{formData.roleCounts?.[skill] || 0}</span><button type="button" onClick={() => updateRoleCount(skill, 1)} className="w-6 h-6 flex items-center justify-center bg-slate-950 text-white rounded-lg hover:bg-blue-600"><Plus size={12}/></button></div>
+                        <div className="flex items-center gap-3">
+                          <button type="button" onClick={() => updateRoleCount(skill, -1)} className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">
+                            <Minus size={14}/>
+                          </button>
+                          <span className="text-xs font-black text-slate-900 w-4 text-center">{formData.roleCounts?.[skill] || 0}</span>
+                          <button type="button" onClick={() => updateRoleCount(skill, 1)} className="w-8 h-8 flex items-center justify-center bg-slate-950 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-lg shadow-slate-950/20">
+                            <Plus size={14}/>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Note: General 'Duty' headcount is automatically filled by the AI up to Max Staff capacity.</p>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight italic">AI fills generic 'Duty' headcount automatically up to Max capacity.</p>
                 </div>
-              <button type="submit" className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.3em] shadow-2xl transition-all">Save Slot</button>
+
+              <div className="flex gap-4 pt-4">
+                 {editingId && (
+                   <button type="button" onClick={resetForm} className="flex-1 py-7 text-[10px] font-black uppercase text-slate-400 italic">Cancel</button>
+                 )}
+                 <button type="submit" className="flex-[2] py-7 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-blue-600 transition-all active:scale-95">
+                   {editingId ? 'Update Slot' : 'Save Registry Slot'}
+                 </button>
+              </div>
             </form>
           </div>
         </div>
+
         <div className="xl:col-span-3 space-y-10 overflow-hidden">
-          <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto no-scrollbar rounded-[2.5rem] border border-slate-100 shadow-inner">
-              <table className="min-w-[2000px] text-left border-collapse">
+          <div className="bg-white p-10 rounded-[4rem] shadow-sm border border-slate-100 overflow-hidden">
+            <div className="overflow-x-auto no-scrollbar rounded-[3rem] border border-slate-100 shadow-inner">
+              <table className="min-w-[1400px] text-left border-collapse">
                 <thead className="bg-slate-950 text-white font-black uppercase tracking-widest text-[8px] sticky top-0 z-20">
                   <tr>
-                    <th className="px-4 py-6 border-r border-white/5">Day Name</th>
-                    <th className="px-4 py-6 border-r border-white/5">Start Date</th>
-                    <th className="px-4 py-6 border-r border-white/5">Start Time</th>
-                    <th className="px-4 py-6 border-r border-white/5">End Date</th>
-                    <th className="px-4 py-6 border-r border-white/5">End Time</th>
-                    <th className="px-4 py-6 border-r border-white/5">Min / Max</th>
-                    <th className="px-4 py-6 border-r border-white/5">Role Matrix</th>
-                    <th className="px-4 py-6 border-r border-white/5 bg-indigo-600 text-white">Flight No (Auto-Linked)</th>
-                    <th className="px-4 py-6 border-r border-white/5">STA</th>
-                    <th className="px-4 py-6 border-r border-white/5">STD</th>
-                    <th className="px-4 py-6 border-r border-white/5">Sector</th>
-                    <th className="px-4 py-6 text-right sticky right-0 bg-slate-950">Action</th>
+                    <th className="px-6 py-7 border-r border-white/5">Day Name</th>
+                    <th className="px-6 py-7 border-r border-white/5">Start Date</th>
+                    <th className="px-6 py-7 border-r border-white/5">Time Range</th>
+                    <th className="px-6 py-7 border-r border-white/5 text-center">Staff Count</th>
+                    <th className="px-6 py-7 border-r border-white/5 bg-blue-600/20 text-blue-100">Engaged Flights</th>
+                    <th className="px-6 py-7 border-r border-white/5">STA/STD</th>
+                    <th className="px-6 py-7 border-r border-white/5">Specialist Registry</th>
+                    <th className="px-6 py-7 text-right sticky right-0 bg-slate-950">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {shifts.length === 0 ? (
-                    <tr><td colSpan={12} className="px-6 py-12 text-center text-[10px] font-black uppercase text-slate-300 italic">No shifts configured in Duty Master</td></tr>
-                  ) : shifts.sort((a,b) => a.pickupDate.localeCompare(b.pickupDate) || a.pickupTime.localeCompare(b.pickupTime)).flatMap((s) => {
-                    const shiftFlights = (s.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean);
-                    const renderRow = (f: Flight | null, fIdx: number) => (
-                      <tr key={`${s.id}-${f?.id || 'empty'}`} className={`group hover:bg-slate-50 transition-all font-black text-[10px] uppercase italic text-slate-900 ${fIdx === 0 && shiftFlights.length > 1 ? 'border-t-2 border-slate-200' : ''}`}>
-                        <td className="px-4 py-5 border-r border-slate-100">{getDayLabel(s.pickupDate)}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{s.pickupDate}</td>
-                        <td className="px-4 py-5 border-r border-slate-100 font-black text-blue-600">{s.pickupTime}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{s.endDate}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{s.endTime}</td>
-                        <td className="px-4 py-5 border-r border-slate-100 text-center">{s.minStaff} / {s.maxStaff}</td>
-                        <td className="px-4 py-5 border-r border-slate-100 text-blue-900 font-black">{getRoleSummary(s.roleCounts)}</td>
-                        <td className={`px-4 py-5 border-r border-slate-100 ${f ? 'bg-indigo-600 text-white shadow-inner font-black' : 'text-slate-300 bg-slate-50'}`}>{f?.flightNumber || 'NIL'}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{f?.sta || '--:--'}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{f?.std || '--:--'}</td>
-                        <td className="px-4 py-5 border-r border-slate-100">{f ? `${f.from} → ${f.to}` : '-'}</td>
-                        <td className="px-4 py-5 text-right sticky right-0 bg-white group-hover:bg-slate-50 transition-colors">
-                          {fIdx === 0 && (<div className="flex items-center justify-end gap-1"><button onClick={() => startEdit(s)} className="p-2 text-slate-400 hover:text-indigo-600"><Edit2 size={14}/></button><button onClick={() => onDelete(s.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 size={14}/></button></div>)}
-                        </td>
-                      </tr>
-                    );
-                    if (shiftFlights.length === 0) return [renderRow(null, 0)];
-                    return shiftFlights.map((f, idx) => renderRow(f, idx));
-                  })}
+                    <tr>
+                      <td colSpan={8} className="px-6 py-32 text-center text-slate-300 font-black uppercase italic text-xl">
+                        Duty Registry Empty
+                      </td>
+                    </tr>
+                  ) : (
+                    [...shifts].sort((a,b) => a.pickupDate.localeCompare(b.pickupDate) || a.pickupTime.localeCompare(b.pickupTime)).map((s) => {
+                      const engagedFlights = (s.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean);
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/50 transition-colors align-top">
+                          <td className="px-6 py-8 border-r border-slate-100">
+                             <span className="font-black text-slate-900 italic block">{getDayLabel(s.pickupDate)}</span>
+                             <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Day {s.day + 1}</span>
+                          </td>
+                          <td className="px-6 py-8 border-r border-slate-100 font-black text-slate-600 text-[11px]">{s.pickupDate}</td>
+                          <td className="px-6 py-8 border-r border-slate-100 font-black text-slate-950 text-lg italic">{s.pickupTime} — {s.endTime}</td>
+                          <td className="px-6 py-8 border-r border-slate-100 text-center">
+                             <div className="inline-flex flex-col items-center">
+                               <span className="font-black text-lg italic text-slate-900 leading-none">{s.minStaff} — {s.maxStaff}</span>
+                               <span className="text-[7px] font-black uppercase tracking-widest mt-1">Min / Max</span>
+                             </div>
+                          </td>
+                          <td className="px-6 py-8 border-r border-slate-100 bg-blue-50/30">
+                             <div className="flex flex-wrap gap-2">
+                               {engagedFlights.map(f => (
+                                 <div key={f!.id} className="px-3 py-1.5 bg-slate-950 text-white rounded-lg text-[10px] font-black uppercase italic flex items-center gap-2">
+                                   <Plane size={10} className="text-blue-400" /> {f!.flightNumber}
+                                 </div>
+                               ))}
+                               {engagedFlights.length === 0 && <span className="text-[9px] font-black text-slate-300 uppercase italic">No Engagement</span>}
+                             </div>
+                          </td>
+                          <td className="px-6 py-8 border-r border-slate-100">
+                             <div className="space-y-1">
+                               {engagedFlights.map(f => (
+                                 <div key={f!.id} className="text-[9px] font-black text-slate-500 uppercase flex items-center gap-2">
+                                   <Clock size={10} className="text-slate-300" /> {f!.sta || '--'} / {f!.std || '--'}
+                                 </div>
+                               ))}
+                             </div>
+                          </td>
+                          <td className="px-6 py-8 border-r border-slate-100">
+                             <div className="flex flex-wrap gap-1.5">
+                                {/* Fix: cast 'c' to number to avoid 'unknown' comparison error */}
+                               {Object.entries(s.roleCounts || {}).filter(([_, c]) => (c as number) > 0).map(([role, count]) => (
+                                 <span key={role} className="px-3 py-1 bg-slate-100 rounded-lg text-[9px] font-black text-slate-500 uppercase">
+                                   {role}: {count}
+                                 </span>
+                               ))}
+                               {(!s.roleCounts || Object.values(s.roleCounts).every(v => !v)) && <span className="text-[9px] font-black text-slate-300 uppercase italic">Duty Only</span>}
+                             </div>
+                          </td>
+                          <td className="px-6 py-8 text-right sticky right-0 bg-white/90 backdrop-blur-sm group">
+                             <div className="flex justify-end gap-2">
+                               <button onClick={() => startEdit(s)} className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+                                 <Edit2 size={16} />
+                               </button>
+                               <button onClick={() => { if(confirm('Erase this slot from registry?')) onDelete(s.id); }} className="p-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all shadow-sm">
+                                 <Trash2 size={16} />
+                               </button>
+                             </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
