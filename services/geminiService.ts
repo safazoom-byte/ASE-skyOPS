@@ -83,12 +83,12 @@ export const generateAIProgram = async (
   You MUST return a JSON object with exactly these keys: 
   { "programs": DailyProgram[], "shortageReport": ShortageWarning[], "recommendations": ResourceRecommendation }
 
-  COMMANDMENTS:
-  1. Distribute staff across shifts based on 'minStaff' and 'maxStaff'.
-  2. Ensure every shift has at least 1 'Shift Leader' and 1 'Load Control'.
-  3. Adhere to the start date: ${config.startDate} and length: ${config.numDays} days.
-  4. Use the registry: ${JSON.stringify(data.staff)}.
-  5. Use shift needs: ${JSON.stringify(data.shifts)}.`;
+  OPERATIONAL COMMANDMENTS:
+  1. HARD MINIMUMS: Every shift MUST meet its 'minStaff' count. Failing to meet minStaff while staff are idle is a critical error.
+  2. ZERO LEAKAGE: If ANY shift is below 'maxStaff', NO QUALIFIED staff member can be placed in 'NIL' (Surplus). You MUST assign them to cover gaps.
+  3. 5/2 LAW: Local staff work 5 days, 2 days OFF. 
+  4. START DATE: ${config.startDate}, Length: ${config.numDays} days.
+  5. REGISTRY: ${JSON.stringify(data.staff)}. SHIFTS: ${JSON.stringify(data.shifts)}.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -97,7 +97,8 @@ export const generateAIProgram = async (
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 32768 }
+        maxOutputTokens: 40000,
+        thinkingConfig: { thinkingBudget: 32000 }
       }
     });
     return safeParseJson(response.text);
@@ -115,27 +116,25 @@ export const refineAIProgram = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const passInstructions = passNumber === 2 
-    ? `You are performing PASS 2: REGULATORY & 5/2 COMPLIANCE AUDIT.
-       Your goal is to fix any violations of the 'Mathematical 5/2 Law'.
-       - LOCAL staff MUST have exactly 2 days off per 7 days.
-       - If they are NOT off, they MUST be working if any shift is below maxStaff.
-       - Adjust the current roster to ensure 100% 5/2 compliance.
-       - KEEP the exact JSON structure: { "programs": [...], "shortageReport": [...], "recommendations": {...} }`
-    : `You are performing PASS 3: EQUITY & SHORTAGE OPTIMIZATION.
-       Your goal is to balance the staff distribution across all shifts.
-       - No shift should be filled to 100% if another is at 50%.
-       - Aim for an identical 'Coverage Ratio' across all shifts on the same day.
-       - Saturate available Roster staff (Zero Leakage).
-       - KEEP the exact JSON structure: { "programs": [...], "shortageReport": [...], "recommendations": {...} }`;
+    ? `You are performing PASS 2: COMPLIANCE AUDIT.
+       FIX 5/2 VIOLATIONS: 
+       - Calculate total work days for every Local staff member.
+       - If total > 5, FORCE exactly 2 days to 'DAY OFF'.
+       - Use 'NIL' staff from other days to fill the new gaps.
+       - If a shift is below 'minStaff', you HAVE to pull staff from 'NIL' categories immediately.`
+    : `You are performing PASS 3: EQUITY OPTIMIZATION.
+       - Balance coverage ratios across all shifts on the same day.
+       - Ensure NO qualified staff member is left in 'NIL' (Available) if a shift is below 'maxStaff'.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Current Roster: ${JSON.stringify(currentResult)}. Refine this based on the registry: ${JSON.stringify(data.staff)}. Registry shifts: ${JSON.stringify(data.shifts)}. Registry flights: ${JSON.stringify(data.flights)}.`,
+      contents: `Current Roster: ${JSON.stringify(currentResult)}. Refine this based on registry: ${JSON.stringify(data.staff)}.`,
       config: { 
         systemInstruction: passInstructions, 
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 32768 }
+        maxOutputTokens: 40000,
+        thinkingConfig: { thinkingBudget: 32000 }
       }
     });
     const refined = safeParseJson(response.text);
@@ -151,7 +150,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce 5/2 Local Compliance and Shortage Equity.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce 5/2 Local Law and Zero-Leakage.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
