@@ -1,8 +1,7 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
-import { Flight } from '../types';
+import { Flight } from '../types.ts';
 import { Trash2, Eraser, CalendarX, PlaneTakeoff, Clock, MapPin, Edit3, CalendarDays, Sparkles } from 'lucide-react';
-import { DAYS_OF_WEEK_FULL } from '../constants';
+import { DAYS_OF_WEEK_FULL } from '../constants.tsx';
 
 interface Props {
   flights: Flight[];

@@ -1,8 +1,7 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { extractDataFromContent, identifyMapping, ExtractionMedia, sanitizeRole } from '../services/geminiService';
-import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
-import { AVAILABLE_SKILLS } from '../constants';
+import { extractDataFromContent, identifyMapping, ExtractionMedia, sanitizeRole } from '../services/geminiService.ts';
+import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types.ts';
+import { AVAILABLE_SKILLS } from '../constants.tsx';
 import * as XLSX from 'xlsx';
 import { 
   FileUp, 

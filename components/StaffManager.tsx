@@ -1,7 +1,7 @@
 // Add React import to fix "Cannot find namespace 'React'" errors
 import React, { useState } from 'react';
-import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types';
-import { AVAILABLE_SKILLS } from '../constants';
+import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types.ts';
+import { AVAILABLE_SKILLS } from '../constants.tsx';
 import * as XLSX from 'xlsx';
 import { 
   Users,
@@ -398,7 +398,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
       {showWipeConfirm && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
-           <div className="bg-white rounded-[4rem] shadow-2xl max-w-sm w-full p-12 text-center">
+           <div className="bg-white rounded-[4rem] shadow-2xl max-sm w-full p-12 text-center">
               <ShieldCheck size={56} className="mx-auto text-rose-500 mb-8" />
               <h4 className="text-2xl font-black uppercase italic mb-3">Registry Purge</h4>
               <p className="text-xs text-slate-500 mb-10">Permanently erase all personnel data?</p>

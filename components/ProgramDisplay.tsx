@@ -1,7 +1,6 @@
-
 import React, { useMemo } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types';
-import { DAYS_OF_WEEK } from '../constants';
+import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types.ts';
+import { DAYS_OF_WEEK } from '../constants.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -43,14 +42,17 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const staffWorkStats = useMemo(() => {
     const data = new Map<string, { workCount: number, offCount: number, offLabels: Map<number, string> }>();
     staff.forEach(s => data.set(s.id, { workCount: 0, offCount: 0, offLabels: new Map() }));
-    programs.forEach(prog => {
-      const workingStaffIds = new Set(prog.assignments.map(a => a.staffId));
+    
+    sortedPrograms.forEach(prog => {
+      const assignments = prog.assignments || [];
+      const workingStaffIds = new Set(assignments.map(a => a.staffId));
       staff.forEach(s => {
         const stats = data.get(s.id)!;
         if (workingStaffIds.has(s.id)) {
           stats.workCount++;
         } else {
-          const offRecord = (prog.offDuty || []).find(off => off.staffId === s.id);
+          const offDuty = prog.offDuty || [];
+          const offRecord = offDuty.find(off => off.staffId === s.id);
           if (offRecord?.type === 'DAY OFF') {
             stats.offCount++;
             stats.offLabels.set(prog.day, stats.offCount.toString().padStart(2, '0'));
@@ -59,34 +61,59 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
     return data;
-  }, [programs, staff]);
+  }, [sortedPrograms, staff]);
 
   const shadowAudit = useMemo(() => {
     const violations: { type: 'CRITICAL' | 'WARNING' | 'LEGAL' | 'ASSET' | 'EQUITY', message: string, day?: number }[] = [];
-    programs.forEach(p => {
+    
+    sortedPrograms.forEach(p => {
+      const assignments = p.assignments || [];
+      const offDuty = p.offDuty || [];
+      
       const shiftAssignments: Record<string, Assignment[]> = {};
-      p.assignments.forEach(a => { if (a.shiftId) { shiftAssignments[a.shiftId] = [...(shiftAssignments[a.shiftId] || []), a]; } });
+      assignments.forEach(a => { 
+        if (a.shiftId) { 
+          shiftAssignments[a.shiftId] = [...(shiftAssignments[a.shiftId] || []), a]; 
+        } 
+      });
+
       const dayHeads: { shiftId: string, count: number, max: number, min: number }[] = [];
       Object.keys(shiftAssignments).forEach(sid => {
         const assigs = shiftAssignments[sid];
         const sh = getShiftById(sid);
         if (!sh) return;
+        
         dayHeads.push({ shiftId: sid, count: assigs.length, max: sh.maxStaff, min: sh.minStaff });
+        
         const hasSL = assigs.some(a => a.role === 'Shift Leader');
         const hasLC = assigs.some(a => a.role === 'Load Control');
-        if (!hasSL || !hasLC) violations.push({ type: 'CRITICAL', day: p.day, message: `Day ${p.day+1}: Shift ${sh.pickupTime} MISSING ${!hasSL ? 'SL' : ''} ${!hasLC ? 'LC' : ''}` });
-        if (assigs.length < sh.minStaff) violations.push({ type: 'CRITICAL', day: p.day, message: `Day ${p.day+1}: Shift ${sh.pickupTime} FAILED MINIMUM (${assigs.length}/${sh.minStaff})` });
+        
+        if (!hasSL || !hasLC) {
+          violations.push({ type: 'CRITICAL', day: p.day, message: `Day ${p.day+1}: Shift ${sh.pickupTime} MISSING ${!hasSL ? 'SL' : ''} ${!hasLC ? 'LC' : ''}` });
+        }
+        
+        if (assigs.length < sh.minStaff) {
+          violations.push({ type: 'CRITICAL', day: p.day, message: `Day ${p.day+1}: Shift ${sh.pickupTime} FAILED MINIMUM (${assigs.length}/${sh.minStaff})` });
+        }
       });
-      const idleQualified = (p.offDuty || []).filter(off => off.type === 'NIL');
+
+      const idleQualified = offDuty.filter(off => off.type === 'NIL');
       const shiftsWithGaps = dayHeads.some(h => h.count < h.max);
-      if (idleQualified.length > 0 && shiftsWithGaps) violations.push({ type: 'ASSET', day: p.day, message: `Day ${p.day+1}: Resource Leakage. ${idleQualified.length} staff idle during shortage.` });
+      
+      if (idleQualified.length > 0 && shiftsWithGaps) {
+        violations.push({ type: 'ASSET', day: p.day, message: `Day ${p.day+1}: Resource Leakage. ${idleQualified.length} staff idle during shortage.` });
+      }
     });
+
     staff.filter(s => s.type === 'Local').forEach(s => {
       const stats = staffWorkStats.get(s.id);
-      if (stats && stats.workCount > 5) violations.push({ type: 'LEGAL', message: `${s.initials}: 5/2 LAW VIOLATION (${stats.workCount} days worked).` });
+      if (stats && stats.workCount > 5) {
+        violations.push({ type: 'LEGAL', message: `${s.initials}: 5/2 LAW VIOLATION (${stats.workCount} days worked).` });
+      }
     });
+    
     return violations;
-  }, [programs, staff, shifts, staffWorkStats]);
+  }, [sortedPrograms, staff, shifts, staffWorkStats]);
 
   const formatStaffDisplay = (s?: Staff, dayIndex?: number) => {
     if (!s) return "??";
@@ -123,21 +150,27 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const doc = new jsPDF('l', 'mm', 'a4');
     doc.setFontSize(22).text(`SkyOPS Station Handling Plan`, 14, 20);
     doc.setFontSize(10).text(`Window: ${startDate} to ${endDate}`, 14, 28);
+    
     sortedPrograms.forEach((program, pIdx) => {
       if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
       doc.setFontSize(16).text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, 40);
+      
+      const assignments = program.assignments || [];
       const assignmentsByShift: Record<string, Assignment[]> = {};
-      (program.assignments || []).forEach(a => {
+      
+      assignments.forEach(a => {
         const sid = a.shiftId || 'unassigned';
         if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
         assignmentsByShift[sid].push(a);
       });
+
       const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
         const sh = getShiftById(sid);
         const flightList = (sh?.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
         const personnel = assigs.map(a => `${getStaffById(a.staffId)?.initials} (${getRoleLabel([a.role])})`).join(' | ');
         return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList, `${assigs.length}/${sh?.maxStaff}`, personnel];
       });
+
       autoTable(doc, { 
         startY: 45, 
         head: [['#', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC/MAX', 'PERSONNEL & ROLES']], 
@@ -146,6 +179,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         styles: { fontSize: 8, cellPadding: 4 },
         headStyles: { fillStyle: 'DF', fillColor: [15, 23, 42] }
       });
+
       const leaveCategories = [
         { type: 'DAY OFF', label: 'OFF DUTY (5/2)' },
         { type: 'ROSTER LEAVE', label: 'ROSTER LEAVE' },
@@ -154,10 +188,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         { type: 'LIEU LEAVE', label: 'LIEU LEAVE' },
         { type: 'NIL', label: 'SURPLUS (AVAILABLE)' }
       ];
+
+      const offDuty = program.offDuty || [];
       const leaveData = leaveCategories.map(cat => {
-        const staffList = (program.offDuty || []).filter(off => off.type === cat.type).map(off => formatStaffDisplay(getStaffById(off.staffId), cat.type === 'DAY OFF' ? program.day : undefined)).filter(Boolean).join(', ');
+        const staffList = offDuty.filter(off => off.type === cat.type)
+          .map(off => formatStaffDisplay(getStaffById(off.staffId), cat.type === 'DAY OFF' ? program.day : undefined))
+          .filter(Boolean).join(', ');
         return [cat.label, staffList || 'NONE'];
       });
+
       const nextY = (doc as any).lastAutoTable.finalY + 15;
       doc.setFontSize(12).text(`STATION EXCLUSION & LEAVE REGISTRY`, 14, nextY);
       autoTable(doc, { startY: nextY + 5, head: [['EXCLUSION', 'PERSONNEL']], body: leaveData, theme: 'grid', styles: { fontSize: 8 }, columnStyles: { 0: { fontStyle: 'bold', width: 60 } } });
@@ -208,8 +247,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       <div className="space-y-24">
         {sortedPrograms.map((program) => {
+          const assignments = program.assignments || [];
           const assignmentsByShift: Record<string, Assignment[]> = {};
-          (program.assignments || []).forEach(a => {
+          
+          assignments.forEach(a => {
             const sid = a.shiftId || 'unassigned';
             if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
             assignmentsByShift[sid].push(a);
@@ -242,7 +283,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     {Object.entries(assignmentsByShift).map(([sid, assigs]) => {
                       const sh = getShiftById(sid);
                       const isBelowMin = sh && assigs.length < sh.minStaff;
-                      const coveragePerc = sh ? (assigs.length / sh.maxStaff) * 100 : 0;
                       return (
                         <tr key={sid} className={`align-top ${isBelowMin ? 'bg-rose-50/40' : ''}`}>
                           <td className="px-6 py-10 font-black text-slate-900 text-2xl italic">{sh?.pickupTime || '--:--'}</td>

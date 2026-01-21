@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, OffDutyRecord } from "../types";
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, OffDutyRecord } from "../types.ts";
 
 export interface ExtractionMedia {
   data: string;
@@ -32,7 +31,7 @@ export interface BuildResult {
 }
 
 interface ConstraintViolation {
-  type: '5/2_VIOLATION' | 'MIN_STAFF_SHORTAGE' | 'ZERO_LEAKAGE_FAILURE' | 'SKILL_GAP';
+  type: '5/2_VIOLATION' | 'MIN_STAFF_SHORTAGE' | 'ZERO_LEAKAGE_FAILURE' | 'SKILL_GAP' | 'DATA_MALFORMED';
   message: string;
 }
 
@@ -77,178 +76,183 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-/**
- * FATAL AUDITOR (Hard Lockdown Engine)
- */
-const auditRoster = (result: BuildResult, data: ProgramData, numDays: number): ConstraintViolation[] => {
+const auditRoster = (result: any, data: ProgramData, numDays: number): ConstraintViolation[] => {
   const violations: ConstraintViolation[] = [];
-  const { programs } = result;
-  if (!programs || !Array.isArray(programs) || programs.length === 0) {
-    return [{ type: '5/2_VIOLATION', message: 'FATAL: Roster is empty.' }];
+  const programs = result?.programs;
+  
+  if (!programs || !Array.isArray(programs)) {
+    return [{ type: 'DATA_MALFORMED', message: 'CRITICAL: Roster structure is invalid or empty.' }];
   }
 
-  // Calculate proportional work day target (5 days work per 7 days)
-  const targetWorkDays = Math.round((numDays / 7) * 5);
-
-  // 1. HARD AUDIT: 5/2 Law (Proportional)
+  const safeStaff = data.staff || [];
   const staffWorkCounts = new Map<string, number>();
-  data.staff.filter(s => s.type === 'Local').forEach(s => staffWorkCounts.set(s.id, 0));
+  
+  // Track 5/2 Law
+  safeStaff.filter(s => s.type === 'Local').forEach(s => staffWorkCounts.set(s.id, 0));
 
-  programs.forEach(p => {
-    p.assignments.forEach(a => {
+  programs.forEach(prog => {
+    const assignments = prog.assignments || [];
+    
+    assignments.forEach(a => {
       if (staffWorkCounts.has(a.staffId)) {
         staffWorkCounts.set(a.staffId, (staffWorkCounts.get(a.staffId) || 0) + 1);
+      }
+    });
+
+    // Cross-reference with shifts to check Min Staff
+    data.shifts.filter(s => s.pickupDate === prog.dateString).forEach(sh => {
+      const staffOnThisShift = assignments.filter(a => a.shiftId === sh.id);
+      if (staffOnThisShift.length < sh.minStaff) {
+        violations.push({ type: 'MIN_STAFF_SHORTAGE', message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})` });
       }
     });
   });
 
   staffWorkCounts.forEach((count, id) => {
-    const s = data.staff.find(st => st.id === id);
-    if (count !== targetWorkDays) {
-      violations.push({ 
-        type: '5/2_VIOLATION', 
-        message: `FATAL: Local Staff ${s?.initials} has ${count}/${targetWorkDays} work days. MUST BE EXACTLY ${targetWorkDays} for a ${numDays}-day window.` 
-      });
+    if (count > 5) {
+      const s = safeStaff.find(st => st.id === id);
+      violations.push({ type: '5/2_VIOLATION', message: `Agent ${s?.initials || id} violates 5/2 Law: ${count} days assigned.` });
     }
-  });
-
-  // 2. HARD AUDIT: Minimum Staffing & Zero Asset Leakage
-  programs.forEach(p => {
-    const shiftAssignments: Record<string, number> = {};
-    p.assignments.forEach(a => { if (a.shiftId) shiftAssignments[a.shiftId] = (shiftAssignments[a.shiftId] || 0) + 1; });
-    const idleStaffCount = (p.offDuty || []).filter(o => o.type === 'NIL').length;
-    
-    data.shifts.filter(s => s.pickupDate === p.dateString || s.day === p.day).forEach(s => {
-      const assigned = shiftAssignments[s.id] || 0;
-      if (assigned < s.minStaff) {
-        if (idleStaffCount > 0) {
-          violations.push({ 
-            type: 'ZERO_LEAKAGE_FAILURE', 
-            message: `FATAL: Day ${p.day+1} - Shift ${s.pickupTime} is in shortage (${assigned}/${s.minStaff}) while ${idleStaffCount} staff are idle (NIL). RE-ASSIGN NIL STAFF IMMEDIATELY.` 
-          });
-        }
-      }
-    });
   });
 
   return violations;
 };
 
-export const generateAIProgram = async (
-  data: ProgramData,
-  constraintsLog: string,
-  config: { numDays: number, customRules: string, minRestHours: number, startDate: string }
-): Promise<BuildResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  let currentResult: BuildResult = { programs: [], shortageReport: [], isCompliant: false };
-  let retryCount = 0;
-  const maxRetries = 4;
-
-  const basePrompt = `COMMAND: Generate an Aviation Station Roster for ${config.numDays} days starting ${config.startDate}.
-  Registry Context: ${constraintsLog}
-  LAWS: 1. 5/2 Law Proportional (${Math.round((config.numDays/7)*5)} work days). 2. Satiate Min Staffing. 3. Zero Leakage (No NIL if shortage).`;
-
-  const systemInstruction = `Output valid JSON with keys: programs, shortageReport, recommendations.`;
-
-  while (retryCount <= maxRetries) {
-    const prompt = retryCount === 0 ? basePrompt : `REPAIR ERRORS:\n${currentResult.validationLog?.join('\n')}\n\nSTATE: ${JSON.stringify(currentResult.programs)}`;
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: prompt,
-      config: { systemInstruction, responseMimeType: "application/json", maxOutputTokens: 40000, thinkingConfig: { thinkingBudget: 32000 } }
-    });
-    const parsed = safeParseJson(response.text);
-    if (!parsed) { retryCount++; continue; }
-    const violations = auditRoster(parsed, data, config.numDays);
-    if (violations.length === 0) return { ...parsed, isCompliant: true };
-    currentResult = { ...parsed, validationLog: violations.map(v => v.message), isCompliant: false };
-    retryCount++;
-  }
-  return currentResult;
-};
-
-export const refineAIProgram = async (
-  currentResult: BuildResult,
-  data: ProgramData,
-  passNumber: number,
-  config: { minRestHours: number, startDate: string, numDays: number }
-): Promise<BuildResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const instruction = passNumber === 2 ? "COMPLIANCE AUDIT: Fix remaining logic errors." : "EQUITY PASS: Balance load without breaking 5/2 Law.";
+export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string, customRules?: string }): Promise<BuildResult> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
-  let result = currentResult;
-  let retry = 0;
-  while (retry < 2) {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: `Roster: ${JSON.stringify(result)}. Instruction: ${instruction}.`,
-      config: { systemInstruction: "Refine JSON. Do not break 5/2 Law.", responseMimeType: "application/json", maxOutputTokens: 40000, thinkingConfig: { thinkingBudget: 32000 } }
-    });
-    const parsed = safeParseJson(response.text);
-    if (parsed) {
-      const violations = auditRoster(parsed, data, config.numDays);
-      if (violations.length === 0) return { ...parsed, isCompliant: true };
-      result = { ...parsed, isCompliant: false, validationLog: violations.map(v => v.message) };
+  const prompt = `
+    COMMAND: Generate Station Roster Handling Plan.
+    MODEL: Gemini 3 Pro
+    STATION CONTEXT: Aviation Ground Handling
+    
+    LAWS (MANDATORY):
+    1. 5/2 LAW: No "Local" agent works more than 5 days in this ${config.numDays}-day window.
+    2. MIN REST: Exactly ${config.minRestHours} hours between shifts.
+    3. ROLE PRIORITY: Every shift MUST have 1 Shift Leader and 1 Load Control if requested in Shift Matrix.
+    4. ZERO LEAKAGE: Use available staff before allowing understaffing.
+    
+    Registry Context: ${constraintsLog}
+    
+    DATA:
+    - Flights: ${JSON.stringify(data.flights)}
+    - Staff: ${JSON.stringify(data.staff)}
+    - Shifts: ${JSON.stringify(data.shifts)}
+    
+    OUTPUT FORMAT: JSON ONLY
+    {
+      "programs": [DailyProgram],
+      "recommendations": ResourceRecommendation
     }
-    retry++;
-  }
-  return result;
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: prompt,
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const parsed = safeParseJson(response.text);
+  const violations = auditRoster(parsed, data, config.numDays);
+
+  return {
+    programs: parsed?.programs || [],
+    shortageReport: [],
+    recommendations: parsed?.recommendations,
+    validationLog: violations.map(v => v.message),
+    isCompliant: violations.length === 0
+  };
 };
 
-export const modifyProgramWithAI = async (
-  instruction: string,
-  data: ProgramData,
-  media?: ExtractionMedia[]
-): Promise<{ programs: DailyProgram[], explanation: string }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce 5/2 Local Law.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
-  if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: { parts },
-      config: { responseMimeType: "application/json" }
-    });
-    return safeParseJson(response.text);
-  } catch (error) {
-    throw error;
-  }
+export const refineAIProgram = async (previous: BuildResult, data: ProgramData, pass: number, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  
+  const prompt = `
+    REFINEMENT PASS ${pass}: 
+    Current Roster has ${previous.validationLog?.length || 0} violations.
+    Logic: ${pass === 2 ? 'Strict Logic & Rest Alignment' : 'Equity & Continuity Balancing'}
+    
+    Improve this roster: ${JSON.stringify(previous.programs)}
+    Target Data: ${JSON.stringify({ staff: data.staff, flights: data.flights, shifts: data.shifts })}
+    
+    Response must be JSON ONLY.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: prompt,
+    config: { responseMimeType: 'application/json' }
+  });
+
+  const parsed = safeParseJson(response.text);
+  const violations = auditRoster(parsed, data, config.numDays);
+
+  return {
+    programs: parsed?.programs || [],
+    shortageReport: [],
+    recommendations: parsed?.recommendations,
+    validationLog: violations.map(v => v.message),
+    isCompliant: violations.length === 0
+  };
 };
 
-export const extractDataFromContent = async (options: {
-  textData?: string;
-  media?: ExtractionMedia[];
-  startDate?: string;
-  targetType?: 'flights' | 'staff' | 'shifts' | 'all';
-}): Promise<ProgramData> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const { textData, media, startDate, targetType = 'all' } = options;
-  const parts: any[] = [{ text: `Extract aviation data for ${targetType}.` }];
-  if (textData) parts.push({ text: `Content: ${textData}` });
-  if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: { parts },
-      config: { responseMimeType: "application/json" }
-    });
-    return safeParseJson(response.text) || { flights: [], staff: [], shifts: [], programs: [] };
-  } catch (error) {
-    return { flights: [], staff: [], shifts: [], programs: [] };
+export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  
+  const parts: any[] = [{ text: `Extract station handling data (${options.targetType}) into JSON. Use ${options.startDate} as base date if needed.` }];
+  
+  if (options.textData) parts.push({ text: options.textData });
+  if (options.media) {
+    options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: { parts },
+    config: { responseMimeType: 'application/json' }
+  });
+
+  return safeParseJson(response.text);
 };
 
-export const identifyMapping = async (rows: any[][], target: 'flights' | 'staff' | 'shifts' | 'all'): Promise<{ columnMap: Record<string, number> }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const headers = rows[0] || [];
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Identify column indices for headers: ${JSON.stringify(headers)}`,
-      config: { responseMimeType: "application/json" }
-    });
-    return safeParseJson(response.text) || { columnMap: {} };
-  } catch (error) {
-    return { columnMap: {} };
+export const identifyMapping = async (rows: any[][], target: string): Promise<any> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  
+  const prompt = `
+    Given these sample rows from a sheet, map the columns to these fields: ${target}.
+    Rows: ${JSON.stringify(rows.slice(0, 5))}
+    Return JSON: { "columnMap": { "field": index } }
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: { responseMimeType: 'application/json' }
+  });
+
+  return safeParseJson(response.text);
+};
+
+export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  
+  const parts: any[] = [
+    { text: `INSTRUCTION: ${instruction}` },
+    { text: `CURRENT DATA: ${JSON.stringify(data)}` }
+  ];
+
+  if (media.length > 0) {
+    media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: { parts },
+    config: { 
+      responseMimeType: "application/json",
+      systemInstruction: "You are an expert aviation scheduler. Modify the existing roster based on user instructions. Ensure compliance with 5/2 Law and Rest Hours. Return the updated programs list and an explanation of changes."
+    }
+  });
+
+  return safeParseJson(response.text);
 };

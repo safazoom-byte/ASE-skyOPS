@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from 'react';
-import { ShiftConfig, Flight, Skill } from '../types';
-import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
+import { ShiftConfig, Flight, Skill } from '../types.ts';
+import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants.tsx';
 import * as XLSX from 'xlsx';
 import { 
   Clock, 
