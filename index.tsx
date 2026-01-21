@@ -31,7 +31,10 @@ import {
   Shield,
   Briefcase,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Cpu,
+  Loader2,
+  Scale
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -41,7 +44,7 @@ import { ShiftManager } from './components/ShiftManager';
 import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramScanner } from './components/ProgramScanner';
 import { ProgramChat } from './components/ProgramChat';
-import { generateAIProgram, extractDataFromContent, ShortageWarning, ResourceRecommendation } from './services/geminiService';
+import { generateAIProgram, refineAIProgram, extractDataFromContent, ShortageWarning, ResourceRecommendation } from './services/geminiService';
 
 const STORAGE_KEYS = {
   FLIGHTS: 'skyops_flights_v3',
@@ -122,6 +125,7 @@ const App: React.FC = () => {
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStep, setGenerationStep] = useState<number>(0); // 0: Idle, 1: Drafting, 2: Compliance, 3: Equity
   const [error, setError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showLinkWarning, setShowLinkWarning] = useState(false);
@@ -227,6 +231,7 @@ const App: React.FC = () => {
     setShowLinkWarning(false);
     setIsGenerating(true);
     setError(null);
+    
     try {
       const programInputData: ProgramData = {
         flights: activeFlightsInRange,
@@ -235,11 +240,21 @@ const App: React.FC = () => {
         programs: []
       };
 
-      const result = await generateAIProgram(
+      // PASS 1: INITIAL DEPLOYMENT
+      setGenerationStep(1);
+      let result = await generateAIProgram(
         programInputData,
-        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests (Absence Box): ${personnelRequests}\nSPECIAL RULE: Do not automatically assign staff to unlinked flights. If a flight is not linked to a shift, leave it as NIL coverage.`,
+        `Previous Duty Log: ${previousDutyLog}\nPersonnel Requests: ${personnelRequests}`,
         { numDays, customRules: '', minRestHours, startDate }
       );
+
+      // PASS 2: COMPLIANCE AUDIT
+      setGenerationStep(2);
+      result = await refineAIProgram(result, programInputData, 2, { minRestHours, startDate });
+
+      // PASS 3: EQUITY REVISION
+      setGenerationStep(3);
+      result = await refineAIProgram(result, programInputData, 3, { minRestHours, startDate });
 
       if (result.shortageReport && result.shortageReport.length > 0) {
         setProposedPrograms(result.programs);
@@ -255,6 +270,7 @@ const App: React.FC = () => {
       setError(err.message || "Logic engine failed.");
     } finally {
       setIsGenerating(false);
+      setGenerationStep(0);
     }
   };
 
@@ -285,6 +301,59 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-3xl md:hidden flex flex-col p-12">
           <div className="flex justify-between items-center mb-20"><Plane className="text-blue-500" size={32} /><button onClick={() => setIsMobileMenuOpen(false)} className="p-4 bg-white/5 text-white rounded-2xl"><X size={24} /></button></div>
           <nav className="flex flex-col gap-6">{navigationTabs.map(tab => (<button key={tab.id} onClick={() => { setActiveTab(tab.id as any); setIsMobileMenuOpen(false); }} className={`flex items-center gap-6 text-left py-6 px-8 rounded-[2rem] transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/30' : 'text-slate-500 hover:text-white'}`}><tab.icon size={28} /><span className="text-2xl font-black uppercase italic tracking-tighter">{tab.label}</span></button>))}</nav>
+        </div>
+      )}
+
+      {/* TRIPLE-PASS LOADING OVERLAY */}
+      {isGenerating && (
+        <div className="fixed inset-0 z-[3000] bg-slate-950/98 backdrop-blur-3xl flex items-center justify-center p-8 animate-in fade-in duration-500">
+           <div className="max-w-xl w-full text-center space-y-12">
+              <div className="relative">
+                <div className="w-32 h-32 bg-blue-600/20 rounded-[2.5rem] border border-blue-600/30 flex items-center justify-center mx-auto animate-pulse">
+                  <Cpu size={48} className="text-blue-500 animate-spin-slow" />
+                </div>
+                <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-900 border border-white/10 rounded-full">
+                  <span className="text-[10px] font-black uppercase text-blue-400 tracking-[0.3em]">Deep Brain Engine</span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">Triple-Pass Revision</h3>
+                <p className="text-slate-400 text-sm font-medium italic">Station architect is performing recursive optimization cycles.</p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 relative">
+                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-white/5 -translate-y-1/2 z-0"></div>
+                 {[
+                   { step: 1, icon: Target, label: "Deployment", desc: "Phase 01: Draft" },
+                   { step: 2, icon: ShieldCheck, label: "Audit", desc: "Phase 02: 5/2 Law" },
+                   { step: 3, icon: Scale, label: "Equity", desc: "Phase 03: Balanced" }
+                 ].map((p) => (
+                   <div key={p.step} className="relative z-10 flex flex-col items-center gap-4">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-700 border ${
+                        generationStep >= p.step 
+                          ? 'bg-blue-600 border-blue-400 text-white shadow-xl shadow-blue-600/20' 
+                          : 'bg-slate-900 border-white/5 text-slate-700'
+                      }`}>
+                        {generationStep > p.step ? <Check size={24} /> : <p.icon size={24} />}
+                      </div>
+                      <div className="text-center">
+                        <p className={`text-[10px] font-black uppercase tracking-widest leading-none mb-1 transition-colors ${generationStep === p.step ? 'text-white' : 'text-slate-500'}`}>{p.label}</p>
+                        <p className="text-[7px] font-black text-slate-600 uppercase tracking-tighter">{p.desc}</p>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+
+              <div className="pt-8">
+                 <div className="flex items-center justify-center gap-3">
+                    <Loader2 className="text-blue-500 animate-spin" size={16} />
+                    <span className="text-[9px] font-black uppercase text-slate-500 tracking-[0.5em] animate-pulse">
+                      {generationStep === 1 ? "MAPPPING PERSONNEL TO SHIFTS" : generationStep === 2 ? "VERIFYING REGULATORY COMPLIANCE" : "FINALIZING EQUITY DISTRIBUTION"}
+                    </span>
+                 </div>
+              </div>
+           </div>
         </div>
       )}
 

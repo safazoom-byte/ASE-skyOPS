@@ -77,42 +77,23 @@ export const generateAIProgram = async (
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const systemInstruction = `You are the High-Brain Station Operations Architect. Your mission: A ZERO-ERROR deployment-ready roster.
+  const systemInstruction = `You are the High-Brain Station Operations Architect. This is PASS 1: INITIAL DEPLOYMENT.
 
-  STRICT OPERATIONAL COMMANDS:
+  STRICT SCHEMA REQUIREMENT: 
+  You MUST return a JSON object with exactly these keys: 
+  { "programs": DailyProgram[], "shortageReport": ShortageWarning[], "recommendations": ResourceRecommendation }
 
-  1. MANDATORY SPECIALIST ROLES (NON-NEGOTIABLE):
-  - EVERY HANDLING SHIFT MUST have AT LEAST 1 'Shift Leader' AND 1 'Load Control'.
-  - You MUST prioritize staff who are qualified (Skill Rating 'Yes') for these positions.
-  - Do NOT assign generic 'Duty' roles to specialists until all SL/LC slots for that day are secure.
-
-  2. RESOURCE SATURATION (NO IDLE STAFF):
-  - Roster staff work every day of their contract.
-  - If a shift is below its 'maxStaff' limit, YOU MUST assign available Roster staff to that shift until the limit is reached. 
-  - Do NOT leave staff as 'Available' or 'NIL' if shifts are not yet at maximum capacity. This is an operational asset leakage.
-
-  3. LOCAL STAFF 5/2 LAW:
-  - Local staff MUST receive EXACTLY 2 days off per 7-day period. 
-  - This is a legal compliance requirement.
-
-  4. REST HOUR INTEGRITY (DAY 0 TETHERING):
-  - Check 'Previous Day Duty Log' (Day 0).
-  - Calculate rest: (Day 1 Start Time) minus (Day 0 End Time).
-  - Personnel MUST have AT LEAST ${config.minRestHours} hours of rest. If violated, flag in shortageReport.
-
-  5. DOUBLE-PASS VERIFICATION:
-  - Before outputting, you MUST perform a secondary mental audit. 
-  - "Does shift X have an SL?" "Does shift X have an LC?" "Is staff Y working too soon after their Day 0 shift?"
-  - Correct any errors before final JSON generation.`;
+  COMMANDMENTS:
+  1. Distribute staff across shifts based on 'minStaff' and 'maxStaff'.
+  2. Ensure every shift has at least 1 'Shift Leader' and 1 'Load Control'.
+  3. Adhere to the start date: ${config.startDate} and length: ${config.numDays} days.
+  4. Use the registry: ${JSON.stringify(data.staff)}.
+  5. Use shift needs: ${JSON.stringify(data.shifts)}.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Operational Window: ${config.startDate} (${config.numDays} days). 
-      Registry: ${JSON.stringify(data.staff)}. 
-      Flights: ${JSON.stringify(data.flights)}. 
-      Shifts: ${JSON.stringify(data.shifts)}. 
-      Previous History/Constraints: ${constraintsLog}.`,
+      contents: `Draft a station roster for ${config.numDays} days. Constraints: ${constraintsLog}.`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
@@ -125,13 +106,52 @@ export const generateAIProgram = async (
   }
 };
 
+export const refineAIProgram = async (
+  currentResult: BuildResult,
+  data: ProgramData,
+  passNumber: number,
+  config: { minRestHours: number, startDate: string }
+): Promise<BuildResult> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const passInstructions = passNumber === 2 
+    ? `You are performing PASS 2: REGULATORY & 5/2 COMPLIANCE AUDIT.
+       Your goal is to fix any violations of the 'Mathematical 5/2 Law'.
+       - LOCAL staff MUST have exactly 2 days off per 7 days.
+       - If they are NOT off, they MUST be working if any shift is below maxStaff.
+       - Adjust the current roster to ensure 100% 5/2 compliance.
+       - KEEP the exact JSON structure: { "programs": [...], "shortageReport": [...], "recommendations": {...} }`
+    : `You are performing PASS 3: EQUITY & SHORTAGE OPTIMIZATION.
+       Your goal is to balance the staff distribution across all shifts.
+       - No shift should be filled to 100% if another is at 50%.
+       - Aim for an identical 'Coverage Ratio' across all shifts on the same day.
+       - Saturate available Roster staff (Zero Leakage).
+       - KEEP the exact JSON structure: { "programs": [...], "shortageReport": [...], "recommendations": {...} }`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: `Current Roster: ${JSON.stringify(currentResult)}. Refine this based on the registry: ${JSON.stringify(data.staff)}. Registry shifts: ${JSON.stringify(data.shifts)}. Registry flights: ${JSON.stringify(data.flights)}.`,
+      config: { 
+        systemInstruction: passInstructions, 
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 32768 }
+      }
+    });
+    const refined = safeParseJson(response.text);
+    return refined || currentResult;
+  } catch (error) {
+    return currentResult;
+  }
+};
+
 export const modifyProgramWithAI = async (
   instruction: string,
   data: ProgramData,
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Focus on Specialist Security and Resource Utility.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce 5/2 Local Compliance and Shortage Equity.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
