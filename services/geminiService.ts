@@ -72,12 +72,12 @@ const safeParseJson = (text: string | undefined): any => {
 
 export const identifyMapping = async (sampleRows: any[][], targetType: 'flights' | 'staff' | 'shifts' | 'all'): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Data Expert. Identify 0-based column indices. 
+  const systemInstruction = `Aviation Data Expert. Identify 0-based column indices for station data mapping. 
   Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
-  Special: Look for 'Role Matrix' or 'Specialist Requirements' or 'Skill Matrix' column that lists required specialist counts.
-  Also look for individual skill columns like 'Ramp', 'OPS', 'SL', etc.
+  Identify individual skill columns like 'Ramp', 'OPS', 'SL', 'LC', 'LF'.
   For powerRate, look for columns containing 'rate', 'power', or '%'.
   For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).`;
+  
   const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
 
   try {
@@ -138,7 +138,8 @@ export const extractDataFromContent = async (params: {
 }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
-  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.`;
+  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
+  Ensure Roster start/end dates are captured correctly as workFromDate and workToDate.`;
 
   const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -237,21 +238,25 @@ export const generateAIProgram = async (
   1. MASTER TRUTH - THE ABSENCE BOX (Personnel Requests):
   - You MUST scan the 'Personnel Requests (Absence Box)' text carefully for overrides.
   - If a staff member (Name or Initials) is mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'LIEU', 'ROSTER' for a date, they MUST be added to the 'offDuty' array for that specific day.
-  - CRITICAL: DO NOT list these staff as 'NIL' (Available). They are on leave and cannot be assigned or listed as present at the station.
+  - CRITICAL: DO NOT list these staff as 'NIL' (Available). They are on leave and cannot be present at the station.
   
   2. ROSTER STAFF CONTRACT PROTECTION:
   - 'Roster' staff have 'workFromDate' (Start) and 'workToDate' (End).
-  - If a roster day is BEFORE their 'workFromDate' or AFTER their 'workToDate', they ARE NOT AT STATION.
+  - If a day is BEFORE their 'workFromDate' or AFTER their 'workToDate', they ARE NOT AT STATION.
   - Move them to 'offDuty' with status 'ROSTER LEAVE' for those days.
-  - DO NOT list them as 'NIL' (Available) outside their contract window.
+  - DO NOT list them as 'NIL' (Available) if they are outside their contract dates.
   
-  3. AVAILABLE (NIL) DEFINITION:
-  - 'NIL' is ONLY for staff who:
-    a) Are NOT mentioned in the Absence Box.
-    b) Are WITHIN their contract dates.
-    c) Were not needed for a shift because shifts were already at 'maxStaff' capacity.
+  3. LOCAL STAFF REST (5/2 RULE):
+  - For 'Local' category staff, you MUST ensure they get 2 days off for every 5 days of work in any 7-day period.
+  - If a Local staff member has worked 5 consecutive days, force 'DAY OFF' in 'offDuty' for the next 2 days.
   
-  EVERY staff member in the database MUST be accounted for either in 'assignments' OR 'offDuty' for every single day.`;
+  4. AVAILABLE (NIL) DEFINITION:
+  - 'NIL' (Available) is ONLY for staff who:
+    a) Are NOT in the Absence Box (Off/Leave).
+    b) Are WITHIN their contract dates (if Roster).
+    c) Were NOT needed for an assignment because 'maxStaff' capacity was reached.
+  
+  CRITICAL: Every single person in the 'staff' database MUST appear in every single day of the program, either in 'assignments' OR in 'offDuty'. No exceptions.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -290,7 +295,8 @@ export const generateAIProgram = async (
                       properties: {
                         staffId: { type: Type.STRING },
                         type: { type: Type.STRING }
-                      }
+                      },
+                      required: ['staffId', 'type']
                     }
                   }
                 },
@@ -340,7 +346,8 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback. Specialists: SL, OPS, Ramp, LC, LF.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback. Specialists: SL, OPS, Ramp, LC, LF. 
+  Ensure 'NIL' is only for present staff, and 'Leave/Off' is for those away.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({

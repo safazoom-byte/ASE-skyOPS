@@ -230,13 +230,15 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       }
 
       if (hasStaffName) {
+        const typeStr = String(row[map.type] || '').toLowerCase();
+        const isRoster = typeStr.includes('rost') || typeStr.includes('contract');
         staff.push({
           id: Math.random().toString(36).substr(2, 9),
           name: String(row[map.name] || '').trim(),
           initials: String(row[map.initials] || '').trim().toUpperCase(),
-          type: String(row[map.type] || '').toLowerCase().includes('rost') ? 'Roster' : 'Local',
+          type: isRoster ? 'Roster' : 'Local',
           powerRate: parsePowerRate(row[map.powerRate]),
-          workPattern: String(row[map.type] || '').toLowerCase().includes('rost') ? 'Continuous (Roster)' : '5 Days On / 2 Off',
+          workPattern: isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off',
           maxShiftsPerWeek: 5,
           workFromDate: map.workFromDate !== undefined && map.workFromDate !== -1 ? parseImportDate(row[map.workFromDate]) : undefined,
           workToDate: map.workToDate !== undefined && map.workToDate !== -1 ? parseImportDate(row[map.workToDate]) : undefined,
@@ -251,20 +253,22 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       }
     });
 
-    // AUTO-LINKAGE ENGINE: Link all flights occurring during shift times on the same date
+    // AUTO-LINKAGE ENGINE: Automatically link flights to shifts on the same date/time window
     shifts.forEach(s => {
       const shiftStart = timeToMinutes(s.pickupTime);
       const shiftEnd = timeToMinutes(s.endTime);
       
       const matchingFlights = flights.filter(f => {
+        // Must be on the same date
         if (f.date !== s.pickupDate) return false;
+        
         const flightTime = timeToMinutes(f.sta || f.std);
         if (flightTime === -1) return false;
         
         // Flight is linked if it falls within the shift window (with 15 min buffer)
         const inWindow = shiftEnd > shiftStart 
           ? (flightTime >= shiftStart - 15 && flightTime <= shiftEnd + 15)
-          : (flightTime >= shiftStart - 15 || flightTime <= shiftEnd + 15); // Overnight wrap
+          : (flightTime >= shiftStart - 15 || flightTime <= shiftEnd + 15); // Overnight wrap logic
         
         return inWindow;
       });
