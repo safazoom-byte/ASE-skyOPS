@@ -233,41 +233,44 @@ export const generateAIProgram = async (
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const systemInstruction = `Aviation Roster Engine. Generate a daily station program with ABSOLUTE compliance.
-  
-  1. MASTER TRUTH - THE ABSENCE BOX (Personnel Requests):
-  - Any staff mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'ROSTER' for a date MUST be moved to 'offDuty' immediately and excluded from all availability for that day.
-  
-  2. NO IDLE STAFF (FILL MINSTAFF OR FAIL):
-  - CRITICAL: You are PROHIBITED from leaving staff as 'NIL' (Available) if any shift on that day is below its 'minStaff' headcount.
-  - You MUST exhaust the available pool to ensure all shifts reach 'minStaff'.
-  - Aim for 'maxStaff' for all shifts if the pool allows.
-  
-  3. MANDATORY SAFETY MINIMUMS (FOR FLIGHT SHIFTS):
-  - Every shift linked to a flight MUST be assigned at least 1 Shift Leader (SL) and 1 Load Control (LC) as the very first step.
-  - You are FORBIDDEN from returning a shift that has 0 Shift Leaders or 0 Load Controllers if qualified people are available in the registry.
-  
-  4. FULL ROLE DIVERSITY:
-  - After safety minimums (SL/LC), fulfill the rest of the 'roleCounts' (Ramp, Operations, Lost and Found).
-  - If a shift needs 5 people but you only have 3 specialists, the remaining 2 MUST be filled by available staff assigned with the role 'Duty'. 
-  - Do NOT leave slots empty just because a specialist is missing; use generic 'Duty' staff to meet 'minStaff'.
-  
-  5. FLEXIBLE LOCAL 5/2 RULE:
-  - 'Local' staff MUST get 2 days off for every 5 days worked. 
-  - THESE 2 DAYS DO NOT NEED TO BE SEQUENTIAL. They can be split (e.g., Tuesday and Saturday).
-  - Prioritize these legally required days off.
-  
-  6. ROSTER STAFF CONTRACTS:
-  - Staff are 'ROSTER LEAVE' if the date is outside their 'workFromDate'/'workToDate'.
-  
-  7. FULL ACCOUNTABILITY:
-  - Every person in the registry MUST appear in 'assignments' OR 'offDuty' for every day. 
-  - Use 'NIL' only for staff who are excess to operational needs after ALL shifts have reached their maximum capacity.`;
+  const systemInstruction = `Station Duty Manager AI. Generate an operationally fair and continuity-focused aviation roster.
+
+  CORE OPERATIONAL LAWS:
+
+  1. ROSTER STAFF CONTINUITY (MAXIMUM UTILITY):
+  - Roster staff MUST work EVERY SINGLE DAY within their contract dates ('workFromDate' to 'workToDate').
+  - They are considered 100% available for assignment daily. No arbitrary "days off" for Roster staff.
+  - If a Roster staff member is outside their contract window, mark as 'ROSTER LEAVE'.
+
+  2. SHORTAGE DISTRIBUTION (SHIFT FAIRNESS):
+  - If total station manpower is less than total shift requirements, YOU MUST NOT fill one shift to 100% and leave another at 0%.
+  - Proportional Shortage: Distribute the gap across all shifts. Every shift should have at least the minimum possible coverage rather than sacrificing one shift entirely. Aim for equal staffing percentage across shifts.
+
+  3. LOCAL STAFF 5/2 RULE:
+  - Every Local staff member MUST receive exactly 2 days off per 7-day period.
+  - Schedule these to ensure Rule #2 (Shortage Smoothing) can still be satisfied on all other days.
+  - Mark as 'DAY OFF' in the offDuty section.
+
+  4. ADAPTIVE STAFF MIXING (FLEXIBLE):
+  - Every shift should ideally include a mix of Local and Roster staff to blend station knowledge with capacity.
+  - The ratio is not fixed; adapt it based on available personnel to ensure neither group is isolated in operations.
+
+  5. REST HOUR SAFETY (DAY 1 TRANSITION):
+  - Use the "Previous Day Duty Log" EXCLUSIVELY to check the end-time of staff members' last shift before Day 1 of the program.
+  - Personnel MUST have exactly ${config.minRestHours} hours of rest after their "Previous Day" end-time before their first shift on Day 1 starts.
+
+  6. TOTAL REGISTRY ACCOUNTABILITY:
+  - Every single person in the 'staff' list MUST appear in the output for EVERY day.
+  - If they are not in 'assignments', they MUST be in 'offDuty'.
+  - Absence Reasons: 'DAY OFF' (Local only), 'ROSTER LEAVE' (Out of contract), 'ANNUAL LEAVE', or 'NIL' (Standby/Available but not needed).`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Roster Window: ${config.startDate} for ${config.numDays} days. Data: ${JSON.stringify(data)}. Constraints: ${constraintsLog}`,
+      contents: `Roster Window: ${config.startDate} (${config.numDays} days). 
+      History/Context (Previous Log & Leaves): ${constraintsLog}. 
+      Staff Registry: ${JSON.stringify(data.staff)}. 
+      Operational Needs: ${JSON.stringify(data.flights)} & ${JSON.stringify(data.shifts)}.`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
@@ -316,26 +319,14 @@ export const generateAIProgram = async (
                 properties: {
                   staffName: { type: Type.STRING },
                   flightNumber: { type: Type.STRING },
-                  actualRest: { type: Type.NUMBER },
-                  targetRest: { type: Type.NUMBER },
                   reason: { type: Type.STRING }
                 }
-              }
-            },
-            recommendations: {
-              type: Type.OBJECT,
-              properties: {
-                idealStaffCount: { type: Type.NUMBER },
-                currentStaffCount: { type: Type.NUMBER },
-                skillGaps: { type: Type.ARRAY, items: { type: Type.STRING } },
-                hireAdvice: { type: Type.STRING },
-                healthScore: { type: Type.NUMBER }
               }
             }
           },
           required: ['programs']
         },
-        thinkingConfig: { thinkingBudget: 24000 }
+        thinkingConfig: { thinkingBudget: 32768 }
       }
     });
     
@@ -352,7 +343,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. MANDATORY: Fill shifts to at least 'minStaff' before marking staff as 'NIL'. Ensure 1 SL and 1 LC per flight shift. 5/2 rule for Local staff is flexible (non-sequential).` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Ensure adaptive staff mixing, proportional shortage distribution, and Roster daily availability.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
