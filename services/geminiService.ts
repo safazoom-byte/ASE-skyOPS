@@ -100,16 +100,18 @@ const auditRoster = (result: any, data: ProgramData, numDays: number): Constrain
       }
     });
 
-    data.shifts.filter(s => s.pickupDate === prog.dateString).forEach(sh => {
-      const staffOnThisShift = assignments.filter(a => a.shiftId === sh.id);
-      if (staffOnThisShift.length < sh.minStaff) {
-        violations.push({ 
-          type: 'MIN_STAFF_SHORTAGE', 
-          message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})`,
-          severity: 'WARNING'
-        });
-      }
-    });
+    if (data.shifts) {
+      data.shifts.filter(s => s.pickupDate === prog.dateString).forEach(sh => {
+        const staffOnThisShift = assignments.filter(a => a.shiftId === sh.id);
+        if (staffOnThisShift.length < sh.minStaff) {
+          violations.push({ 
+            type: 'MIN_STAFF_SHORTAGE', 
+            message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})`,
+            severity: 'WARNING'
+          });
+        }
+      });
+    }
   });
 
   staffWorkCounts.forEach((count, id) => {
@@ -127,7 +129,7 @@ const auditRoster = (result: any, data: ProgramData, numDays: number): Constrain
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string, customRules?: string }): Promise<BuildResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
     COMMAND: Generate Station Roster Handling Plan.
@@ -157,7 +159,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      systemInstruction: "You are a world-class aviation operations scheduler. Precision and compliance with 5/2 labor laws and rest hours are mandatory."
+    }
   });
 
   const parsed = safeParseJson(response.text);
@@ -175,7 +180,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 };
 
 export const refineAIProgram = async (previous: BuildResult, data: ProgramData, pass: number, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
     REFINEMENT PASS ${pass}: 
@@ -191,7 +196,10 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      systemInstruction: "Refine the provided roster. Fix rest hour violations and ensure shift leaders are assigned where missing."
+    }
   });
 
   const parsed = safeParseJson(response.text);
@@ -209,7 +217,7 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
 };
 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const parts: any[] = [{ text: `Extract station handling data (${options.targetType}) into JSON. Use ${options.startDate} as base date if needed.` }];
   
@@ -221,14 +229,17 @@ export const extractDataFromContent = async (options: { textData?: string, media
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: { parts },
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      systemInstruction: "Extract flight numbers, times, staff names, and initials from images or text. Ensure YYYY-MM-DD date formatting."
+    }
   });
 
   return safeParseJson(response.text);
 };
 
 export const identifyMapping = async (rows: any[][], target: string): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
     Given these sample rows from a sheet, map the columns to these fields: ${target}.
@@ -246,7 +257,7 @@ export const identifyMapping = async (rows: any[][], target: string): Promise<an
 };
 
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const parts: any[] = [
     { text: `INSTRUCTION: ${instruction}` },

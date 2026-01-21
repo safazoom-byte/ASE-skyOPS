@@ -1,4 +1,3 @@
-// Add React import to fix "Cannot find namespace 'React'" errors
 import React, { useState } from 'react';
 import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types.ts';
 import { AVAILABLE_SKILLS } from '../constants.tsx';
@@ -15,7 +14,9 @@ import {
   ShieldCheck,
   Sparkles,
   Zap,
-  CalendarDays
+  CalendarDays,
+  Shield,
+  Briefcase
 } from 'lucide-react';
 
 interface Props {
@@ -50,12 +51,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
-  /**
-   * UTC-Safe Date Formatter
-   */
   const formatStaffDate = (dateStr?: string) => {
     if (!dateStr || dateStr === 'N/A' || dateStr === '???') return '???';
-    
     let date: Date;
     if (/^\d{5}$/.test(dateStr)) {
       const serial = parseInt(dateStr);
@@ -64,9 +61,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     } else {
       date = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00Z'));
     }
-
     if (isNaN(date.getTime())) return dateStr;
-
     return date.getUTCDate().toString().padStart(2, '0') + '/' + 
            (date.getUTCMonth() + 1).toString().padStart(2, '0') + '/' + 
            date.getUTCFullYear();
@@ -77,9 +72,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     if (!newStaff.name) return;
     const initials = (newStaff.initials || generateInitials(newStaff.name)).toUpperCase();
     const id = Math.random().toString(36).substring(2, 11);
-    
     const isRoster = newStaff.type === 'Roster';
-    
     const staffData: Staff = {
       id,
       name: newStaff.name,
@@ -161,9 +154,9 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
   return (
     <div className="space-y-12 pb-24 animate-in fade-in duration-500">
-      <div className="bg-slate-900 text-white p-10 lg:p-14 rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
+      <div className="bg-slate-950 text-white p-10 lg:p-14 rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px] pointer-events-none"></div>
-        <div className="flex items-center gap-8 text-center md:text-left relative z-10">
+        <div className="flex items-center gap-8 relative z-10">
           <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/40 border-4 border-white/5">
             <Users size={36} />
           </div>
@@ -230,13 +223,13 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-10 bg-indigo-50/30 rounded-[3rem] border border-indigo-100 animate-in slide-in-from-top-4">
               <div>
                 <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <CalendarDays size={14} className="text-indigo-600" /> Contract Start (Work From)
+                  <CalendarDays size={14} className="text-indigo-600" /> Contract Start
                 </label>
                 <input type="date" name="workFromDate" className="w-full p-4 border rounded-2xl bg-white font-bold" value={newStaff.workFromDate} onChange={(e) => handleInputChange(e, false)} />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <CalendarDays size={14} className="text-rose-600" /> Contract End (Work To)
+                  <CalendarDays size={14} className="text-rose-600" /> Contract End
                 </label>
                 <input type="date" name="workToDate" className="w-full p-4 border rounded-2xl bg-white font-bold" value={newStaff.workToDate} onChange={(e) => handleInputChange(e, false)} />
               </div>
@@ -274,58 +267,67 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
             const power = member.powerRate || 75;
             const isRoster = member.type === 'Roster';
             return (
-              <div key={member.id} className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 p-10 group hover:shadow-2xl transition-all relative overflow-hidden flex flex-col">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 group-hover:bg-indigo-50 transition-colors rounded-bl-[4rem] -mr-8 -mt-8 flex items-center justify-center pt-8 pr-8">
-                   <span className="text-3xl font-black italic text-slate-200 group-hover:text-indigo-200">{member.initials}</span>
-                </div>
-                <div className="mb-8">
-                  <div className={`inline-block px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest mb-4 ${isRoster ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
-                    {member.type} Agent
-                  </div>
-                  <h5 className="text-xl font-black text-slate-900 leading-tight mb-1 truncate">{member.name}</h5>
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-4">{member.workPattern}</p>
-                  
-                  {isRoster && (member.workFromDate || member.workToDate) && (
-                    <div className="flex flex-col gap-1 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest">
-                        <span className="text-slate-400">TERM:</span>
-                        <span className="text-slate-900 italic font-black">
-                          {formatStaffDate(member.workFromDate)} — {formatStaffDate(member.workToDate)}
-                        </span>
+              <div key={member.id} className="bg-white rounded-[4rem] shadow-sm border border-slate-100 p-0 group hover:shadow-2xl transition-all relative overflow-hidden flex flex-col">
+                <div className={`h-24 px-8 flex items-center justify-between ${isRoster ? 'bg-amber-500/10' : 'bg-blue-600/5'}`}>
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm text-slate-950 font-black italic text-xl border border-slate-100">{member.initials}</div>
+                      <div>
+                        <h5 className="text-sm font-black text-slate-900 leading-tight truncate max-w-[140px]">{member.name}</h5>
+                        <span className={`text-[8px] font-black uppercase tracking-widest ${isRoster ? 'text-amber-600' : 'text-blue-600'}`}>{member.type} AGENT</span>
                       </div>
-                    </div>
-                  )}
+                   </div>
+                   <div className="relative w-12 h-12 flex items-center justify-center">
+                      <svg className="w-full h-full -rotate-90">
+                        <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" strokeWidth="4" className="text-slate-100" />
+                        <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeDasharray="125.6" strokeDashoffset={125.6 - (125.6 * power / 100)} className={isRoster ? 'text-amber-500' : 'text-blue-600'} />
+                      </svg>
+                      <span className="absolute text-[8px] font-black">{power}%</span>
+                   </div>
                 </div>
 
-                <div className="flex-1 space-y-6">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <Zap size={16} className="text-blue-500" />
-                      <span className="text-[9px] font-black uppercase text-slate-400">Power Rate</span>
+                <div className="p-8 flex-1 flex flex-col justify-between space-y-8">
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <Briefcase size={14} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">{member.workPattern}</span>
                     </div>
-                    <span className="text-sm font-black text-slate-900 italic">{power}%</span>
-                  </div>
-                  <div className="space-y-3">
-                    <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Qualified Disciplines</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {AVAILABLE_SKILLS.filter(s => String(skillRatings[s as any]).toLowerCase() === 'yes').map(s => (
-                        <span key={s} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-[8px] font-black uppercase border border-indigo-100">
-                          {s}
-                        </span>
-                      ))}
-                      {AVAILABLE_SKILLS.every(s => String(skillRatings[s as any]).toLowerCase() !== 'yes') && (
-                        <span className="text-[8px] font-bold text-slate-300 italic">No specializations</span>
-                      )}
+
+                    {isRoster && (
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+                        <div className="flex justify-between items-center text-[8px] font-black uppercase">
+                          <span className="text-slate-400">CONTRACT WINDOW</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] font-black italic">
+                          <span>{formatStaffDate(member.workFromDate)}</span>
+                          <span className="text-slate-300">→</span>
+                          <span>{formatStaffDate(member.workToDate)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Shield size={12} className="text-indigo-400" /> Qualifications</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {AVAILABLE_SKILLS.filter(s => String(skillRatings[s as any]).toLowerCase() === 'yes').map(s => (
+                          <span key={s} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[8px] font-black uppercase tracking-tight">
+                            {s}
+                          </span>
+                        ))}
+                        {AVAILABLE_SKILLS.every(s => String(skillRatings[s as any]).toLowerCase() !== 'yes') && (
+                          <span className="text-[8px] font-bold text-slate-300 italic">Core Duty Only</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex gap-2 mt-10 pt-8 border-t opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setEditingStaff(member)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-[9px] flex items-center justify-center gap-2 hover:bg-slate-950 hover:text-white transition-all">
-                    <Edit2 size={14} /> Refine
-                  </button>
-                  <button onClick={() => onDelete(member.id)} className="w-14 h-14 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all">
-                    <Trash2 size={18} />
-                  </button>
+
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setEditingStaff(member)} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[9px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all">
+                      <Edit2 size={14} /> REFINE
+                    </button>
+                    <button onClick={() => onDelete(member.id)} className="w-14 h-14 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );

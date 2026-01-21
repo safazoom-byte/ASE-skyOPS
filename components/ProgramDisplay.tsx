@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types.ts';
 import { DAYS_OF_WEEK } from '../constants.tsx';
@@ -17,7 +16,11 @@ import {
   Zap, 
   Scale, 
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  BarChart3,
+  Users,
+  // Fix: Add missing CalendarDays import
+  CalendarDays
 } from 'lucide-react';
 
 interface Props {
@@ -40,23 +43,40 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  /**
-   * Sequential Absence Counter
-   * Counts total days of absence (any leave type) for a specific staff member 
-   * from the start of the roster up to the given day index.
-   */
   const getCumulativeAbsenceCount = (staffId: string, dayIndex: number) => {
     let count = 0;
     for (let i = 0; i <= dayIndex; i++) {
       const prog = sortedPrograms.find(p => p.day === i);
       if (prog) {
-        // Any record in offDuty constitutes an absence day
         const isAbsent = prog.offDuty?.some(off => off.staffId === staffId);
         if (isAbsent) count++;
       }
     }
     return count;
   };
+
+  const dayStats = useMemo(() => {
+    return sortedPrograms.map(p => {
+      const dayFlights = flights.filter(f => f.date === p.dateString || (startDate && new Date(new Date(startDate + 'T00:00:00').getTime() + p.day * 86400000).toISOString().split('T')[0] === f.date));
+      const activeStaff = new Set(p.assignments?.map(a => a.staffId)).size;
+      const totalStaff = staff.length;
+      const coverageRatio = dayFlights.length > 0 ? activeStaff / dayFlights.length : 10;
+      
+      const assignments = p.assignments || [];
+      const shiftAssignments: Record<string, Assignment[]> = {};
+      assignments.forEach(a => { if (a.shiftId) shiftAssignments[a.shiftId] = [...(shiftAssignments[a.shiftId] || []), a]; });
+      
+      let hasShortage = false;
+      Object.keys(shiftAssignments).forEach(sid => {
+        const assigs = shiftAssignments[sid];
+        const hasSL = assigs.some(a => a.role === 'Shift Leader');
+        const hasLC = assigs.some(a => a.role === 'Load Control');
+        if (!hasSL || !hasLC) hasShortage = true;
+      });
+
+      return { day: p.day, flightCount: dayFlights.length, staffCount: activeStaff, ratio: coverageRatio, hasShortage };
+    });
+  }, [sortedPrograms, flights, staff, startDate]);
 
   const shadowAudit = useMemo(() => {
     const violations: { type: 'CRITICAL' | 'WARNING' | 'LEGAL' | 'ASSET' | 'EQUITY', message: string, day?: number }[] = [];
@@ -167,13 +187,45 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   return (
     <div className="space-y-16 pb-32">
       <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-10">
-        <div>
-          <h2 className="text-4xl font-black text-slate-900 uppercase italic tracking-tighter mb-3">Handling Program</h2>
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{startDate} — {endDate}</p>
+        <div className="flex items-center gap-8">
+           <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl"><CalendarDays size={32} /></div>
+           <div>
+             <h2 className="text-4xl font-black text-slate-900 uppercase italic tracking-tighter mb-2">Handling Program</h2>
+             <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{startDate} — {endDate}</p>
+           </div>
         </div>
         <button onClick={exportPDF} className="px-10 py-6 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 hover:bg-blue-600 transition-all shadow-xl shadow-slate-950/20">
           <FileText size={20} /> AUTHORIZE PDF EXPORT
         </button>
+      </div>
+
+      <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8 flex items-center gap-3">
+          <BarChart3 size={16} className="text-blue-500" /> Station Load Heatmap
+        </h4>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          {dayStats.map((stat) => (
+            <div key={stat.day} className={`p-5 rounded-[2rem] border transition-all ${stat.hasShortage ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+              <span className="block text-[8px] font-black text-slate-400 uppercase mb-2">Day {stat.day + 1}</span>
+              <div className="flex items-end gap-1 mb-3">
+                <div className="flex-1 bg-slate-200 rounded-full h-12 relative overflow-hidden">
+                  <div 
+                    className={`absolute bottom-0 left-0 w-full transition-all duration-1000 ${stat.hasShortage ? 'bg-rose-500' : 'bg-blue-600'}`} 
+                    style={{ height: `${Math.min(100, (stat.staffCount / (stat.flightCount || 1)) * 50)}%` }}
+                  />
+                </div>
+                <div className="text-right">
+                  <span className="block text-lg font-black italic text-slate-900 leading-none">{stat.staffCount}</span>
+                  <span className="block text-[7px] font-black text-slate-400 uppercase">HC</span>
+                </div>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[7px] font-black uppercase text-slate-500">{stat.flightCount} Flights</span>
+                {stat.hasShortage && <AlertCircle size={12} className="text-rose-500 animate-pulse" />}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -224,6 +276,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                   <div>
                     <h3 className="text-3xl font-black uppercase italic tracking-tight">{getDayName(program.day)}</h3>
                     <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{getDayDate(program.day)}</p>
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <div className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-center">
+                    <span className="block text-[8px] font-black text-slate-500 uppercase mb-1">Total HC</span>
+                    <span className="text-xl font-black italic text-white">{new Set(program.assignments?.map(a => a.staffId)).size}</span>
                   </div>
                 </div>
               </div>

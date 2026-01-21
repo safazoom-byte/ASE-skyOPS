@@ -1,21 +1,20 @@
-
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import process from 'node:process';
 
 export default defineConfig(({ mode }) => {
-  // Load environment variables from the system (Vercel) or .env file
   const env = loadEnv(mode, process.cwd(), '');
   
-  // Vercel provides the API_KEY in the environment.
-  // We prioritize the system environment variable for security.
   const apiKey = env.API_KEY || env.VITE_API_KEY || '';
+  const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL || '';
+  const supabaseAnonKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
 
   return {
     plugins: [react()],
     define: {
-      // This makes process.env.API_KEY available in your code
-      'process.env.API_KEY': JSON.stringify(apiKey)
+      'process.env.API_KEY': JSON.stringify(apiKey),
+      'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey)
     },
     build: {
       target: 'esnext',
