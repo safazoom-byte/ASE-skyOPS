@@ -236,27 +236,28 @@ export const generateAIProgram = async (
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program with ABSOLUTE compliance.
   
   1. MASTER TRUTH - THE ABSENCE BOX (Personnel Requests):
-  - You MUST scan the 'Personnel Requests (Absence Box)' text carefully for overrides.
-  - If a staff member (Name or Initials) is mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'LIEU', 'ROSTER' for a date, they MUST be added to the 'offDuty' array for that specific day.
-  - CRITICAL: DO NOT list these staff as 'NIL' (Available). They are on leave and cannot be present at the station.
+  - Any staff mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'ROSTER' for a date MUST be added to 'offDuty' and excluded from all shifts.
   
-  2. ROSTER STAFF CONTRACT PROTECTION:
-  - 'Roster' staff have 'workFromDate' (Start) and 'workToDate' (End).
-  - If a day is BEFORE their 'workFromDate' or AFTER their 'workToDate', they ARE NOT AT STATION.
-  - Move them to 'offDuty' with status 'ROSTER LEAVE' for those days.
-  - DO NOT list them as 'NIL' (Available) if they are outside their contract dates.
+  2. SPECIALIST BUDGET CEILING (NO OVER-ALLOCATION):
+  - 'roleCounts' in a Shift is a HARD MAXIMUM. 
+  - If a shift defines 'Shift Leader: 1', do NOT assign more than 1 Shift Leader. 
+  - Extra specialists MUST be assigned as 'Duty' or left off-duty (NIL).
   
-  3. LOCAL STAFF REST (5/2 RULE):
-  - For 'Local' category staff, you MUST ensure they get 2 days off for every 5 days of work in any 7-day period.
-  - If a Local staff member has worked 5 consecutive days, force 'DAY OFF' in 'offDuty' for the next 2 days.
+  3. MANDATORY SAFETY MINIMUMS (THE FLOOR):
+  - EVERY shift handling a flight MUST have at least 1 Shift Leader (SL) and 1 Load Control (LC) assigned.
+  - Failure to provide this coverage is an UNSAFE operation.
   
-  4. AVAILABLE (NIL) DEFINITION:
-  - 'NIL' (Available) is ONLY for staff who:
-    a) Are NOT in the Absence Box (Off/Leave).
-    b) Are WITHIN their contract dates (if Roster).
-    c) Were NOT needed for an assignment because 'maxStaff' capacity was reached.
+  4. FLEXIBLE LOCAL 5/2 RULE:
+  - 'Local' staff MUST get 2 days off for every 5 days worked. 
+  - THESE 2 DAYS DO NOT NEED TO BE SEQUENTIAL. They can be split (e.g., Monday and Thursday).
+  - Count work days in the rolling 7-day window (Previous Duty Log + current plan).
   
-  CRITICAL: Every single person in the 'staff' database MUST appear in every single day of the program, either in 'assignments' OR in 'offDuty'. No exceptions.`;
+  5. ROSTER STAFF CONTRACTS:
+  - Outside 'workFromDate'/'workToDate', staff are 'ROSTER LEAVE' in 'offDuty'.
+  
+  6. FULL ACCOUNTABILITY:
+  - Every person in the registry MUST appear in 'assignments' OR 'offDuty' for every single day.
+  - Use 'NIL' for available staff who are not required for duty.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -329,7 +330,7 @@ export const generateAIProgram = async (
           },
           required: ['programs']
         },
-        thinkingConfig: { thinkingBudget: 16384 }
+        thinkingConfig: { thinkingBudget: 24000 }
       }
     });
     
@@ -346,8 +347,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Use 'Duty' as fallback. Specialists: SL, OPS, Ramp, LC, LF. 
-  Ensure 'NIL' is only for present staff, and 'Leave/Off' is for those away.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce strict role counts and safety covers.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
