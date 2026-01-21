@@ -236,28 +236,33 @@ export const generateAIProgram = async (
   const systemInstruction = `Aviation Roster Engine. Generate a daily station program with ABSOLUTE compliance.
   
   1. MASTER TRUTH - THE ABSENCE BOX (Personnel Requests):
-  - Any staff mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'ROSTER' for a date MUST be added to 'offDuty' and excluded from all shifts.
+  - Any staff mentioned as 'OFF', 'LEAVE', 'SICK', 'ANNUAL', 'ROSTER' for a date MUST be moved to 'offDuty' immediately and excluded from all availability for that day.
   
-  2. SPECIALIST BUDGET CEILING (NO OVER-ALLOCATION):
-  - 'roleCounts' in a Shift is a HARD MAXIMUM. 
-  - If a shift defines 'Shift Leader: 1', do NOT assign more than 1 Shift Leader. 
-  - Extra specialists MUST be assigned as 'Duty' or left off-duty (NIL).
+  2. NO IDLE STAFF (FILL MINSTAFF OR FAIL):
+  - CRITICAL: You are PROHIBITED from leaving staff as 'NIL' (Available) if any shift on that day is below its 'minStaff' headcount.
+  - You MUST exhaust the available pool to ensure all shifts reach 'minStaff'.
+  - Aim for 'maxStaff' for all shifts if the pool allows.
   
-  3. MANDATORY SAFETY MINIMUMS (THE FLOOR):
-  - EVERY shift handling a flight MUST have at least 1 Shift Leader (SL) and 1 Load Control (LC) assigned.
-  - Failure to provide this coverage is an UNSAFE operation.
+  3. MANDATORY SAFETY MINIMUMS (FOR FLIGHT SHIFTS):
+  - Every shift linked to a flight MUST be assigned at least 1 Shift Leader (SL) and 1 Load Control (LC) as the very first step.
+  - You are FORBIDDEN from returning a shift that has 0 Shift Leaders or 0 Load Controllers if qualified people are available in the registry.
   
-  4. FLEXIBLE LOCAL 5/2 RULE:
+  4. FULL ROLE DIVERSITY:
+  - After safety minimums (SL/LC), fulfill the rest of the 'roleCounts' (Ramp, Operations, Lost and Found).
+  - If a shift needs 5 people but you only have 3 specialists, the remaining 2 MUST be filled by available staff assigned with the role 'Duty'. 
+  - Do NOT leave slots empty just because a specialist is missing; use generic 'Duty' staff to meet 'minStaff'.
+  
+  5. FLEXIBLE LOCAL 5/2 RULE:
   - 'Local' staff MUST get 2 days off for every 5 days worked. 
-  - THESE 2 DAYS DO NOT NEED TO BE SEQUENTIAL. They can be split (e.g., Monday and Thursday).
-  - Count work days in the rolling 7-day window (Previous Duty Log + current plan).
+  - THESE 2 DAYS DO NOT NEED TO BE SEQUENTIAL. They can be split (e.g., Tuesday and Saturday).
+  - Prioritize these legally required days off.
   
-  5. ROSTER STAFF CONTRACTS:
-  - Outside 'workFromDate'/'workToDate', staff are 'ROSTER LEAVE' in 'offDuty'.
+  6. ROSTER STAFF CONTRACTS:
+  - Staff are 'ROSTER LEAVE' if the date is outside their 'workFromDate'/'workToDate'.
   
-  6. FULL ACCOUNTABILITY:
-  - Every person in the registry MUST appear in 'assignments' OR 'offDuty' for every single day.
-  - Use 'NIL' for available staff who are not required for duty.`;
+  7. FULL ACCOUNTABILITY:
+  - Every person in the registry MUST appear in 'assignments' OR 'offDuty' for every day. 
+  - Use 'NIL' only for staff who are excess to operational needs after ALL shifts have reached their maximum capacity.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -347,7 +352,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Enforce strict role counts and safety covers.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. MANDATORY: Fill shifts to at least 'minStaff' before marking staff as 'NIL'. Ensure 1 SL and 1 LC per flight shift. 5/2 rule for Local staff is flexible (non-sequential).` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
