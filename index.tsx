@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -94,12 +95,10 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showSuccessChecklist, setShowSuccessChecklist] = useState(false);
-  const [showFailureModal, setShowFailureModal] = useState(false);
+  const [showWarningModal, setShowWarningModal] = useState(false);
   const [complianceLog, setComplianceLog] = useState<string[]>([]);
   const [pendingVerification, setPendingVerification] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] } | null>(null);
   const [proposedPrograms, setProposedPrograms] = useState<DailyProgram[] | null>(null);
-  const [shortageReport, setShortageReport] = useState<ShortageWarning[]>([]);
-  const [showWaiverDialog, setShowWaiverDialog] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
 
@@ -128,81 +127,52 @@ const App: React.FC = () => {
 
   const commitVerifiedData = () => {
     if (!pendingVerification) return;
-    
-    // Helper to ensure an ID exists
-    const ensureId = (obj: any) => ({
-      ...obj,
-      id: obj.id || Math.random().toString(36).substr(2, 9)
-    });
-
     setStaff(prev => {
       const p = prev || [];
       const existingIds = new Set(p.map(s => s.id));
-      const existingInitials = new Set(p.map(s => (s.initials || "").toUpperCase().trim()));
-      
-      const newStaff = (pendingVerification.staff || [])
-        .map(ensureId)
-        .filter(s => !existingIds.has(s.id) && !existingInitials.has((s.initials || "").toUpperCase().trim()));
-        
+      const newStaff = (pendingVerification.staff || []).filter(s => !existingIds.has(s.id));
       return [...p, ...newStaff];
     });
-
     setFlights(prev => {
       const p = prev || [];
-      const existingKeys = new Set(p.map(f => `${f.flightNumber.toUpperCase().trim()}-${f.date}`));
-      
-      const newFlights = (pendingVerification.flights || [])
-        .map(ensureId)
-        .filter(f => !existingKeys.has(`${f.flightNumber.toUpperCase().trim()}-${f.date}`));
-        
+      const existingKeys = new Set(p.map(f => `${f.flightNumber}-${f.date}`));
+      const newFlights = (pendingVerification.flights || []).filter(f => !existingKeys.has(`${f.flightNumber}-${f.date}`));
       return [...p, ...newFlights];
     });
-
     setShifts(prev => {
       const p = prev || [];
-      const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime.trim()}`));
-      
-      const newShifts = (pendingVerification.shifts || [])
-        .map(ensureId)
-        .filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime.trim()}`));
-        
+      const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime}`));
+      const newShifts = (pendingVerification.shifts || []).filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime}`));
       return [...p, ...newShifts];
     });
-
     setPendingVerification(null);
     setShowSuccessChecklist(true);
   };
 
   const confirmGenerateProgram = async () => {
     if (activeFlightsInRange.length === 0) { setError("No flights in window."); setShowConfirmDialog(false); return; }
-    setShowConfirmDialog(false); setIsGenerating(true); setComplianceLog([]); setShowFailureModal(false);
+    setShowConfirmDialog(false); setIsGenerating(true); setComplianceLog([]); setShowWarningModal(false);
     
     try {
       const inputData: ProgramData = { flights: activeFlightsInRange, staff: staff || [], shifts: activeShiftsInRange, programs: [] };
       setGenerationStep(1); 
-      let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, customRules: '', minRestHours, startDate });
+      let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, minRestHours, startDate });
       
-      if (!result.isCompliant) { 
-        setComplianceLog(result.validationLog || ["Phase 1: Compliance Breach"]); 
-        setShowFailureModal(true); return; 
+      if (result.hasBlockers) { 
+        setComplianceLog(result.validationLog || ["Structural Failure"]); 
+        setError("Structural logic failure. Check Registry."); return; 
       }
 
       setGenerationStep(2); 
       result = await refineAIProgram(result, inputData, 2, { minRestHours, startDate, numDays });
-      if (!result.isCompliant) { 
-        setComplianceLog(result.validationLog || ["Phase 2: Logic Deviation"]); 
-        setShowFailureModal(true); return; 
-      }
-
+      
       setGenerationStep(3); 
       result = await refineAIProgram(result, inputData, 3, { minRestHours, startDate, numDays });
-      if (!result.isCompliant) { 
-        setComplianceLog(result.validationLog || ["Phase 3: Equity Failure"]); 
-        setShowFailureModal(true); return; 
-      }
 
-      if (result.shortageReport && result.shortageReport.length > 0) {
-        setProposedPrograms(result.programs); setShortageReport(result.shortageReport); setShowWaiverDialog(true);
+      setProposedPrograms(result.programs);
+      if (!result.isCompliant) {
+        setComplianceLog(result.validationLog || ["5/2 Law Warnings"]);
+        setShowWarningModal(true);
       } else {
         setPrograms(result.programs || []); if (result.recommendations) setRecommendations(result.recommendations);
         setActiveTab('program'); setShowSuccessChecklist(true);
@@ -212,6 +182,15 @@ const App: React.FC = () => {
       setError(err.message || "An unexpected error occurred during generation."); 
     } 
     finally { setIsGenerating(false); setGenerationStep(0); }
+  };
+
+  const authorizeWithWaiver = () => {
+    if (proposedPrograms) {
+      setPrograms(proposedPrograms);
+      setShowWarningModal(false);
+      setActiveTab('program');
+      setShowSuccessChecklist(true);
+    }
   };
 
   const navigationTabs = [
@@ -240,11 +219,11 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[3000] bg-slate-950/98 flex items-center justify-center p-8 animate-in fade-in">
            <div className="max-w-xl w-full text-center space-y-12">
               <div className="w-32 h-32 bg-blue-600/20 rounded-[2.5rem] flex items-center justify-center mx-auto animate-pulse"><Cpu size={48} className="text-blue-500" /></div>
-              <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">Triple-Pass Logic Lockdown</h3>
+              <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">AI Roster Generation</h3>
               <div className="grid grid-cols-3 gap-4 relative">
                  {[1, 2, 3].map(s => (<div key={s} className={`w-14 h-14 rounded-2xl flex items-center justify-center border mx-auto transition-all ${generationStep >= s ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-900 text-slate-700'}`}>{generationStep > s ? <Check /> : s}</div>))}
               </div>
-              <p className="text-blue-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Enforcing 100% 5/2 Law compliance</p>
+              <p className="text-blue-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Building best-fit handling sequence</p>
            </div>
         </div>
       )}
@@ -320,18 +299,18 @@ const App: React.FC = () => {
         {activeTab === 'program' && <ProgramDisplay programs={programs || []} flights={flights || []} staff={staff || []} shifts={shifts || []} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} />}
       </main>
 
-      {showFailureModal && (
+      {showWarningModal && (
         <div className="fixed inset-0 z-[2500] flex items-center justify-center p-6 bg-slate-950/98 animate-in fade-in">
            <div className="bg-white rounded-[4rem] max-w-2xl w-full p-12 text-center">
-              <AlertTriangle size={60} className="mx-auto text-rose-600 mb-6" />
-              <h3 className="text-3xl font-black uppercase italic text-rose-600">Compliance Lockdown</h3>
-              <p className="text-slate-500 text-xs font-bold uppercase mt-2 mb-8 italic">Operation Abortion: Logical laws were breached</p>
-              <div className="p-6 bg-rose-50 border border-rose-100 rounded-[2.5rem] mb-10 max-h-[300px] overflow-auto text-left space-y-3">
-                 {complianceLog.map((log, i) => (<p key={i} className="text-[10px] font-bold text-rose-900 leading-tight border-b border-rose-100 pb-2 uppercase">&bull; {log}</p>))}
+              <AlertTriangle size={60} className="mx-auto text-amber-600 mb-6" />
+              <h3 className="text-3xl font-black uppercase italic text-amber-600">Policy Warnings</h3>
+              <p className="text-slate-500 text-xs font-bold uppercase mt-2 mb-8 italic">The AI detected staff shortages requiring 5/2 waivers.</p>
+              <div className="p-6 bg-amber-50 border border-amber-100 rounded-[2.5rem] mb-10 max-h-[300px] overflow-auto text-left space-y-3">
+                 {complianceLog.map((log, i) => (<p key={i} className="text-[10px] font-bold text-amber-900 leading-tight border-b border-amber-100 pb-2 uppercase">&bull; {log}</p>))}
               </div>
-              <div className="flex gap-4">
-                <button onClick={() => setShowFailureModal(false)} className="flex-1 py-6 font-black uppercase text-slate-400">Abort</button>
-                <button onClick={confirmGenerateProgram} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic flex items-center justify-center gap-4"><RefreshCw size={18}/> RE-ENGAGE REPAIR LOOP</button>
+              <div className="flex flex-col gap-4">
+                <button onClick={authorizeWithWaiver} className="w-full py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic flex items-center justify-center gap-4">AUTHORIZE PROGRAM WITH WAIVERS <ArrowRight size={18}/></button>
+                <button onClick={() => setShowWarningModal(false)} className="py-2 font-black uppercase text-slate-400 text-[10px] tracking-widest">Discard and Re-Registry</button>
               </div>
            </div>
         </div>
@@ -342,7 +321,7 @@ const App: React.FC = () => {
            <div className="bg-white rounded-[4rem] p-12 max-w-lg w-full text-center">
               <Check size={60} className="mx-auto text-emerald-500 mb-6" />
               <h3 className="text-3xl font-black italic uppercase">Roster Validated</h3>
-              <p className="text-slate-400 text-[10px] font-black uppercase mt-2">All constraints strictly satisfied</p>
+              <p className="text-slate-400 text-[10px] font-black uppercase mt-2">Operational Command Authorized</p>
               <button onClick={() => setShowSuccessChecklist(false)} className="w-full mt-10 py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.3em] flex items-center justify-center gap-4">DEPLOY PROGRAM <ArrowRight size={18}/></button>
            </div>
         </div>
@@ -372,7 +351,7 @@ const App: React.FC = () => {
            <div className="bg-white rounded-[4rem] p-12 text-center max-w-lg w-full">
               <Target size={60} className="mx-auto text-blue-600 mb-8" />
               <h3 className="text-3xl font-black italic uppercase">Engage Logic Engine?</h3>
-              <p className="text-slate-400 text-xs font-medium mt-4">Initiating hard-lockdown compliance build for {activeFlightsInRange.length} flights.</p>
+              <p className="text-slate-400 text-xs font-medium mt-4">Initiating roster build for {activeFlightsInRange.length} flights.</p>
               <div className="flex gap-4 mt-10"><button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-6 text-slate-400 font-black">Cancel</button><button onClick={confirmGenerateProgram} className="flex-[2] py-6 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic">ENGAGE</button></div>
            </div>
         </div>
