@@ -252,23 +252,18 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       }
     });
 
-    // AUTO-LINKAGE ENGINE: Automatically link flights to shifts on the same date/time window
+    // AUTO-LINKAGE ENGINE
     shifts.forEach(s => {
       const shiftStart = timeToMinutes(s.pickupTime);
       const shiftEnd = timeToMinutes(s.endTime);
       
       const matchingFlights = flights.filter(f => {
-        // Must be on the same date
         if (f.date !== s.pickupDate) return false;
-        
         const flightTime = timeToMinutes(f.sta || f.std);
         if (flightTime === -1) return false;
-        
-        // Flight is linked if it falls within the shift window (with 15 min buffer)
         const inWindow = shiftEnd > shiftStart 
           ? (flightTime >= shiftStart - 15 && flightTime <= shiftEnd + 15)
-          : (flightTime >= shiftStart - 15 || flightTime <= shiftEnd + 15); // Overnight wrap logic
-        
+          : (flightTime >= shiftStart - 15 || flightTime <= shiftEnd + 15);
         return inWindow;
       });
 
@@ -283,14 +278,61 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     setPendingMapping(null);
   };
 
+  const normalizeExtractedData = (raw: any) => {
+    // Resilient normalization to handle various AI output shapes
+    const data = raw?.data || raw || {};
+    const flights = (data.flights || data.flight_list || data.flightData || []).map((f: any) => ({
+      id: f.id || Math.random().toString(36).substr(2, 9),
+      flightNumber: (f.flightNumber || f.flight_no || f.flight || "").toUpperCase().trim(),
+      from: (f.from || f.origin || f.src || "").toUpperCase().trim(),
+      to: (f.to || f.destination || f.dest || "").toUpperCase().trim(),
+      sta: parseImportTime(f.sta || f.arrival_time),
+      std: parseImportTime(f.std || f.departure_time),
+      date: parseImportDate(f.date || f.flight_date),
+      type: 'Turnaround',
+      day: 0
+    })).filter((f: any) => f.flightNumber);
+
+    const staff = (data.staff || data.personnel || data.staff_list || []).map((s: any) => ({
+      id: s.id || Math.random().toString(36).substr(2, 9),
+      name: s.name || s.fullName || "",
+      initials: (s.initials || s.shortName || "").toUpperCase().trim(),
+      type: (s.type || s.category || "Local"),
+      powerRate: parsePowerRate(s.powerRate || s.efficiency || 75),
+      workPattern: s.type === 'Roster' ? 'Continuous (Roster)' : '5 Days On / 2 Off',
+      maxShiftsPerWeek: 5,
+      skillRatings: s.skillRatings || {},
+      workFromDate: parseImportDate(s.workFromDate),
+      workToDate: parseImportDate(s.workToDate)
+    })).filter((s: any) => s.name);
+
+    const shifts = (data.shifts || data.duty_slots || data.schedule || []).map((sh: any) => ({
+      id: sh.id || Math.random().toString(36).substr(2, 9),
+      pickupDate: parseImportDate(sh.pickupDate || sh.date),
+      pickupTime: parseImportTime(sh.pickupTime || sh.start),
+      endDate: parseImportDate(sh.endDate || sh.pickupDate || sh.date),
+      endTime: parseImportTime(sh.endTime || sh.end),
+      minStaff: sh.minStaff || 2,
+      maxStaff: sh.maxStaff || 8,
+      day: 0,
+      roleCounts: sh.roleCounts || {},
+      flightIds: sh.flightIds || []
+    }));
+
+    return { flights, staff, shifts, programs: [] };
+  };
+
   const processImport = async (textData?: string, mediaParts: ExtractionMedia[] = [], target: PasteTarget = 'all') => {
     setIsScanning(true);
     setScanError(null);
     try {
-      const data = await extractDataFromContent({ textData, media: mediaParts, startDate, targetType: target });
-      if (data) {
-        setExtractedData(data);
-        setDetectedRowCount((data.flights?.length || 0) + (data.staff?.length || 0) + (data.shifts?.length || 0));
+      const raw = await extractDataFromContent({ textData, media: mediaParts, startDate, targetType: target });
+      if (raw) {
+        const normalized = normalizeExtractedData(raw);
+        setExtractedData(normalized);
+        setDetectedRowCount(normalized.flights.length + normalized.staff.length + normalized.shifts.length);
+      } else {
+        throw new Error("AI returned empty or invalid response.");
       }
     } catch (error: any) {
       setScanError({ title: "Extraction Error", message: error.message });

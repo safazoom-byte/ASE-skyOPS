@@ -78,44 +78,108 @@ const safeParseJson = (text: string | undefined): any => {
 
 const auditRoster = (result: any, data: ProgramData, numDays: number): ConstraintViolation[] => {
   const violations: ConstraintViolation[] = [];
-  const programs = result?.programs;
   
-  if (!programs || !Array.isArray(programs)) {
-    return [{ type: 'DATA_MALFORMED', message: 'CRITICAL: Roster structure is invalid or empty.' }];
+  let programs = result?.programs;
+  if (!programs && Array.isArray(result)) {
+    programs = result;
+  }
+  
+  if (!programs || !Array.isArray(programs) || programs.length === 0) {
+    return [{ type: 'DATA_MALFORMED', message: 'CRITICAL: Roster structure is invalid or AI returned an empty sequence.' }];
   }
 
   const safeStaff = data.staff || [];
   const staffWorkCounts = new Map<string, number>();
   
-  // Track 5/2 Law
   safeStaff.filter(s => s.type === 'Local').forEach(s => staffWorkCounts.set(s.id, 0));
 
-  programs.forEach(prog => {
+  programs.forEach((prog: any) => {
     const assignments = prog.assignments || [];
-    
-    assignments.forEach(a => {
+    const progDate = prog.dateString || data.shifts.find(s => s.day === prog.day)?.pickupDate;
+
+    assignments.forEach((a: any) => {
       if (staffWorkCounts.has(a.staffId)) {
         staffWorkCounts.set(a.staffId, (staffWorkCounts.get(a.staffId) || 0) + 1);
       }
     });
 
-    // Cross-reference with shifts to check Min Staff
-    data.shifts.filter(s => s.pickupDate === prog.dateString).forEach(sh => {
-      const staffOnThisShift = assignments.filter(a => a.shiftId === sh.id);
-      if (staffOnThisShift.length < sh.minStaff) {
-        violations.push({ type: 'MIN_STAFF_SHORTAGE', message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})` });
-      }
-    });
+    if (progDate) {
+      data.shifts.filter(s => s.pickupDate === progDate).forEach(sh => {
+        const staffOnThisShift = assignments.filter((a: any) => a.shiftId === sh.id);
+        if (staffOnThisShift.length < sh.minStaff) {
+          violations.push({ 
+            type: 'MIN_STAFF_SHORTAGE', 
+            message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})` 
+          });
+        }
+      });
+    }
   });
 
   staffWorkCounts.forEach((count, id) => {
     if (count > 5) {
       const s = safeStaff.find(st => st.id === id);
-      violations.push({ type: '5/2_VIOLATION', message: `Agent ${s?.initials || id} violates 5/2 Law: ${count} days assigned.` });
+      violations.push({ 
+        type: '5/2_VIOLATION', 
+        message: `Agent ${s?.initials || id} violates 5/2 Law: ${count} days assigned.` 
+      });
     }
   });
 
   return violations;
+};
+
+const rosterSchema = {
+  type: Type.OBJECT,
+  properties: {
+    programs: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          day: { type: Type.NUMBER },
+          dateString: { type: Type.STRING },
+          assignments: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                staffId: { type: Type.STRING },
+                flightId: { type: Type.STRING },
+                role: { type: Type.STRING },
+                shiftId: { type: Type.STRING }
+              },
+              required: ["id", "staffId", "flightId", "role"]
+            }
+          },
+          offDuty: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                staffId: { type: Type.STRING },
+                type: { type: Type.STRING }
+              },
+              required: ["staffId", "type"]
+            }
+          }
+        },
+        required: ["day", "assignments"]
+      }
+    },
+    recommendations: {
+      type: Type.OBJECT,
+      properties: {
+        idealStaffCount: { type: Type.NUMBER },
+        currentStaffCount: { type: Type.NUMBER },
+        skillGaps: { type: Type.ARRAY, items: { type: Type.STRING } },
+        hireAdvice: { type: Type.STRING },
+        healthScore: { type: Type.NUMBER }
+      }
+    }
+  },
+  required: ["programs"]
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string, customRules?: string }): Promise<BuildResult> => {
@@ -138,18 +202,15 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - Flights: ${JSON.stringify(data.flights)}
     - Staff: ${JSON.stringify(data.staff)}
     - Shifts: ${JSON.stringify(data.shifts)}
-    
-    OUTPUT FORMAT: JSON ONLY
-    {
-      "programs": [DailyProgram],
-      "recommendations": ResourceRecommendation
-    }
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      responseSchema: rosterSchema
+    }
   });
 
   const parsed = safeParseJson(response.text);
@@ -170,18 +231,21 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
   const prompt = `
     REFINEMENT PASS ${pass}: 
     Current Roster has ${previous.validationLog?.length || 0} violations.
-    Logic: ${pass === 2 ? 'Strict Logic & Rest Alignment' : 'Equity & Continuity Balancing'}
+    Target: 100% compliance with 5/2 Law and operational minimums.
     
-    Improve this roster: ${JSON.stringify(previous.programs)}
-    Target Data: ${JSON.stringify({ staff: data.staff, flights: data.flights, shifts: data.shifts })}
+    Logic Focus: ${pass === 2 ? 'Strict Logic & Rest Alignment' : 'Equity & Continuity Balancing'}
     
-    Response must be JSON ONLY.
+    Current Plan: ${JSON.stringify(previous.programs)}
+    Available Resources: ${JSON.stringify({ staff: data.staff, flights: data.flights, shifts: data.shifts })}
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      responseSchema: rosterSchema
+    }
   });
 
   const parsed = safeParseJson(response.text);
@@ -199,7 +263,28 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
-  const parts: any[] = [{ text: `Extract station handling data (${options.targetType}) into JSON. Use ${options.startDate} as base date if needed.` }];
+  const prompt = `
+    Extract station handling data into a valid JSON object.
+    Context Date: ${options.startDate || 'Current'}
+    Target Data Category: ${options.targetType}
+
+    MANDATORY JSON STRUCTURE:
+    {
+      "flights": [
+        { "flightNumber": "string", "from": "string", "to": "string", "sta": "HH:mm", "std": "HH:mm", "date": "YYYY-MM-DD" }
+      ],
+      "staff": [
+        { "name": "string", "initials": "string", "type": "Local|Roster", "powerRate": number, "skillRatings": { "Skill": "Yes|No" } }
+      ],
+      "shifts": [
+        { "pickupDate": "YYYY-MM-DD", "pickupTime": "HH:mm", "endDate": "YYYY-MM-DD", "endTime": "HH:mm", "minStaff": number, "maxStaff": number }
+      ]
+    }
+    
+    Use the provided content below for extraction. If a category has no data, return an empty array for that key.
+  `;
+
+  const parts: any[] = [{ text: prompt }];
   
   if (options.textData) parts.push({ text: options.textData });
   if (options.media) {
@@ -219,15 +304,27 @@ export const identifyMapping = async (rows: any[][], target: string): Promise<an
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const prompt = `
-    Given these sample rows from a sheet, map the columns to these fields: ${target}.
-    Rows: ${JSON.stringify(rows.slice(0, 5))}
-    Return JSON: { "columnMap": { "field": index } }
+    Identify which spreadsheet columns correspond to these fields: ${target}.
+    Sample Rows: ${JSON.stringify(rows.slice(0, 5))}
+    Return a mapping object: { "columnMap": { "field": columnIndex } }
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
-    config: { responseMimeType: 'application/json' }
+    config: { 
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          columnMap: {
+            type: Type.OBJECT,
+            additionalProperties: { type: Type.NUMBER }
+          }
+        },
+        required: ["columnMap"]
+      }
+    }
   });
 
   return safeParseJson(response.text);
@@ -237,8 +334,8 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const parts: any[] = [
-    { text: `INSTRUCTION: ${instruction}` },
-    { text: `CURRENT DATA: ${JSON.stringify(data)}` }
+    { text: `COMMAND: Modify roster based on instruction: "${instruction}"` },
+    { text: `CURRENT STATE: ${JSON.stringify(data)}` }
   ];
 
   if (media.length > 0) {
@@ -250,7 +347,15 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      systemInstruction: "You are an expert aviation scheduler. Modify the existing roster based on user instructions. Ensure compliance with 5/2 Law and Rest Hours. Return the updated programs list and an explanation of changes."
+      systemInstruction: "You are an expert aviation scheduler. Adjust the roster based on natural language commands while preserving legality (5/2 Law). Return updated programs list and a brief explanation.",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          programs: { type: Type.ARRAY, items: { type: Type.OBJECT } },
+          explanation: { type: Type.STRING }
+        },
+        required: ["programs", "explanation"]
+      }
     }
   });
 

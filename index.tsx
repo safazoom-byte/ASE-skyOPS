@@ -128,24 +128,47 @@ const App: React.FC = () => {
 
   const commitVerifiedData = () => {
     if (!pendingVerification) return;
+    
+    // Helper to ensure an ID exists
+    const ensureId = (obj: any) => ({
+      ...obj,
+      id: obj.id || Math.random().toString(36).substr(2, 9)
+    });
+
     setStaff(prev => {
       const p = prev || [];
       const existingIds = new Set(p.map(s => s.id));
-      const newStaff = (pendingVerification.staff || []).filter(s => !existingIds.has(s.id));
+      const existingInitials = new Set(p.map(s => (s.initials || "").toUpperCase().trim()));
+      
+      const newStaff = (pendingVerification.staff || [])
+        .map(ensureId)
+        .filter(s => !existingIds.has(s.id) && !existingInitials.has((s.initials || "").toUpperCase().trim()));
+        
       return [...p, ...newStaff];
     });
+
     setFlights(prev => {
       const p = prev || [];
-      const existingKeys = new Set(p.map(f => `${f.flightNumber}-${f.date}`));
-      const newFlights = (pendingVerification.flights || []).filter(f => !existingKeys.has(`${f.flightNumber}-${f.date}`));
+      const existingKeys = new Set(p.map(f => `${f.flightNumber.toUpperCase().trim()}-${f.date}`));
+      
+      const newFlights = (pendingVerification.flights || [])
+        .map(ensureId)
+        .filter(f => !existingKeys.has(`${f.flightNumber.toUpperCase().trim()}-${f.date}`));
+        
       return [...p, ...newFlights];
     });
+
     setShifts(prev => {
       const p = prev || [];
-      const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime}`));
-      const newShifts = (pendingVerification.shifts || []).filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime}`));
+      const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime.trim()}`));
+      
+      const newShifts = (pendingVerification.shifts || [])
+        .map(ensureId)
+        .filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime.trim()}`));
+        
       return [...p, ...newShifts];
     });
+
     setPendingVerification(null);
     setShowSuccessChecklist(true);
   };
