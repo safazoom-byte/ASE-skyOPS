@@ -70,162 +70,6 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-export const identifyMapping = async (sampleRows: any[][], targetType: 'flights' | 'staff' | 'shifts' | 'all'): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Data Expert. Identify 0-based column indices for station data mapping. 
-  Recognize 'Lost and Found' specifically. Also map 'minStaff' and 'maxStaff' for shifts.
-  Identify individual skill columns like 'Ramp', 'OPS', 'SL', 'LC', 'LF'.
-  For powerRate, look for columns containing 'rate', 'power', or '%'.
-  For Roster dates, map 'workFromDate' (Contract Start) and 'workToDate' (Contract End).`;
-  
-  const prompt = `Target: ${targetType}\nData Sample: ${JSON.stringify(sampleRows.slice(0, 5))}`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: { 
-        systemInstruction, 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            detectedTarget: { type: Type.STRING },
-            columnMap: { 
-              type: Type.OBJECT,
-              properties: {
-                flightNumber: { type: Type.INTEGER },
-                from: { type: Type.INTEGER },
-                to: { type: Type.INTEGER },
-                sta: { type: Type.INTEGER },
-                std: { type: Type.INTEGER },
-                date: { type: Type.INTEGER },
-                name: { type: Type.INTEGER },
-                initials: { type: Type.INTEGER },
-                type: { type: Type.INTEGER },
-                powerRate: { type: Type.INTEGER },
-                workFromDate: { type: Type.INTEGER },
-                workToDate: { type: Type.INTEGER },
-                roleMatrix: { type: Type.INTEGER },
-                skill_Ramp: { type: Type.INTEGER },
-                skill_LoadControl: { type: Type.INTEGER },
-                skill_Operations: { type: Type.INTEGER },
-                skill_ShiftLeader: { type: Type.INTEGER },
-                'skill_Lost and Found': { type: Type.INTEGER },
-                pickupDate: { type: Type.INTEGER },
-                pickupTime: { type: Type.INTEGER },
-                endDate: { type: Type.INTEGER },
-                endTime: { type: Type.INTEGER },
-                minStaff: { type: Type.INTEGER },
-                maxStaff: { type: Type.INTEGER },
-              }
-            }
-          }
-        }
-      }
-    });
-    return safeParseJson(response.text);
-  } catch (error) {
-    return null;
-  }
-};
-
-export const extractDataFromContent = async (params: { 
-  textData?: string, 
-  media?: ExtractionMedia[],
-  startDate?: string,
-  targetType?: 'flights' | 'staff' | 'shifts' | 'all'
-}): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const systemInstruction = `Aviation Data Architect. Extract flight, staff, and shift records.
-  Role names: 'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'.
-  Ensure Roster start/end dates are captured correctly as workFromDate and workToDate.`;
-
-  const parts: any[] = [{ text: `Extract station data from: ${params.textData || "Images"}` }];
-  if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', 
-      contents: { parts },
-      config: { 
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            flights: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  flightNumber: { type: Type.STRING },
-                  from: { type: Type.STRING },
-                  to: { type: Type.STRING },
-                  sta: { type: Type.STRING },
-                  std: { type: Type.STRING },
-                  date: { type: Type.STRING }
-                }
-              } 
-            },
-            staff: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  initials: { type: Type.STRING },
-                  type: { type: Type.STRING },
-                  powerRate: { type: Type.NUMBER },
-                  workFromDate: { type: Type.STRING },
-                  workToDate: { type: Type.STRING },
-                  skillRatings: { 
-                    type: Type.OBJECT, 
-                    properties: { 
-                      Ramp: { type: Type.STRING }, 
-                      Operations: { type: Type.STRING }, 
-                      'Load Control': { type: Type.STRING }, 
-                      'Shift Leader': { type: Type.STRING }, 
-                      'Lost and Found': { type: Type.STRING }
-                    } 
-                  }
-                }
-              } 
-            },
-            shifts: { 
-              type: Type.ARRAY, 
-              items: { 
-                type: Type.OBJECT,
-                properties: {
-                  pickupDate: { type: Type.STRING },
-                  pickupTime: { type: Type.STRING },
-                  endDate: { type: Type.STRING },
-                  endTime: { type: Type.STRING },
-                  minStaff: { type: Type.NUMBER },
-                  maxStaff: { type: Type.NUMBER },
-                  roleCounts: {
-                    type: Type.OBJECT,
-                    properties: {
-                      'Shift Leader': { type: Type.NUMBER },
-                      'Operations': { type: Type.NUMBER },
-                      'Ramp': { type: Type.NUMBER },
-                      'Load Control': { type: Type.NUMBER },
-                      'Lost and Found': { type: Type.NUMBER }
-                    }
-                  }
-                }
-              } 
-            }
-          }
-        }
-      }
-    });
-    return safeParseJson(response.text);
-  } catch (error) {
-    throw error;
-  }
-};
-
 export const generateAIProgram = async (
   data: ProgramData,
   constraintsLog: string,
@@ -233,106 +77,49 @@ export const generateAIProgram = async (
 ): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const systemInstruction = `Station Duty Manager AI. Generate an operationally fair and continuity-focused aviation roster.
+  const systemInstruction = `You are the High-Brain Station Operations Architect. Your mission: A ZERO-ERROR deployment-ready roster.
 
-  CORE OPERATIONAL LAWS:
+  STRICT OPERATIONAL COMMANDS:
 
-  1. MANDATORY ROLE SECURITY (CRITICAL):
-  - Every handling shift MUST be assigned at least ONE (1) Shift Leader and at least ONE (1) Load Control.
-  - YOU MUST prioritize staff members who are qualified for these roles (Skill Rating 'Yes' in staff matrix). Use them even if it means adjusting other Generic roles.
-  - No shift is allowed to have 0 Shift Leader or 0 Load Control if qualified staff are available in the registry.
+  1. MANDATORY SPECIALIST ROLES (NON-NEGOTIABLE):
+  - EVERY HANDLING SHIFT MUST have AT LEAST 1 'Shift Leader' AND 1 'Load Control'.
+  - You MUST prioritize staff who are qualified (Skill Rating 'Yes') for these positions.
+  - Do NOT assign generic 'Duty' roles to specialists until all SL/LC slots for that day are secure.
 
-  2. ROSTER STAFF CONTINUITY (MAXIMUM UTILITY):
-  - Roster staff MUST work EVERY SINGLE DAY within their contract dates ('workFromDate' to 'workToDate').
-  - They are considered 100% available for assignment daily. No arbitrary "days off" for Roster staff.
-  - If a Roster staff member is outside their contract window, mark as 'ROSTER LEAVE'.
+  2. RESOURCE SATURATION (NO IDLE STAFF):
+  - Roster staff work every day of their contract.
+  - If a shift is below its 'maxStaff' limit, YOU MUST assign available Roster staff to that shift until the limit is reached. 
+  - Do NOT leave staff as 'Available' or 'NIL' if shifts are not yet at maximum capacity. This is an operational asset leakage.
 
-  3. SHORTAGE DISTRIBUTION (SHIFT FAIRNESS):
-  - If total station manpower is less than total shift requirements, YOU MUST NOT fill one shift to 100% and leave another at 0%.
-  - Proportional Shortage: Distribute the gap across all shifts. Every shift should have at least the minimum possible coverage rather than sacrificing one shift entirely. Aim for equal staffing percentage across shifts.
+  3. LOCAL STAFF 5/2 LAW:
+  - Local staff MUST receive EXACTLY 2 days off per 7-day period. 
+  - This is a legal compliance requirement.
 
-  4. LOCAL STAFF 5/2 RULE:
-  - Every Local staff member MUST receive exactly 2 days off per 7-day period.
-  - Mark as 'DAY OFF' in the offDuty section.
-  - AUDIT: If you cannot provide 2 days off for a Local staff member, you MUST list this in the shortageReport.
+  4. REST HOUR INTEGRITY (DAY 0 TETHERING):
+  - Check 'Previous Day Duty Log' (Day 0).
+  - Calculate rest: (Day 1 Start Time) minus (Day 0 End Time).
+  - Personnel MUST have AT LEAST ${config.minRestHours} hours of rest. If violated, flag in shortageReport.
 
-  5. REST HOUR SAFETY (DAY 1 TRANSITION):
-  - Use the "Previous Day Duty Log" EXCLUSIVELY to check the end-time of staff members' last shift before Day 1 of the program.
-  - Personnel MUST have exactly ${config.minRestHours} hours of rest after their "Previous Day" end-time before their first shift on Day 1 starts.
-
-  6. TOTAL REGISTRY ACCOUNTABILITY:
-  - Every single person in the 'staff' list MUST appear in the output for EVERY day.
-  - If they are not in 'assignments', they MUST be in 'offDuty'.
-  - Absence Reasons: 'DAY OFF' (Local only), 'ROSTER LEAVE' (Out of contract), 'ANNUAL LEAVE', or 'NIL' (Standby/Available but not needed).`;
+  5. DOUBLE-PASS VERIFICATION:
+  - Before outputting, you MUST perform a secondary mental audit. 
+  - "Does shift X have an SL?" "Does shift X have an LC?" "Is staff Y working too soon after their Day 0 shift?"
+  - Correct any errors before final JSON generation.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Roster Window: ${config.startDate} (${config.numDays} days). 
-      History/Context (Previous Log & Leaves): ${constraintsLog}. 
-      Staff Registry: ${JSON.stringify(data.staff)}. 
-      Operational Needs: ${JSON.stringify(data.flights)} & ${JSON.stringify(data.shifts)}.`,
+      contents: `Operational Window: ${config.startDate} (${config.numDays} days). 
+      Registry: ${JSON.stringify(data.staff)}. 
+      Flights: ${JSON.stringify(data.flights)}. 
+      Shifts: ${JSON.stringify(data.shifts)}. 
+      Previous History/Constraints: ${constraintsLog}.`,
       config: { 
         systemInstruction, 
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            programs: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  day: { type: Type.INTEGER },
-                  assignments: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        id: { type: Type.STRING },
-                        staffId: { type: Type.STRING },
-                        flightId: { type: Type.STRING },
-                        role: { type: Type.STRING },
-                        shiftId: { type: Type.STRING }
-                      },
-                      required: ['staffId', 'flightId', 'role']
-                    }
-                  },
-                  offDuty: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        staffId: { type: Type.STRING },
-                        type: { type: Type.STRING }
-                      },
-                      required: ['staffId', 'type']
-                    }
-                  }
-                },
-                required: ['day', 'assignments', 'offDuty']
-              }
-            },
-            shortageReport: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  staffName: { type: Type.STRING },
-                  flightNumber: { type: Type.STRING },
-                  reason: { type: Type.STRING }
-                }
-              }
-            }
-          },
-          required: ['programs']
-        },
         thinkingConfig: { thinkingBudget: 32768 }
       }
     });
-    
-    const result = safeParseJson(response.text);
-    return result;
+    return safeParseJson(response.text);
   } catch (error) {
     throw error;
   }
@@ -344,7 +131,7 @@ export const modifyProgramWithAI = async (
   media?: ExtractionMedia[]
 ): Promise<{ programs: DailyProgram[], explanation: string }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Instruction: ${instruction}. Ensure adaptive staff mixing, proportional shortage distribution, and Roster daily availability.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [{ text: `Instruction: ${instruction}. Focus on Specialist Security and Resource Utility.` }, { text: `State: ${JSON.stringify(data.programs)}` }];
   if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   try {
     const response = await ai.models.generateContent({
@@ -352,8 +139,48 @@ export const modifyProgramWithAI = async (
       contents: { parts },
       config: { responseMimeType: "application/json" }
     });
-    return safeParseJson(response.text) || { programs: data.programs, explanation: "Error modifying." };
+    return safeParseJson(response.text);
   } catch (error) {
     throw error;
+  }
+};
+
+export const extractDataFromContent = async (options: {
+  textData?: string;
+  media?: ExtractionMedia[];
+  startDate?: string;
+  targetType?: 'flights' | 'staff' | 'shifts' | 'all';
+}): Promise<ProgramData> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const { textData, media, startDate, targetType = 'all' } = options;
+  const prompt = `Extract aviation operational data. Target: ${targetType}. Date context: ${startDate || 'N/A'}.`;
+  const parts: any[] = [{ text: prompt }];
+  if (textData) parts.push({ text: `Content: ${textData}` });
+  if (media) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: { parts },
+      config: { responseMimeType: "application/json" }
+    });
+    return safeParseJson(response.text) || { flights: [], staff: [], shifts: [], programs: [] };
+  } catch (error) {
+    return { flights: [], staff: [], shifts: [], programs: [] };
+  }
+};
+
+export const identifyMapping = async (rows: any[][], target: 'flights' | 'staff' | 'shifts' | 'all'): Promise<{ columnMap: Record<string, number> }> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const headers = rows[0] || [];
+  const prompt = `Identify column indices (0-based) for: flightNumber, from, to, sta, std, date, name, initials, type, powerRate, workFromDate, workToDate, skill_Ramp, skill_Operations, skill_LoadControl, skill_ShiftLeader, skill_Lost and Found, pickupDate, pickupTime, endDate, endTime, minStaff, maxStaff, roleMatrix. Headers: ${JSON.stringify(headers)}`;
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    return safeParseJson(response.text) || { columnMap: {} };
+  } catch (error) {
+    return { columnMap: {} };
   }
 };
