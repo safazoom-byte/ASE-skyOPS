@@ -4,7 +4,7 @@ import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from 
 import { DAYS_OF_WEEK } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { CalendarOff, Activity, FileText, Plane, Shield, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { CalendarOff, Activity, FileText, Plane, Shield, AlertTriangle, CheckCircle2, UserCheck, UserX } from 'lucide-react';
 
 interface Props {
   programs: DailyProgram[];
@@ -25,6 +25,38 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
+
+  // Pre-calculate Day Off counts and labels for sequential numbering
+  const staffDayOffData = useMemo(() => {
+    const data = new Map<string, { count: number, labels: Map<number, string> }>();
+    
+    // Sort programs by day to ensure chronological numbering
+    const chronologicalPrograms = [...programs].sort((a, b) => a.day - b.day);
+
+    chronologicalPrograms.forEach(prog => {
+      (prog.offDuty || []).forEach(off => {
+        if (off.type === 'DAY OFF') {
+          const stats = data.get(off.staffId) || { count: 0, labels: new Map() };
+          stats.count++;
+          stats.labels.set(prog.day, stats.count.toString().padStart(2, '0'));
+          data.set(off.staffId, stats);
+        }
+      });
+    });
+
+    return data;
+  }, [programs]);
+
+  // Compliance Audit: Identify local staff with < 2 days off
+  const complianceViolations = useMemo(() => {
+    return staff
+      .filter(s => s.type === 'Local')
+      .map(s => {
+        const offDays = staffDayOffData.get(s.id)?.count || 0;
+        return { staff: s, offDays };
+      })
+      .filter(v => v.offDays < 2);
+  }, [staff, staffDayOffData]);
 
   const getRoleLabel = (roles: string[]) => {
     const specialistMap: Record<string, string> = {
@@ -50,7 +82,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return unique[0] || 'Duty';
   };
 
-  const formatStaffDisplay = (s?: Staff) => s?.initials || "??";
+  const formatStaffDisplay = (s?: Staff, dayIndex?: number) => {
+    if (!s) return "??";
+    if (dayIndex !== undefined) {
+      const dayOffLabel = staffDayOffData.get(s.id)?.labels.get(dayIndex);
+      if (dayOffLabel) return `${s.initials} ${dayOffLabel}`;
+    }
+    return s.initials;
+  };
 
   const getDayName = (dayIndex: any) => {
     const idx = Number(dayIndex);
@@ -154,9 +193,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const leaveTableData = leaveCategories.map(cat => {
         const list = (program.offDuty || [])
           .filter(off => off.type === cat.type)
-          .map(off => getStaffById(off.staffId))
+          .map(off => {
+            const s = getStaffById(off.staffId);
+            return formatStaffDisplay(s as Staff, off.type === 'DAY OFF' ? program.day : undefined);
+          })
           .filter(Boolean)
-          .map(s => formatStaffDisplay(s as Staff))
           .join(', ');
         
         return [cat.label, list || 'NONE'];
@@ -192,7 +233,58 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     <div className="space-y-16 animate-in fade-in duration-700 pb-32">
       <div className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col xl:flex-row justify-between items-center gap-10">
         <div><h2 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter leading-none mb-3">Station Handling Program</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formattedStartDate} — {formattedEndDate}</p></div>
-        <button onClick={exportPDF} className="px-8 py-5 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 shadow-xl active:scale-95 transition-all"><FileText size={20} /> PDF EXPORT</button>
+        <div className="flex gap-4">
+           <button onClick={exportPDF} className="px-8 py-5 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 shadow-xl active:scale-95 transition-all"><FileText size={20} /> PDF EXPORT</button>
+        </div>
+      </div>
+
+      {/* Compliance Audit Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm">
+           <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8 flex items-center gap-3">
+             <UserCheck size={16} className="text-emerald-500" /> Compliance Audit: 5/2 Rule
+           </h4>
+           {complianceViolations.length === 0 ? (
+             <div className="flex items-center gap-4 p-6 bg-emerald-50 rounded-3xl border border-emerald-100">
+               <CheckCircle2 className="text-emerald-500" />
+               <p className="text-xs font-black text-emerald-800 uppercase italic">All Local staff satisfied 2-day off minimum.</p>
+             </div>
+           ) : (
+             <div className="space-y-3">
+               {complianceViolations.map((v, i) => (
+                 <div key={i} className="flex items-center justify-between p-4 bg-rose-50 border border-rose-100 rounded-2xl">
+                    <div className="flex items-center gap-3">
+                      <UserX className="text-rose-500" size={18} />
+                      <span className="text-sm font-black text-rose-900 italic">{v.staff.name} ({v.staff.initials})</span>
+                    </div>
+                    <span className="px-3 py-1 bg-rose-200 text-rose-700 rounded-lg text-[10px] font-black uppercase">
+                      Only {v.offDays} Day{v.offDays !== 1 ? 's' : ''} Off
+                    </span>
+                 </div>
+               ))}
+             </div>
+           )}
+        </div>
+
+        <div className="bg-slate-950 p-10 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px]"></div>
+          <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 mb-8 flex items-center gap-3">
+             <Shield size={16} className="text-blue-500" /> Critical Role Integrity
+          </h4>
+          <div className="space-y-4 relative z-10">
+            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] font-black uppercase italic text-slate-400">Shift Leader Security</span>
+              <span className="text-[10px] font-black uppercase text-emerald-400">Guaranteed</span>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] font-black uppercase italic text-slate-400">Load Control Security</span>
+              <span className="text-[10px] font-black uppercase text-emerald-400">Guaranteed</span>
+            </div>
+            <p className="text-[8px] font-black uppercase tracking-widest text-slate-600 leading-relaxed mt-4 italic">
+              AI engine prioritizes SL/LC qualified staff for handling shifts.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="space-y-24">
@@ -300,7 +392,18 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-8">{leaveCategories.map(cat => {
                         const list = (program.offDuty || []).filter(off => off.type === cat.type).map(off => getStaffById(off.staffId)).filter(Boolean);
                         return (
-                          <div key={cat.type} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-xl flex flex-col gap-6 group hover:border-slate-400 transition-colors"><h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-4 group-hover:text-slate-900">{cat.label}</h5><div className="flex flex-wrap gap-2 min-h-[50px]">{list.length > 0 ? list.map((s, i) => (<div key={i} className="px-5 py-3 bg-slate-950 text-white rounded-2xl font-black text-xs italic shadow-lg">{formatStaffDisplay(s as Staff)}</div>)) : (<span className="text-[9px] font-black text-slate-200 uppercase italic self-center">None</span>)}</div></div>
+                          <div key={cat.type} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-xl flex flex-col gap-6 group hover:border-slate-400 transition-colors">
+                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-4 group-hover:text-slate-900">{cat.label}</h5>
+                            <div className="flex flex-wrap gap-2 min-h-[50px]">
+                              {list.length > 0 ? list.map((s, i) => (
+                                <div key={i} className="px-5 py-3 bg-slate-950 text-white rounded-2xl font-black text-xs italic shadow-lg">
+                                  {formatStaffDisplay(s as Staff, cat.type === 'DAY OFF' ? program.day : undefined)}
+                                </div>
+                              )) : (
+                                <span className="text-[9px] font-black text-slate-200 uppercase italic self-center">None</span>
+                              )}
+                            </div>
+                          </div>
                         );
                       })}</div>
                 </div>

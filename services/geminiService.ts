@@ -237,23 +237,24 @@ export const generateAIProgram = async (
 
   CORE OPERATIONAL LAWS:
 
-  1. ROSTER STAFF CONTINUITY (MAXIMUM UTILITY):
+  1. MANDATORY ROLE SECURITY (CRITICAL):
+  - Every handling shift MUST be assigned at least ONE (1) Shift Leader and at least ONE (1) Load Control.
+  - YOU MUST prioritize staff members who are qualified for these roles (Skill Rating 'Yes' in staff matrix). Use them even if it means adjusting other Generic roles.
+  - No shift is allowed to have 0 Shift Leader or 0 Load Control if qualified staff are available in the registry.
+
+  2. ROSTER STAFF CONTINUITY (MAXIMUM UTILITY):
   - Roster staff MUST work EVERY SINGLE DAY within their contract dates ('workFromDate' to 'workToDate').
   - They are considered 100% available for assignment daily. No arbitrary "days off" for Roster staff.
   - If a Roster staff member is outside their contract window, mark as 'ROSTER LEAVE'.
 
-  2. SHORTAGE DISTRIBUTION (SHIFT FAIRNESS):
+  3. SHORTAGE DISTRIBUTION (SHIFT FAIRNESS):
   - If total station manpower is less than total shift requirements, YOU MUST NOT fill one shift to 100% and leave another at 0%.
   - Proportional Shortage: Distribute the gap across all shifts. Every shift should have at least the minimum possible coverage rather than sacrificing one shift entirely. Aim for equal staffing percentage across shifts.
 
-  3. LOCAL STAFF 5/2 RULE:
+  4. LOCAL STAFF 5/2 RULE:
   - Every Local staff member MUST receive exactly 2 days off per 7-day period.
-  - Schedule these to ensure Rule #2 (Shortage Smoothing) can still be satisfied on all other days.
   - Mark as 'DAY OFF' in the offDuty section.
-
-  4. ADAPTIVE STAFF MIXING (FLEXIBLE):
-  - Every shift should ideally include a mix of Local and Roster staff to blend station knowledge with capacity.
-  - The ratio is not fixed; adapt it based on available personnel to ensure neither group is isolated in operations.
+  - AUDIT: If you cannot provide 2 days off for a Local staff member, you MUST list this in the shortageReport.
 
   5. REST HOUR SAFETY (DAY 1 TRANSITION):
   - Use the "Previous Day Duty Log" EXCLUSIVELY to check the end-time of staff members' last shift before Day 1 of the program.
