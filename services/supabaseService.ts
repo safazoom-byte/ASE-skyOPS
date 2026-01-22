@@ -44,26 +44,39 @@ export const db = {
   async fetchAll() {
     if (!supabase) return null;
     try {
+      const session = await auth.getSession();
+      if (!session) return null;
+      const userId = session.user.id;
+
       const [fRes, sRes, shRes, pRes] = await Promise.all([
-        supabase.from('flights').select('*'),
-        supabase.from('staff').select('*'),
-        supabase.from('shifts').select('*'),
-        supabase.from('programs').select('*')
+        supabase.from('flights').select('*').eq('user_id', userId),
+        supabase.from('staff').select('*').eq('user_id', userId),
+        supabase.from('shifts').select('*').eq('user_id', userId),
+        supabase.from('programs').select('*').eq('user_id', userId)
       ]);
+
+      if (fRes.error || sRes.error || shRes.error || pRes.error) {
+        console.error("Database fetch error:", { 
+          flights: fRes.error, 
+          staff: sRes.error, 
+          shifts: shRes.error, 
+          programs: pRes.error 
+        });
+      }
 
       return {
         flights: (fRes.data || []).map(f => ({
-          ...f,
+          id: f.id,
           flightNumber: f.flight_number,
           from: f.origin,
           to: f.destination,
           sta: f.sta,
           std: f.std,
           date: f.flight_date,
-          type: f.flight_type
+          type: f.flight_type,
+          day: f.day
         })),
         staff: (sRes.data || []).map(s => ({
-          ...s,
           id: s.id,
           name: s.name,
           initials: s.initials,
@@ -80,7 +93,8 @@ export const db = {
           workToDate: s.work_to_date
         })),
         shifts: (shRes.data || []).map(s => ({
-          ...s,
+          id: s.id,
+          day: s.day,
           pickupDate: s.pickup_date,
           pickupTime: s.pickup_time,
           endDate: s.end_date,
@@ -91,38 +105,48 @@ export const db = {
           flightIds: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
-          ...p,
+          day: p.day,
           dateString: p.date_string,
           assignments: p.assignments || [],
           offDuty: p.off_duty || []
         }))
       };
     } catch (e) {
-      console.error("Supabase Fetch Error:", e);
+      console.error("Critical Supabase Fetch Error:", e);
       return null;
     }
   },
 
   async upsertFlight(f: Flight) {
     if (!supabase) return;
-    const { error } = await supabase.from('flights').upsert({
+    const session = await auth.getSession();
+    if (!session) return;
+    
+    const payload = {
       id: f.id,
+      user_id: session.user.id,
       flight_number: f.flightNumber,
       origin: f.from,
       destination: f.to,
-      sta: f.sta,
-      std: f.std,
+      sta: f.sta || null,
+      std: f.std || null,
       flight_date: f.date,
       flight_type: f.type,
       day: f.day
-    });
+    };
+
+    const { error } = await supabase.from('flights').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
   },
 
   async upsertStaff(s: Staff) {
     if (!supabase) return;
-    const { error } = await supabase.from('staff').upsert({
+    const session = await auth.getSession();
+    if (!session) return;
+
+    const payload = {
       id: s.id,
+      user_id: session.user.id,
       name: s.name,
       initials: s.initials,
       type: s.type,
@@ -136,50 +160,75 @@ export const db = {
       max_shifts_per_week: s.maxShiftsPerWeek,
       work_from_date: s.workFromDate,
       work_to_date: s.workToDate
-    });
+    };
+
+    const { error } = await supabase.from('staff').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
   },
 
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
-    
-    // Explicit Column Reflection for DB Visibility
+    const session = await auth.getSession();
+    if (!session) return;
+
     const payload = {
       id: s.id,
-      day: s.day, // Day Index
-      day_name: new Date(s.pickupDate).toLocaleDateString('en-US', { weekday: 'long' }), // Day Name
-      pickup_date: s.pickupDate, // Shift Start Date
-      pickup_time: s.pickupTime, // Shift Start Time
-      end_date: s.endDate, // Shift End Date
-      end_time: s.endTime, // Shift End Time
-      min_staff: s.minStaff, // Min Staff
-      max_staff: s.maxStaff, // Max Staff
-      role_counts: s.roleCounts, // Role Matrix (JSONB)
-      flight_ids: s.flightIds // Flight ID Links (Array)
+      user_id: session.user.id,
+      day: s.day,
+      pickup_date: s.pickupDate,
+      pickup_time: s.pickupTime,
+      end_date: s.endDate,
+      end_time: s.endTime,
+      min_staff: s.minStaff,
+      max_staff: s.maxStaff,
+      role_counts: s.roleCounts || {},
+      flight_ids: s.flightIds || []
     };
 
-    const { error } = await supabase.from('shifts').upsert(payload);
-    if (error) {
-      console.error("Supabase Shift Sync Failed:", error);
-      throw error;
-    }
+    const { error } = await supabase.from('shifts').upsert(payload, { onConflict: 'id' });
+    if (error) throw error;
   },
 
   async savePrograms(programs: DailyProgram[]) {
     if (!supabase) return;
-    await supabase.from('programs').delete().neq('id', '0');
-    const { error } = await supabase.from('programs').insert(
-      programs.map(p => ({
-        day: p.day,
-        date_string: p.dateString,
-        assignments: p.assignments,
-        off_duty: p.offDuty
-      }))
-    );
-    if (error) throw error;
+    const session = await auth.getSession();
+    if (!session) return;
+    const userId = session.user.id;
+
+    try {
+      // Clean start for the day's program to prevent assignment duplication
+      await supabase.from('programs').delete().eq('user_id', userId); 
+      const { error } = await supabase.from('programs').insert(
+        programs.map(p => ({
+          user_id: userId,
+          day: p.day,
+          date_string: p.dateString,
+          assignments: p.assignments,
+          off_duty: p.offDuty
+        }))
+      );
+      if (error) throw error;
+    } catch (e) {
+      console.error("Supabase Program Save Error:", e);
+    }
   },
 
-  async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },
-  async deleteStaff(id: string) { if (supabase) await supabase.from('staff').delete().eq('id', id); },
-  async deleteShift(id: string) { if (supabase) await supabase.from('shifts').delete().eq('id', id); }
+  async deleteFlight(id: string) { 
+    if (!supabase) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('flights').delete().eq('id', id).eq('user_id', session.user.id); 
+  },
+  async deleteStaff(id: string) { 
+    if (!supabase) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('staff').delete().eq('id', id).eq('user_id', session.user.id); 
+  },
+  async deleteShift(id: string) { 
+    if (!supabase) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); 
+  }
 };

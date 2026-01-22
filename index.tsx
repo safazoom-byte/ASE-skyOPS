@@ -113,7 +113,6 @@ const App: React.FC = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
 
-  // Auth Listener
   useEffect(() => {
     auth.getSession().then(s => {
       setSession(s);
@@ -187,38 +186,46 @@ const App: React.FC = () => {
     const newFlightsList = pendingVerification.flights || [];
     const newShiftsList = pendingVerification.shifts || [];
 
-    await Promise.all([
-      ...newStaffList.map(s => db.upsertStaff(s)),
-      ...newFlightsList.map(f => db.upsertFlight(f)),
-      ...newShiftsList.map(s => db.upsertShift(s))
-    ]);
+    try {
+      // Step 1: Commit Staff
+      await Promise.all(newStaffList.map(s => db.upsertStaff(s)));
+      // Step 2: Commit Flights
+      await Promise.all(newFlightsList.map(f => db.upsertFlight(f)));
+      // Step 3: Commit Shifts (Sequential may be safer if FK exists)
+      for (const sh of newShiftsList) {
+        await db.upsertShift(sh);
+      }
 
-    setStaff(prev => {
-      const p = prev || [];
-      const existingIds = new Set(p.map(s => s.id));
-      const filtered = newStaffList.filter(s => !existingIds.has(s.id));
-      return [...p, ...filtered];
-    });
-    setFlights(prev => {
-      const p = prev || [];
-      const existingKeys = new Set(p.map(f => `${f.flightNumber}-${f.date}`));
-      const filtered = newFlightsList.filter(f => !existingKeys.has(`${f.flightNumber}-${f.date}`));
-      return [...p, ...filtered];
-    });
-    setShifts(prev => {
-      const p = prev || [];
-      const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime}`));
-      const filtered = newShiftsList.filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime}`));
-      return [...p, ...filtered];
-    });
-    
-    setSyncStatus('connected');
-    setPendingVerification(null);
-    setShowSuccessChecklist(true);
+      setStaff(prev => {
+        const p = prev || [];
+        const existingIds = new Set(p.map(s => s.id));
+        const filtered = newStaffList.filter(s => !existingIds.has(s.id));
+        return [...p, ...filtered];
+      });
+      setFlights(prev => {
+        const p = prev || [];
+        const existingKeys = new Set(p.map(f => `${f.flightNumber}-${f.date}`));
+        const filtered = newFlightsList.filter(f => !existingKeys.has(`${f.flightNumber}-${f.date}`));
+        return [...p, ...filtered];
+      });
+      setShifts(prev => {
+        const p = prev || [];
+        const existingKeys = new Set(p.map(s => `${s.pickupDate}-${s.pickupTime}`));
+        const filtered = newShiftsList.filter(s => !existingKeys.has(`${s.pickupDate}-${s.pickupTime}`));
+        return [...p, ...filtered];
+      });
+      
+      setSyncStatus('connected');
+      setPendingVerification(null);
+      setShowSuccessChecklist(true);
+    } catch (err: any) {
+      console.error("Batch Commit Error:", err);
+      setSyncStatus('error');
+      setError("Database sync failed. Check column constraints or connection.");
+    }
   };
 
   const confirmGenerateProgram = async () => {
-    // Critical Guard: Ensure shifts exist for the period
     if (activeShiftsInRange.length === 0) {
       setError("No Duty Master slots (shifts) found for this window. Define shifts first.");
       setShowConfirmDialog(false);
@@ -239,7 +246,7 @@ const App: React.FC = () => {
     try {
       const inputData: ProgramData = { flights: activeFlightsInRange, staff: staff || [], shifts: activeShiftsInRange, programs: [] };
       
-      setGenerationStep(1); // Structural Draft
+      setGenerationStep(1); 
       let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, minRestHours, startDate });
       
       if (result.hasBlockers) { 
@@ -248,7 +255,7 @@ const App: React.FC = () => {
         return; 
       }
 
-      setGenerationStep(2); // Quality Optimization
+      setGenerationStep(2); 
       result = await refineAIProgram(result, inputData, 1, { minRestHours, startDate, numDays });
       
       setProposedPrograms(result.programs);
@@ -295,6 +302,7 @@ const App: React.FC = () => {
         await db.upsertFlight(f);
         setSyncStatus('connected');
       } catch (e) {
+        console.error("Flight Add Sync Error:", e);
         setSyncStatus('error');
       }
     }
@@ -302,8 +310,17 @@ const App: React.FC = () => {
 
   const handleFlightUpdate = async (f: Flight) => {
     setFlights(prev => prev.map(old => old.id === f.id ? f : old));
-    if (supabase) { setSyncStatus('syncing'); await db.upsertFlight(f); setSyncStatus('connected'); }
+    if (supabase) { 
+      setSyncStatus('syncing'); 
+      try {
+        await db.upsertFlight(f); 
+        setSyncStatus('connected'); 
+      } catch (e) {
+        setSyncStatus('error');
+      }
+    }
   };
+
   const handleFlightDelete = async (id: string) => {
     setFlights(prev => prev.filter(f => f.id !== id));
     if (supabase) { setSyncStatus('syncing'); await db.deleteFlight(id); setSyncStatus('connected'); }
@@ -314,8 +331,17 @@ const App: React.FC = () => {
       const exists = prev.find(old => old.id === s.id);
       return exists ? prev.map(old => old.id === s.id ? s : old) : [...prev, s];
     });
-    if (supabase) { setSyncStatus('syncing'); await db.upsertStaff(s); setSyncStatus('connected'); }
+    if (supabase) { 
+      setSyncStatus('syncing'); 
+      try {
+        await db.upsertStaff(s); 
+        setSyncStatus('connected'); 
+      } catch (e) {
+        setSyncStatus('error');
+      }
+    }
   };
+
   const handleStaffDelete = async (id: string) => {
     setStaff(prev => prev.filter(s => s.id !== id));
     if (supabase) { setSyncStatus('syncing'); await db.deleteStaff(id); setSyncStatus('connected'); }
@@ -329,6 +355,7 @@ const App: React.FC = () => {
         await db.upsertShift(s);
         setSyncStatus('connected');
       } catch (e) {
+        console.error("Shift Add Sync Error:", e);
         setSyncStatus('error');
       }
     }
@@ -339,8 +366,18 @@ const App: React.FC = () => {
       const exists = prev.find(old => old.id === s.id);
       return exists ? prev.map(old => old.id === s.id ? s : old) : [...prev, s];
     });
-    if (supabase) { setSyncStatus('syncing'); await db.upsertShift(s); setSyncStatus('connected'); }
+    if (supabase) {
+      setSyncStatus('syncing');
+      try {
+        await db.upsertShift(s);
+        setSyncStatus('connected');
+      } catch (e) {
+        console.error("Shift Update Sync Error:", e);
+        setSyncStatus('error');
+      }
+    }
   };
+
   const handleShiftDelete = async (id: string) => {
     setShifts(prev => prev.filter(s => s.id !== id));
     if (supabase) { setSyncStatus('syncing'); await db.deleteShift(id); setSyncStatus('connected'); }
@@ -471,7 +508,7 @@ const App: React.FC = () => {
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 space-y-6">
                   <h4 className="text-xl font-black italic uppercase flex items-center gap-4 text-slate-900">
-                    <Briefcase className="text-blue-600" /> Requested Day Off / Leave Matrix
+                    <Briefcase className="text-blue-600" /> Requested Day Off / Matrix
                   </h4>
                   <textarea 
                     className="w-full h-48 p-6 bg-slate-50 border border-slate-200 rounded-[2.5rem] font-medium text-sm outline-none focus:ring-4 focus:ring-blue-500/5 transition-all resize-none shadow-inner"
@@ -479,7 +516,7 @@ const App: React.FC = () => {
                     value={personnelRequests}
                     onChange={e => setPersonnelRequests(e.target.value)}
                   />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4 italic">Overrides standard 5/2 Law for specific agents.</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4 italic">Overrides standard rules for specific agents.</p>
                 </div>
                 
                 <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 space-y-6">

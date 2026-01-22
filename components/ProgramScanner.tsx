@@ -1,3 +1,5 @@
+
+/* ... existing imports ... */
 import React, { useState, useRef, useEffect } from 'react';
 import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
@@ -23,6 +25,8 @@ import {
   Settings
 } from 'lucide-react';
 
+/* ... existing constants and interfaces ... */
+
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => void;
   startDate?: string;
@@ -37,38 +41,28 @@ interface ScanError {
 
 type PasteTarget = 'flights' | 'staff' | 'shifts' | 'all';
 
-// Categorized aliases for better organization in the mapper
 const HEADER_ALIASES: Record<string, string[]> = {
-  // Flight basic fields
   flightNumber: ['flight', 'flt', 'fn', 'flight no', 'flight number', 'f/n', 'service'],
   from: ['from', 'origin', 'dep', 'departure station', 'org', 'sector from'],
   to: ['to', 'destination', 'arr', 'arrival station', 'dest', 'sector to'],
   sta: ['sta', 'arrival time', 'arrival', 'sta time', 'eta'],
   std: ['std', 'departure time', 'departure', 'std time', 'etd'],
   date: ['date', 'day', 'flight date', 'op date', 'service date'],
-  
-  // Staff basic fields
   name: ['name', 'full name', 'staff name', 'personnel', 'agent', 'employee'],
   initials: ['initials', 'sign', 'code', 'staff id', 'id', 'user'],
   type: ['type', 'category', 'status', 'contract', 'staff type'],
   powerRate: ['power', 'rate', 'performance', 'power rate', '%', 'productivity'],
-  
-  // Shift basic fields
   pickupTime: ['pickup', 'start', 'duty start', 'on', 'shift start', 'start time', 'time from'],
   endTime: ['end', 'release', 'duty end', 'off', 'shift end', 'end time', 'time to'],
   pickupDate: ['shift date', 'start date', 'pickup date', 'duty date'],
   endDate: ['end date', 'release date', 'finish date'],
   minStaff: ['min', 'minimum', 'min hc', 'staff required', 'target staff'],
   maxStaff: ['max', 'maximum', 'max hc', 'staff max', 'total staff'],
-  
-  // Personnel Qualifications (Staff Import)
   isRamp: ['ramp', 'rmp', 'ramp qualified', 'ramp skill'],
   isLoadControl: ['load control', 'lc', 'loadcontrol', 'l/c', 'lc skill'],
   isOps: ['ops', 'operations', 'operation', 'ground ops', 'ops skill'],
   isShiftLeader: ['shift leader', 'sl', 'shiftleader', 'lead', 'team lead', 'sl skill'],
   isLostFound: ['lost and found', 'lost & found', 'l&f', 'lf', 'lost/found', 'lf skill'],
-
-  // Specialist Requirements (Shift Import)
   role_shiftLeader: ['sl count', 'shift leader count', 'lead needed', 'sl required'],
   role_loadControl: ['lc count', 'load control count', 'lc needed', 'lc required'],
   role_ramp: ['ramp count', 'ramp needed', 'ramp required'],
@@ -77,6 +71,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
+  /* ... existing state and logic ... */
   const [isScanning, setIsScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
   const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] } | null>(null);
@@ -156,8 +151,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     }
     let str = String(val).trim().toLowerCase();
-    
-    // Handle "6 am", "10pm"
     const ampmMatch = str.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
     if (ampmMatch) {
       let h = parseInt(ampmMatch[1]);
@@ -167,17 +160,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       if (ampm === 'am' && h === 12) h = 0;
       return `${String(h).padStart(2, '0')}:${m}`;
     }
-
     if (/^\d{3,4}$/.test(str)) {
       str = str.padStart(4, '0');
       return `${str.slice(0, 2)}:${str.slice(2, 4)}`;
     }
-    
-    // Remove seconds if present
     if (/^\d{2}:\d{2}:\d{2}$/.test(str)) {
         return str.slice(0, 5);
     }
-
     return str;
   };
 
@@ -195,7 +184,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
     dataRows.forEach((row, idx) => {
       if (!row || row.length === 0) return;
-      
       const flightNo = map.flightNumber !== -1 ? String(row[map.flightNumber] || '').trim() : '';
       const staffName = map.name !== -1 ? String(row[map.name] || '').trim() : '';
       const pickupTime = map.pickupTime !== -1 ? parseImportTime(row[map.pickupTime]) : '';
@@ -237,8 +225,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         const pDate = parseImportDate(row[map.pickupDate] || row[map.date]);
         let eDate = parseImportDate(row[map.endDate] || pDate);
         const eTime = map.endTime !== -1 ? parseImportTime(row[map.endTime]) : '';
-        
-        // Overnight logic: if endDate is same as pickupDate but endTime is earlier than pickupTime
         if (eTime && pickupTime && eDate === pDate) {
            const [h1, m1] = pickupTime.split(':').map(Number);
            const [h2, m2] = eTime.split(':').map(Number);
@@ -248,7 +234,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
               eDate = d.toISOString().split('T')[0];
            }
         }
-
         const roleCounts: Partial<Record<Skill, number>> = {};
         if (map.role_shiftLeader !== -1) roleCounts['Shift Leader'] = parseInt(row[map.role_shiftLeader]) || 0;
         if (map.role_loadControl !== -1) roleCounts['Load Control'] = parseInt(row[map.role_loadControl]) || 0;
@@ -275,19 +260,17 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     setIsScanning(false);
   };
 
+  /* ... rest of existing component logic ... */
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsScanning(true);
     setScanError(null);
-
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
         const data = evt.target?.result;
         let rows: any[][];
-
         if (file.name.match(/\.(xlsx|xls)$/i)) {
           const workbook = XLSX.read(data, { type: 'binary' });
           rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
@@ -295,12 +278,9 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           const workbook = XLSX.read(data, { type: 'string' });
           rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
         }
-
         if (rows.length < 1) throw new Error("Document appears to be empty.");
-
         const localMap = detectHeadersLocally(rows[0]);
         const identifiedCount = Object.values(localMap).filter(v => v !== -1).length;
-
         if (identifiedCount >= 2) {
           processLocalRows(rows, localMap);
         } else {
@@ -312,28 +292,20 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         setIsScanning(false);
       }
     };
-
-    if (file.name.match(/\.(xlsx|xls)$/i)) {
-      reader.readAsBinaryString(file);
-    } else {
-      reader.readAsText(file);
-    }
+    if (file.name.match(/\.(xlsx|xls)$/i)) reader.readAsBinaryString(file);
+    else reader.readAsText(file);
   };
 
   const handlePasteSubmit = () => {
     if (!pastedText.trim()) return;
     setIsScanning(true);
-    
     try {
       const workbook = XLSX.read(pastedText, { type: 'string' });
       const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
-      
       if (rows.length < 1) throw new Error("Empty buffer.");
-
       const localMap = detectHeadersLocally(rows[0]);
-      if (Object.values(localMap).filter(v => v !== -1).length >= 2) {
-        processLocalRows(rows, localMap);
-      } else {
+      if (Object.values(localMap).filter(v => v !== -1).length >= 2) processLocalRows(rows, localMap);
+      else {
         setPendingMapping({ rows, target: pasteTarget, map: localMap });
         setIsScanning(false);
       }
@@ -369,7 +341,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     });
   };
 
-  // Group mappings for UI display
   const renderMappingGroup = (title: string, icon: React.ReactNode, fieldKeys: string[]) => {
     if (!pendingMapping) return null;
     return (
@@ -400,6 +371,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
+      {/* ... existing header and content logic ... */}
       <div className="p-8 lg:p-12 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
          <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/20"><Layers size={24} /></div>
@@ -469,17 +441,14 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                    <p className="text-[10px] font-black text-slate-400 uppercase">Manual verification required for ambiguous headers.</p>
                 </div>
              </div>
-             
              <div className="space-y-12 max-h-[60vh] overflow-y-auto pr-6 no-scrollbar pb-10">
                 {(pendingMapping.target === 'all' || pendingMapping.target === 'flights') && renderMappingGroup('Flight Parameters', <Plane size={14} />, ['flightNumber', 'from', 'to', 'sta', 'std', 'date'])}
-                
                 {(pendingMapping.target === 'all' || pendingMapping.target === 'staff') && (
                   <>
                     {renderMappingGroup('Staff Registry', <Users size={14} />, ['name', 'initials', 'type', 'powerRate'])}
                     {renderMappingGroup('Discipline Matrix', <ShieldCheck size={14} />, ['isRamp', 'isLoadControl', 'isOps', 'isShiftLeader', 'isLostFound'])}
                   </>
                 )}
-
                 {(pendingMapping.target === 'all' || pendingMapping.target === 'shifts') && (
                   <>
                     {renderMappingGroup('Shift Timing', <Clock size={14} />, ['pickupDate', 'pickupTime', 'endDate', 'endTime'])}
@@ -488,7 +457,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                   </>
                 )}
              </div>
-
              <button onClick={() => processLocalRows(pendingMapping.rows, pendingMapping.map)} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all">GENERATE REGISTRY FROM MAP <ArrowRight size={20}/></button>
           </div>
         )}
@@ -510,7 +478,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                       <div className="bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100 text-center"><span className="block text-[8px] font-black text-slate-400 uppercase mb-1">Shifts</span><span className="text-xl font-black italic">{extractedData.shifts.length}</span></div>
                    </div>
                 </div>
-
                 <div className="max-h-[500px] overflow-y-auto rounded-[2rem] border border-slate-50 bg-slate-50/30 p-2 no-scrollbar mb-10">
                   <table className="w-full text-left">
                     <thead className="sticky top-0 bg-slate-100 text-[8px] font-black uppercase tracking-widest text-slate-400 z-30">
@@ -558,8 +525,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                           <td className="px-6 py-4 text-slate-400 uppercase">{sh.pickupDate} | HC: {sh.minStaff}-{sh.maxStaff}</td>
                           <td className="px-6 py-4">
                             <div className="flex gap-1">
-                              {/* Fix type error: Operator > cannot be applied to types unknown and number */}
-                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (count as number) > 0 && (
+                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (count || 0) > 0 && (
                                 <span key={role} className="bg-amber-100 text-amber-700 px-1 rounded text-[7px]">{role}: {count}</span>
                               ))}
                             </div>
@@ -572,7 +538,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                     </tbody>
                   </table>
                 </div>
-
                 <button onClick={finalizeImport} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-6">
                    AUTHORIZE DATA COMMIT <Sparkles />
                 </button>
