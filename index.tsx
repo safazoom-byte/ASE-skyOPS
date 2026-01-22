@@ -43,16 +43,16 @@ import {
   LogOut
 } from 'lucide-react';
 
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types.ts';
-import { FlightManager } from './components/FlightManager.tsx';
-import { StaffManager } from './components/StaffManager.tsx';
-import { ShiftManager } from './components/ShiftManager.tsx';
-import { ProgramDisplay } from './components/ProgramDisplay.tsx';
-import { ProgramScanner } from './components/ProgramScanner.tsx';
-import { ProgramChat } from './components/ProgramChat.tsx';
-import { Auth } from './components/Auth.tsx';
-import { generateAIProgram, refineAIProgram, extractDataFromContent, ShortageWarning, ResourceRecommendation, BuildResult } from './services/geminiService.ts';
-import { db, supabase, auth } from './services/supabaseService.ts';
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
+import { FlightManager } from './components/FlightManager';
+import { StaffManager } from './components/StaffManager';
+import { ShiftManager } from './components/ShiftManager';
+import { ProgramDisplay } from './components/ProgramDisplay';
+import { ProgramScanner } from './components/ProgramScanner';
+import { ProgramChat } from './components/ProgramChat';
+import { Auth } from './components/Auth';
+import { generateAIProgram, refineAIProgram, extractDataFromContent, ShortageWarning, ResourceRecommendation, BuildResult } from './services/geminiService';
+import { db, supabase, auth } from './services/supabaseService';
 
 const STORAGE_KEYS = {
   FLIGHTS: 'skyops_flights_v3',
@@ -144,7 +144,10 @@ const App: React.FC = () => {
           if (data.flights.length) setFlights(data.flights);
           if (data.staff.length) setStaff(data.staff);
           if (data.shifts.length) setShifts(data.shifts);
-          if (data.programs.length) setPrograms(data.programs.sort((a,b) => a.day - b.day));
+          if (data.programs.length) {
+            const sortedPrograms = [...data.programs].sort((a,b) => a.day - b.day);
+            setPrograms(sortedPrograms);
+          }
           setSyncStatus('connected');
         } else {
           setSyncStatus('error');

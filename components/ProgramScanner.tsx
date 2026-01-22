@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService.ts';
-import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types.ts';
+import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService';
+import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
+import { AVAILABLE_SKILLS } from '../constants';
 import * as XLSX from 'xlsx';
 import { 
   FileUp, 
@@ -18,8 +19,9 @@ import {
   CheckCircle2,
   Layers,
   Users,
-  Eye,
-  Trash2
+  Trash2,
+  ShieldCheck,
+  ChevronDown
 } from 'lucide-react';
 
 interface Props {
@@ -36,29 +38,39 @@ interface ScanError {
 
 type PasteTarget = 'flights' | 'staff' | 'shifts' | 'all';
 
-// Enhanced Header Heuristics for direct Excel mapping
+// Specialist Field Definition for Mapping
+const SPECIALIST_FIELDS: Record<Skill, string[]> = {
+  'Shift Leader': ['sl', 'shift leader', 'leader', 'lead', 'sl count', 'shiftleader'],
+  'Operations': ['ops', 'operations', 'op', 'ground ops', 'office'],
+  'Ramp': ['ramp', 'rmp', 'ramp agent', 'ramp count'],
+  'Load Control': ['lc', 'load control', 'loadcontrol', 'l/c', 'weight and balance'],
+  'Lost and Found': ['l&f', 'lf', 'lost and found', 'lost & found', 'found'],
+  'Duty': ['duty', 'general', 'core']
+};
+
 const HEADER_ALIASES: Record<string, string[]> = {
-  flightNumber: ['flight', 'flt', 'fn', 'flight no', 'flight number', 'f/n', 'service'],
+  flightNumber: ['flight', 'flt', 'fn', 'flight no', 'flight number', 'f/n', 'service', 'acft'],
   from: ['from', 'origin', 'dep', 'departure station', 'org', 'sector from'],
   to: ['to', 'destination', 'arr', 'arrival station', 'dest', 'sector to'],
-  sta: ['sta', 'arrival time', 'arrival', 'sta time', 'eta'],
-  std: ['std', 'departure time', 'departure', 'std time', 'etd'],
-  date: ['date', 'day', 'flight date', 'op date', 'service date'],
-  name: ['name', 'full name', 'staff name', 'personnel', 'agent', 'employee'],
-  initials: ['initials', 'sign', 'code', 'staff id', 'id', 'user'],
-  type: ['type', 'category', 'status', 'contract', 'staff type'],
-  powerRate: ['power', 'rate', 'performance', 'power rate', '%', 'productivity'],
-  pickupTime: ['pickup', 'start', 'duty start', 'on', 'shift start', 'start time'],
-  endTime: ['end', 'release', 'duty end', 'off', 'shift end', 'end time'],
-  pickupDate: ['shift date', 'start date', 'pickup date'],
-  minStaff: ['min', 'minimum', 'min hc', 'staff required'],
-  maxStaff: ['max', 'maximum', 'max hc', 'staff max'],
-  // Skill Mapping Aliases
-  isRamp: ['ramp', 'rmp', 'ramp qualified'],
-  isLoadControl: ['load control', 'lc', 'loadcontrol', 'l/c'],
-  isOps: ['ops', 'operations', 'operation', 'ground ops'],
-  isShiftLeader: ['shift leader', 'sl', 'shiftleader', 'lead', 'team lead'],
-  isLostFound: ['lost and found', 'lost & found', 'l&f', 'lf', 'lost/found']
+  sta: ['sta', 'arrival time', 'arrival', 'sta time', 'eta', 'arr time'],
+  std: ['std', 'departure time', 'departure', 'std time', 'etd', 'dep time'],
+  date: ['date', 'day', 'flight date', 'op date', 'service date', 'sch date'],
+  name: ['name', 'full name', 'staff name', 'personnel', 'agent', 'employee', 'staff'],
+  initials: ['initials', 'sign', 'code', 'staff id', 'id', 'user', 'init'],
+  type: ['type', 'category', 'status', 'contract', 'staff type', 'agent type'],
+  powerRate: ['power', 'rate', 'performance', 'power rate', '%', 'productivity', 'efficiency'],
+  pickupTime: ['pickup', 'start', 'duty start', 'on', 'shift start', 'start time', 'on duty'],
+  endTime: ['end', 'release', 'duty end', 'off', 'shift end', 'end time', 'off duty'],
+  pickupDate: ['shift date', 'start date', 'pickup date', 'duty date'],
+  endDate: ['release date', 'end date', 'off date', 'finish date'],
+  minStaff: ['min', 'minimum', 'min hc', 'staff required', 'req staff', 'min strength'],
+  maxStaff: ['max', 'maximum', 'max hc', 'staff max', 'max strength'],
+  // Staff Capability Mapping
+  isRamp: ['is ramp', 'ramp qualified', 'rmp cert'],
+  isLoadControl: ['is load control', 'lc cert', 'lc qualified'],
+  isOps: ['is ops', 'ops qualified'],
+  isShiftLeader: ['is sl', 'sl qualified', 'is lead'],
+  isLostFound: ['is lf', 'lf qualified']
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
@@ -73,7 +85,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   const [pendingMapping, setPendingMapping] = useState<{ 
     rows: any[][], 
     target: PasteTarget, 
-    map: Record<string, number> 
+    map: Record<string, number>,
+    specialistMap: Record<string, number>
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,10 +109,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     return () => clearInterval(interval);
   }, [isScanning]);
 
-  const detectHeadersLocally = (headers: any[]): Record<string, number> => {
+  const detectHeadersLocally = (headers: any[]): { map: Record<string, number>, specialistMap: Record<string, number> } => {
     const map: Record<string, number> = {};
+    const specialistMap: Record<string, number> = {};
     const normalizedHeaders = headers.map(h => String(h || '').toLowerCase().trim());
 
+    // Main Fields
     Object.entries(HEADER_ALIASES).forEach(([key, aliases]) => {
       const index = normalizedHeaders.findIndex(h => 
         aliases.some(alias => h === alias || h.includes(alias))
@@ -107,7 +122,16 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       map[key] = index;
     });
 
-    return map;
+    // Specialist Counts (Shifts)
+    AVAILABLE_SKILLS.forEach(skill => {
+      const aliases = SPECIALIST_FIELDS[skill];
+      const index = normalizedHeaders.findIndex(h => 
+        aliases.some(alias => h === alias || (h.includes(alias) && h.includes('count')))
+      );
+      if (index !== -1) specialistMap[skill] = index;
+    });
+
+    return { map, specialistMap };
   };
 
   const parseImportDate = (val: any) => {
@@ -128,6 +152,11 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         return `${y}-${m}-${d}`;
       }
     }
+    // Try to sanitize YYYY-MM-DD
+    const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    }
     return str;
   };
 
@@ -140,21 +169,40 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       const mm = totalMinutes % 60;
       return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     }
-    let str = String(val).trim();
+    let str = String(val).trim().replace(/[^\d:apm\s]/gi, '');
+    
+    // Handle 0600 or 600
     if (/^\d{3,4}$/.test(str)) {
       str = str.padStart(4, '0');
       return `${str.slice(0, 2)}:${str.slice(2, 4)}`;
     }
+
+    // Handle 6am / 6:30pm
+    if (/(am|pm)/i.test(str)) {
+      const isPm = /pm/i.test(str);
+      let [h, m] = str.replace(/(am|pm)/gi, '').split(':').map(Number);
+      if (isNaN(m)) m = 0;
+      if (isPm && h < 12) h += 12;
+      if (!isPm && h === 12) h = 0;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    // Standard HH:mm[:ss]
+    const parts = str.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+    }
+
     return str;
   };
 
   const parseBoolean = (val: any): boolean => {
     if (val === null || val === undefined) return false;
     const str = String(val).toLowerCase().trim();
-    return ['yes', 'y', 'true', '1', 'ok', 'active'].includes(str);
+    return ['yes', 'y', 'true', '1', 'ok', 'active', 'qualified', 'x'].includes(str);
   };
 
-  const processLocalRows = (rows: any[][], map: Record<string, number>) => {
+  const processLocalRows = (rows: any[][], map: Record<string, number>, specialistMap: Record<string, number> = {}) => {
     const dataRows = rows.slice(1);
     const flights: Flight[] = [];
     const staff: Staff[] = [];
@@ -167,6 +215,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       const staffName = map.name !== -1 ? String(row[map.name] || '').trim() : '';
       const pickupTime = map.pickupTime !== -1 ? parseImportTime(row[map.pickupTime]) : '';
 
+      // Flight Processing
       if (flightNo && (pasteTarget === 'all' || pasteTarget === 'flights')) {
         flights.push({
           id: `f-${idx}-${Math.random().toString(36).substr(2, 4)}`,
@@ -181,6 +230,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         });
       }
 
+      // Staff Processing
       if (staffName && (pasteTarget === 'all' || pasteTarget === 'staff')) {
         const typeStr = map.type !== -1 ? String(row[map.type] || '').toLowerCase() : '';
         const isRoster = typeStr.includes('rost') || typeStr.includes('contract');
@@ -196,23 +246,47 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           isLoadControl: map.isLoadControl !== -1 ? parseBoolean(row[map.isLoadControl]) : false,
           isOps: map.isOps !== -1 ? parseBoolean(row[map.isOps]) : false,
           isShiftLeader: map.isShiftLeader !== -1 ? parseBoolean(row[map.isShiftLeader]) : false,
-          isLostFound: map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false
+          isLostFound: map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false,
+          workFromDate: isRoster ? parseImportDate(row[map.date] || row[map.pickupDate]) : undefined,
+          workToDate: undefined
         });
       }
 
+      // Shift Processing (Refined for "Shifts Reflect Good")
       if (pickupTime && (pasteTarget === 'all' || pasteTarget === 'shifts')) {
         const pDate = parseImportDate(row[map.pickupDate] || row[map.date]);
+        const endTime = map.endTime !== -1 ? parseImportTime(row[map.endTime]) : '';
+        
+        // Handle overnight shifts if Release Date is missing
+        let eDate = map.endDate !== -1 ? parseImportDate(row[map.endDate]) : pDate;
+        if (pDate && pickupTime && endTime && map.endDate === -1) {
+            const startMins = parseInt(pickupTime.split(':')[0]) * 60 + parseInt(pickupTime.split(':')[1]);
+            const endMins = parseInt(endTime.split(':')[0]) * 60 + parseInt(endTime.split(':')[1]);
+            if (endMins < startMins) {
+                const nextDay = new Date(pDate);
+                nextDay.setDate(nextDay.getDate() + 1);
+                eDate = nextDay.toISOString().split('T')[0];
+            }
+        }
+
+        // Specialist Role Extraction
+        const roleCounts: Partial<Record<Skill, number>> = {};
+        Object.entries(specialistMap).forEach(([role, colIndex]) => {
+          const val = parseInt(row[colIndex]);
+          if (!isNaN(val) && val > 0) roleCounts[role as Skill] = val;
+        });
+
         shifts.push({
           id: `sh-${idx}-${Math.random().toString(36).substr(2, 4)}`,
           pickupDate: pDate,
           pickupTime: pickupTime,
-          endDate: parseImportDate(row[map.endDate] || pDate),
-          endTime: map.endTime !== -1 ? parseImportTime(row[map.endTime]) : '',
+          endDate: eDate,
+          endTime: endTime,
           minStaff: map.minStaff !== -1 ? (parseInt(row[map.minStaff]) || 2) : 2,
           maxStaff: map.maxStaff !== -1 ? (parseInt(row[map.maxStaff]) || 8) : 8,
           day: 0,
           flightIds: [],
-          roleCounts: {}
+          roleCounts: roleCounts
         });
       }
     });
@@ -244,13 +318,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
         if (rows.length < 1) throw new Error("Document appears to be empty.");
 
-        const localMap = detectHeadersLocally(rows[0]);
-        const identifiedCount = Object.values(localMap).filter(v => v !== -1).length;
+        const result = detectHeadersLocally(rows[0]);
+        const identifiedCount = Object.values(result.map).filter(v => v !== -1).length;
 
         if (identifiedCount >= 2) {
-          processLocalRows(rows, localMap);
+          processLocalRows(rows, result.map, result.specialistMap);
         } else {
-          setPendingMapping({ rows, target: pasteTarget, map: localMap });
+          setPendingMapping({ rows, target: pasteTarget, map: result.map, specialistMap: result.specialistMap });
           setIsScanning(false);
         }
       } catch (err: any) {
@@ -276,11 +350,11 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       
       if (rows.length < 1) throw new Error("Empty buffer.");
 
-      const localMap = detectHeadersLocally(rows[0]);
-      if (Object.values(localMap).filter(v => v !== -1).length >= 2) {
-        processLocalRows(rows, localMap);
+      const result = detectHeadersLocally(rows[0]);
+      if (Object.values(result.map).filter(v => v !== -1).length >= 2) {
+        processLocalRows(rows, result.map, result.specialistMap);
       } else {
-        setPendingMapping({ rows, target: pasteTarget, map: localMap });
+        setPendingMapping({ rows, target: pasteTarget, map: result.map, specialistMap: result.specialistMap });
         setIsScanning(false);
       }
     } catch (e) {
@@ -307,12 +381,19 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     }
   };
 
-  const updateMapping = (field: string, index: number) => {
+  const updateMapping = (field: string, index: number, isSpecialist = false) => {
     if (!pendingMapping) return;
-    setPendingMapping({
-      ...pendingMapping,
-      map: { ...pendingMapping.map, [field]: index }
-    });
+    if (isSpecialist) {
+      setPendingMapping({
+        ...pendingMapping,
+        specialistMap: { ...pendingMapping.specialistMap, [field]: index }
+      });
+    } else {
+      setPendingMapping({
+        ...pendingMapping,
+        map: { ...pendingMapping.map, [field]: index }
+      });
+    }
   };
 
   return (
@@ -384,24 +465,68 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                 </div>
              </div>
              
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10 max-h-[400px] overflow-y-auto pr-4 no-scrollbar">
-                {Object.keys(HEADER_ALIASES).map((field) => (
-                   <div key={field} className="p-6 rounded-[2rem] bg-slate-50 border border-slate-100 space-y-3">
-                      <label className="text-[9px] font-black uppercase text-slate-400 block">{field}</label>
-                      <select 
-                        className="w-full p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold outline-none"
-                        value={pendingMapping.map[field] ?? -1}
-                        onChange={(e) => updateMapping(field, parseInt(e.target.value))}
-                      >
-                         <option value={-1}>[Ignore Field]</option>
-                         {pendingMapping.rows[0]?.map((h: any, i: number) => (
-                           <option key={i} value={i}>{h || `Column ${i+1}`}</option>
-                         ))}
-                      </select>
-                   </div>
-                ))}
+             <div className="space-y-12 max-h-[500px] overflow-y-auto pr-4 no-scrollbar">
+                {/* Primary Data Fields */}
+                <div className="space-y-6">
+                  <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 flex items-center gap-2">
+                    <CheckCircle2 size={14} /> Core Registry Fields
+                  </h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Object.keys(HEADER_ALIASES).map((field) => (
+                      <div key={field} className="p-6 rounded-[2rem] bg-slate-50 border border-slate-100 space-y-3">
+                          <label className="text-[9px] font-black uppercase text-slate-400 block">{field}</label>
+                          <div className="relative">
+                            <select 
+                              className="w-full p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold outline-none appearance-none"
+                              value={pendingMapping.map[field] ?? -1}
+                              onChange={(e) => updateMapping(field, parseInt(e.target.value))}
+                            >
+                              <option value={-1}>[Ignore Field]</option>
+                              {pendingMapping.rows[0]?.map((h: any, i: number) => (
+                                <option key={i} value={i}>{h || `Column ${i+1}`}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                          </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Specialist Staffing Fields (Shifts) */}
+                <div className="space-y-6 border-t border-slate-100 pt-10">
+                  <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 flex items-center gap-2">
+                    <ShieldCheck size={14} /> Specialist Matrix Mapping
+                  </h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {AVAILABLE_SKILLS.map((skill) => (
+                      <div key={skill} className="p-6 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-3">
+                          <label className="text-[9px] font-black uppercase text-indigo-400 block">{skill} Count</label>
+                          <div className="relative">
+                            <select 
+                              className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-[10px] font-bold outline-none appearance-none"
+                              value={pendingMapping.specialistMap[skill] ?? -1}
+                              onChange={(e) => updateMapping(skill, parseInt(e.target.value), true)}
+                            >
+                              <option value={-1}>[Default: 0]</option>
+                              {pendingMapping.rows[0]?.map((h: any, i: number) => (
+                                <option key={i} value={i}>{h || `Column ${i+1}`}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-300 pointer-events-none" />
+                          </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
              </div>
-             <button onClick={() => processLocalRows(pendingMapping.rows, pendingMapping.map)} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all">GENERATE REGISTRY FROM MAP <ArrowRight size={20}/></button>
+
+             <div className="mt-12 flex gap-4">
+               <button onClick={() => setPendingMapping(null)} className="flex-1 py-7 text-slate-400 font-black uppercase text-xs italic">Cancel</button>
+               <button onClick={() => processLocalRows(pendingMapping.rows, pendingMapping.map, pendingMapping.specialistMap)} className="flex-[2] py-7 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">
+                 GENERATE REGISTRY FROM MAP <ArrowRight size={20}/>
+               </button>
+             </div>
           </div>
         )}
 
@@ -430,7 +555,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                         <th className="px-6 py-4">ENTITY</th>
                         <th className="px-6 py-4">IDENTIFIER</th>
                         <th className="px-6 py-4">DETAILS</th>
-                        <th className="px-6 py-4">QUALIFICATIONS</th>
+                        <th className="px-6 py-4">QUALIFICATIONS / MATRIX</th>
                         <th className="px-6 py-4 text-right">ACTION</th>
                       </tr>
                     </thead>
@@ -468,7 +593,14 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                           <td className="px-6 py-4 text-amber-600 uppercase flex items-center gap-2"><Clock size={12}/> SHIFT</td>
                           <td className="px-6 py-4">{sh.pickupTime} — {sh.endTime}</td>
                           <td className="px-6 py-4 text-slate-400 uppercase">{sh.pickupDate} | HC: {sh.minStaff}-{sh.maxStaff}</td>
-                          <td className="px-6 py-4 text-emerald-500">PARSED</td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (
+                                <span key={role} className="bg-amber-100 text-amber-700 px-1 rounded text-[7px] uppercase">{role}: {count}</span>
+                              ))}
+                              {(!sh.roleCounts || Object.keys(sh.roleCounts).length === 0) && <span className="text-slate-300 italic">None</span>}
+                            </div>
+                          </td>
                           <td className="px-6 py-4 text-right">
                             <button onClick={() => setExtractedData(prev => prev ? {...prev, shifts: prev.shifts.filter((_, idx) => idx !== i)} : null)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={14}/></button>
                           </td>

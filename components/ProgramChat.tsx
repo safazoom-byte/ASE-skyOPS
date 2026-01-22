@@ -1,6 +1,7 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { modifyProgramWithAI, ExtractionMedia } from '../services/geminiService.ts';
-import { ProgramData, DailyProgram } from '../types.ts';
+import { modifyProgramWithAI, ExtractionMedia } from '../services/geminiService';
+import { ProgramData, DailyProgram } from '../types';
 import { X, Send, MessageSquare, Sparkles, Check, RotateCcw, HelpCircle, AlertCircle, Paperclip, FileText } from 'lucide-react';
 
 interface Message {

@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types.ts';
-import { DAYS_OF_WEEK } from '../constants.tsx';
+import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types';
+import { DAYS_OF_WEEK } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 

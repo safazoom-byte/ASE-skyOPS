@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types.ts";
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
 export interface ExtractionMedia {
   data: string;

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { Staff, Skill, StaffCategory } from '../types.ts';
-import { AVAILABLE_SKILLS } from '../constants.tsx';
+import { Staff, Skill, StaffCategory } from '../types';
+import { AVAILABLE_SKILLS } from '../constants';
 import * as XLSX from 'xlsx';
 import { 
   Users,

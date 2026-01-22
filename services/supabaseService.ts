@@ -1,9 +1,9 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Flight, Staff, ShiftConfig, DailyProgram } from '../types.ts';
+import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 
-const SUPABASE_URL = (process.env as any).SUPABASE_URL;
-const SUPABASE_ANON_KEY = (process.env as any).SUPABASE_ANON_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.warn("SKY_OPS_CRITICAL: Supabase environment variables are missing. Cloud Sync disabled.");
@@ -55,6 +55,8 @@ export const db = {
         flights: (fRes.data || []).map(f => ({
           ...f,
           flightNumber: f.flight_number,
+          from: f.origin,
+          to: f.destination,
           sta: f.sta,
           std: f.std,
           date: f.flight_date,
