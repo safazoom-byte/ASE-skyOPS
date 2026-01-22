@@ -1,4 +1,5 @@
 
+/* ... existing imports ... */
 import React, { useState, useRef, useEffect } from 'react';
 import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
@@ -70,6 +71,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
+  /* ... existing state and logic ... */
   const [isScanning, setIsScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
   const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] } | null>(null);
@@ -119,30 +121,24 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   };
 
   const parseImportDate = (val: any) => {
-    if (val === null || val === undefined || val === '') return startDate || new Date().toISOString().split('T')[0];
-    let dateObj: Date;
+    if (val === null || val === undefined || val === '') return startDate || '';
     if (typeof val === 'number') {
-      const serial = val;
-      dateObj = new Date(0);
-      dateObj.setUTCMilliseconds(Math.round((serial - 25569) * 86400 * 1000));
-    } else {
-      const str = String(val).trim();
-      if (str.includes('/')) {
-        const parts = str.split('/');
-        if (parts.length === 3) {
-          let d = parts[0].padStart(2, '0'), m = parts[1].padStart(2, '0'), y = parts[2];
-          if (y.length === 2) y = '20' + y;
-          dateObj = new Date(`${y}-${m}-${d}T00:00:00Z`);
-        } else {
-          dateObj = new Date(str);
-        }
-      } else {
-        dateObj = new Date(str + (str.includes('T') ? '' : 'T00:00:00Z'));
+      const date = new Date(0);
+      date.setUTCMilliseconds(Math.round((val - 25569) * 86400 * 1000));
+      return date.getUTCFullYear() + '-' + 
+             String(date.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+             String(date.getUTCDate()).padStart(2, '0');
+    }
+    const str = String(val).trim();
+    if (str.includes('/')) {
+      const parts = str.split('/');
+      if (parts.length === 3) {
+        let d = parts[0].padStart(2, '0'), m = parts[1].padStart(2, '0'), y = parts[2];
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m}-${d}`;
       }
     }
-
-    if (isNaN(dateObj.getTime())) return startDate || new Date().toISOString().split('T')[0];
-    return dateObj.toISOString().split('T')[0];
+    return str;
   };
 
   const parseImportTime = (val: any) => {
@@ -264,6 +260,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     setIsScanning(false);
   };
 
+  /* ... rest of existing component logic ... */
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -374,6 +371,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
+      {/* ... existing header and content logic ... */}
       <div className="p-8 lg:p-12 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
          <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/20"><Layers size={24} /></div>
@@ -527,6 +525,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                           <td className="px-6 py-4 text-slate-400 uppercase">{sh.pickupDate} | HC: {sh.minStaff}-{sh.maxStaff}</td>
                           <td className="px-6 py-4">
                             <div className="flex gap-1">
+                              {/* Fix: cast count to number or ensure it is numeric to fix TypeScript error in line 528 context (mapping over entries) */}
                               {Object.entries(sh.roleCounts || {}).map(([role, count]) => (Number(count) || 0) > 0 && (
                                 <span key={role} className="bg-amber-100 text-amber-700 px-1 rounded text-[7px]">{role}: {count}</span>
                               ))}

@@ -29,14 +29,7 @@ export default defineConfig(({ mode }) => {
         }
       },
       rollupOptions: {
-        // Externalize modules that are failing to resolve during the build.
-        // These will be resolved by the browser using the importmap in index.html.
-        external: [
-          '@supabase/supabase-js',
-          '@google/genai'
-        ],
         output: {
-          format: 'es',
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
             'vendor-utils': ['xlsx', 'jspdf', 'jspdf-autotable', 'lucide-react']

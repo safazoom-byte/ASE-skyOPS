@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 
@@ -55,14 +54,10 @@ export const db = {
         supabase.from('programs').select('*').eq('user_id', userId)
       ]);
 
-      if (fRes.error || sRes.error || shRes.error || pRes.error) {
-        console.error("Database fetch error:", { 
-          flights: fRes.error, 
-          staff: sRes.error, 
-          shifts: shRes.error, 
-          programs: pRes.error 
-        });
-      }
+      if (fRes.error) throw fRes.error;
+      if (sRes.error) throw sRes.error;
+      if (shRes.error) throw shRes.error;
+      if (pRes.error) throw pRes.error;
 
       return {
         flights: (fRes.data || []).map(f => ({
@@ -73,8 +68,8 @@ export const db = {
           sta: f.sta,
           std: f.std,
           date: f.flight_date,
-          type: f.flight_type,
-          day: f.day
+          type: f.flight_type || 'Turnaround',
+          day: f.day || 0
         })),
         staff: (sRes.data || []).map(s => ({
           id: s.id,
@@ -87,40 +82,40 @@ export const db = {
           isOps: !!s.is_ops,
           isLoadControl: !!s.is_load_control,
           isLostFound: !!s.is_lost_found,
-          powerRate: s.power_rate,
-          maxShiftsPerWeek: s.max_shifts_per_week,
+          powerRate: s.power_rate || 75,
+          maxShiftsPerWeek: s.max_shifts_per_week || 5,
           workFromDate: s.work_from_date,
           workToDate: s.work_to_date
         })),
         shifts: (shRes.data || []).map(s => ({
           id: s.id,
-          day: s.day,
+          day: s.day || 0,
           pickupDate: s.pickup_date,
           pickupTime: s.pickup_time,
           endDate: s.end_date,
           endTime: s.end_time,
-          minStaff: s.min_staff || 0,
-          maxStaff: s.max_staff || 0,
+          minStaff: s.min_staff || 1,
+          maxStaff: s.max_staff || 10,
           roleCounts: s.role_counts || {},
           flightIds: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
-          dateString: p.date_string, // Corrected mapping
+          dateString: p.date_string,
           assignments: p.assignments || [],
           offDuty: p.off_duty || []
         }))
       };
     } catch (e) {
-      console.error("Critical Supabase Fetch Error:", e);
-      return null;
+      console.error("Supabase fetchAll Error:", e);
+      throw e;
     }
   },
 
   async upsertFlight(f: Flight) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) throw new Error("Authentication required.");
+    if (!session) return;
     
     const payload = {
       id: f.id,
@@ -142,7 +137,7 @@ export const db = {
   async upsertStaff(s: Staff) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) throw new Error("Authentication required.");
+    if (!session) return;
 
     const payload = {
       id: s.id,
@@ -169,19 +164,18 @@ export const db = {
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) throw new Error("Authentication required.");
+    if (!session) return;
 
-    // Defensive check to prevent invalid numbers hitting the DB
     const payload = {
       id: s.id,
       user_id: session.user.id,
-      day: s.day || 0,
+      day: s.day,
       pickup_date: s.pickupDate,
       pickup_time: s.pickupTime,
-      end_date: s.endDate || s.pickupDate,
+      end_date: s.endDate,
       end_time: s.endTime,
-      min_staff: Number(s.minStaff) || 0,
-      max_staff: Number(s.maxStaff) || 0,
+      min_staff: s.minStaff,
+      max_staff: s.maxStaff,
       role_counts: s.roleCounts || {},
       flight_ids: s.flightIds || []
     };
@@ -198,18 +192,21 @@ export const db = {
 
     try {
       await supabase.from('programs').delete().eq('user_id', userId); 
-      const { error } = await supabase.from('programs').insert(
-        programs.map(p => ({
-          user_id: userId,
-          day: p.day,
-          date_string: p.dateString,
-          assignments: p.assignments,
-          off_duty: p.offDuty
-        }))
-      );
-      if (error) throw error;
+      if (programs.length > 0) {
+        const { error } = await supabase.from('programs').insert(
+          programs.map(p => ({
+            user_id: userId,
+            day: p.day,
+            date_string: p.dateString,
+            assignments: p.assignments,
+            off_duty: p.offDuty
+          }))
+        );
+        if (error) throw error;
+      }
     } catch (e) {
-      console.error("Supabase Program Save Error:", e);
+      console.error("Supabase savePrograms Error:", e);
+      throw e;
     }
   },
 
