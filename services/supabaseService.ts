@@ -55,14 +55,11 @@ export const db = {
         supabase.from('programs').select('*').eq('user_id', userId)
       ]);
 
-      if (fRes.error || sRes.error || shRes.error || pRes.error) {
-        console.error("Database fetch error:", { 
-          flights: fRes.error, 
-          staff: sRes.error, 
-          shifts: shRes.error, 
-          programs: pRes.error 
-        });
-      }
+      // STRENGTHENED: Throw on error to ensure syncStatus becomes 'error' in App.tsx
+      if (fRes.error) { console.error("Flights Fetch Error:", fRes.error); throw fRes.error; }
+      if (sRes.error) { console.error("Staff Fetch Error:", sRes.error); throw sRes.error; }
+      if (shRes.error) { console.error("Shifts Fetch Error:", shRes.error); throw shRes.error; }
+      if (pRes.error) { console.error("Programs Fetch Error:", pRes.error); throw pRes.error; }
 
       return {
         flights: (fRes.data || []).map(f => ({
@@ -112,7 +109,7 @@ export const db = {
         }))
       };
     } catch (e) {
-      console.error("Critical Supabase Fetch Error:", e);
+      console.error("CRITICAL SUPABASE SYNC FAILURE:", e);
       return null;
     }
   },
@@ -136,7 +133,10 @@ export const db = {
     };
 
     const { error } = await supabase.from('flights').upsert(payload, { onConflict: 'id' });
-    if (error) throw error;
+    if (error) {
+       console.error("Supabase upsertFlight error:", error);
+       throw error;
+    }
   },
 
   async upsertStaff(s: Staff) {
@@ -163,7 +163,10 @@ export const db = {
     };
 
     const { error } = await supabase.from('staff').upsert(payload, { onConflict: 'id' });
-    if (error) throw error;
+    if (error) {
+       console.error("Supabase upsertStaff error:", error);
+       throw error;
+    }
   },
 
   async upsertShift(s: ShiftConfig) {
@@ -175,7 +178,6 @@ export const db = {
       id: s.id,
       user_id: session.user.id,
       day: s.day,
-      day_name: new Date(s.pickupDate).toLocaleDateString('en-US', { weekday: 'long' }),
       pickup_date: s.pickupDate,
       pickup_time: s.pickupTime,
       end_date: s.endDate,
@@ -187,7 +189,10 @@ export const db = {
     };
 
     const { error } = await supabase.from('shifts').upsert(payload, { onConflict: 'id' });
-    if (error) throw error;
+    if (error) {
+       console.error("Supabase upsertShift error:", error);
+       throw error;
+    }
   },
 
   async savePrograms(programs: DailyProgram[]) {
@@ -197,19 +202,25 @@ export const db = {
     const userId = session.user.id;
 
     try {
-      await supabase.from('programs').delete().eq('user_id', userId); 
-      const { error } = await supabase.from('programs').insert(
-        programs.map(p => ({
-          user_id: userId,
-          day: p.day,
-          date_string: p.dateString,
-          assignments: p.assignments,
-          off_duty: p.offDuty
-        }))
-      );
-      if (error) throw error;
+      // Clear existing user programs to prevent data pollution
+      const { error: delError } = await supabase.from('programs').delete().eq('user_id', userId); 
+      if (delError) throw delError;
+
+      if (programs.length > 0) {
+        const { error } = await supabase.from('programs').insert(
+          programs.map(p => ({
+            user_id: userId,
+            day: p.day,
+            date_string: p.dateString,
+            assignments: p.assignments,
+            off_duty: p.offDuty
+          }))
+        );
+        if (error) throw error;
+      }
     } catch (e) {
-      console.error("Supabase Program Save Error:", e);
+      console.error("Supabase savePrograms error:", e);
+      throw e;
     }
   },
 
@@ -217,18 +228,21 @@ export const db = {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('flights').delete().eq('id', id).eq('user_id', session.user.id); 
+    const { error } = await supabase.from('flights').delete().eq('id', id).eq('user_id', session.user.id); 
+    if (error) throw error;
   },
   async deleteStaff(id: string) { 
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('staff').delete().eq('id', id).eq('user_id', session.user.id); 
+    const { error } = await supabase.from('staff').delete().eq('id', id).eq('user_id', session.user.id); 
+    if (error) throw error;
   },
   async deleteShift(id: string) { 
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); 
+    const { error } = await supabase.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); 
+    if (error) throw error;
   }
 };
