@@ -105,7 +105,7 @@ export const db = {
 
   async upsertFlight(f: Flight) {
     if (!supabase) return;
-    return await supabase.from('flights').upsert({
+    const { error } = await supabase.from('flights').upsert({
       id: f.id,
       flight_number: f.flightNumber,
       origin: f.from,
@@ -116,11 +116,15 @@ export const db = {
       flight_type: f.type,
       day: f.day
     });
+    if (error) {
+       console.error("Supabase Flight Upsert Error:", error);
+       throw error;
+    }
   },
 
   async upsertStaff(s: Staff) {
     if (!supabase) return;
-    return await supabase.from('staff').upsert({
+    const { error } = await supabase.from('staff').upsert({
       id: s.id,
       name: s.name,
       initials: s.initials,
@@ -136,11 +140,15 @@ export const db = {
       work_from_date: s.workFromDate,
       work_to_date: s.workToDate
     });
+    if (error) {
+       console.error("Supabase Staff Upsert Error:", error);
+       throw error;
+    }
   },
 
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
-    return await supabase.from('shifts').upsert({
+    const { error } = await supabase.from('shifts').upsert({
       id: s.id,
       day: s.day,
       pickup_date: s.pickupDate,
@@ -152,19 +160,28 @@ export const db = {
       role_counts: s.roleCounts,
       flight_ids: s.flightIds
     });
+    if (error) {
+       console.error("Supabase Shift Upsert Error:", error);
+       throw error;
+    }
   },
 
   async savePrograms(programs: DailyProgram[]) {
     if (!supabase) return;
-    await supabase.from('programs').delete().neq('id', '0'); // Clear old programs
-    return await supabase.from('programs').insert(
-      programs.map(p => ({
-        day: p.day,
-        date_string: p.dateString,
-        assignments: p.assignments,
-        off_duty: p.offDuty
-      }))
-    );
+    try {
+      await supabase.from('programs').delete().neq('id', '0'); 
+      const { error } = await supabase.from('programs').insert(
+        programs.map(p => ({
+          day: p.day,
+          date_string: p.dateString,
+          assignments: p.assignments,
+          off_duty: p.offDuty
+        }))
+      );
+      if (error) throw error;
+    } catch (e) {
+      console.error("Supabase Program Save Error:", e);
+    }
   },
 
   async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },
