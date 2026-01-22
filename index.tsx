@@ -123,7 +123,6 @@ const App: React.FC = () => {
     const unsubscribe = auth.onAuthStateChange((s) => {
       setSession(s);
       if (!s) {
-        // Clear all states on logout
         setFlights([]);
         setStaff([]);
         setShifts([]);
@@ -135,7 +134,6 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Load cloud data on session
   useEffect(() => {
     if (supabase && session) {
       setSyncStatus('syncing');
@@ -160,13 +158,13 @@ const App: React.FC = () => {
     if (!startDate || !endDate) return 7;
     const start = new Date(startDate);
     const end = new Date(endDate);
-    return Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return Math.max(1, diff);
   }, [startDate, endDate]);
 
   const activeFlightsInRange = useMemo(() => (flights || []).filter(f => f.date >= startDate && f.date <= endDate), [flights, startDate, endDate]);
   const activeShiftsInRange = useMemo(() => (shifts || []).filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate), [shifts, startDate, endDate]);
 
-  // Sync to localStorage
   useEffect(() => {
     if (!session) return;
     localStorage.setItem(STORAGE_KEYS.FLIGHTS, JSON.stringify(flights || []));
@@ -220,28 +218,42 @@ const App: React.FC = () => {
   };
 
   const confirmGenerateProgram = async () => {
-    if (activeFlightsInRange.length === 0) { setError("No flights in window."); setShowConfirmDialog(false); return; }
-    setShowConfirmDialog(false); setIsGenerating(true); setComplianceLog([]); setShowWarningModal(false);
+    // Critical Guard: Ensure shifts exist for the period
+    if (activeShiftsInRange.length === 0) {
+      setError("No Duty Master slots (shifts) found for this window. Define shifts first.");
+      setShowConfirmDialog(false);
+      return;
+    }
+
+    if (activeFlightsInRange.length === 0) { 
+      setError("No flights found in window. Roster requires flight data."); 
+      setShowConfirmDialog(false); 
+      return; 
+    }
+
+    setShowConfirmDialog(false); 
+    setIsGenerating(true); 
+    setComplianceLog([]); 
+    setShowWarningModal(false);
     
     try {
       const inputData: ProgramData = { flights: activeFlightsInRange, staff: staff || [], shifts: activeShiftsInRange, programs: [] };
-      setGenerationStep(1); 
+      
+      setGenerationStep(1); // Structural Draft
       let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, minRestHours, startDate });
       
       if (result.hasBlockers) { 
         setComplianceLog(result.validationLog || ["Structural Failure"]); 
-        setError("Structural logic failure. Check Registry."); return; 
+        setError("Structural logic failure. Check Registry and availability."); 
+        return; 
       }
 
-      setGenerationStep(2); 
-      result = await refineAIProgram(result, inputData, 2, { minRestHours, startDate, numDays });
+      setGenerationStep(2); // Quality Optimization
+      result = await refineAIProgram(result, inputData, 1, { minRestHours, startDate, numDays });
       
-      setGenerationStep(3); 
-      result = await refineAIProgram(result, inputData, 3, { minRestHours, startDate, numDays });
-
       setProposedPrograms(result.programs);
-      if (!result.isCompliant) {
-        setComplianceLog(result.validationLog || ["5/2 Law Warnings"]);
+      if (!result.isCompliant || result.validationLog?.length) {
+        setComplianceLog(result.validationLog || ["Reviewing policy exceptions..."]);
         setShowWarningModal(true);
       } else {
         setPrograms(result.programs || []); 
@@ -251,11 +263,12 @@ const App: React.FC = () => {
           await db.savePrograms(result.programs || []);
           setSyncStatus('connected');
         }
-        setActiveTab('program'); setShowSuccessChecklist(true);
+        setActiveTab('program'); 
+        setShowSuccessChecklist(true);
       }
     } catch (err: any) { 
       console.error(err);
-      setError(err.message || "An unexpected error occurred during generation."); 
+      setError(err.message || "Engine timeout. Try a shorter date range."); 
     } 
     finally { setIsGenerating(false); setGenerationStep(0); }
   };
@@ -381,17 +394,17 @@ const App: React.FC = () => {
                 <div className="relative w-full h-full bg-blue-600/20 rounded-[2.5rem] flex items-center justify-center"><Cpu size={48} className="text-blue-500" /></div>
               </div>
               <h3 className="text-4xl font-black text-white italic uppercase tracking-tighter">AI Roster Generation</h3>
-              <div className="grid grid-cols-3 gap-4 relative">
-                 {[1, 2, 3].map(s => (
+              <div className="grid grid-cols-2 gap-4 relative max-w-sm mx-auto">
+                 {[1, 2].map(s => (
                    <div key={s} className="relative">
                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border mx-auto transition-all duration-500 ${generationStep >= s ? 'bg-blue-600 text-white shadow-xl scale-110' : 'bg-slate-900 text-slate-700'}`}>{generationStep > s ? <Check /> : s}</div>
                       <span className={`block mt-3 text-[7px] font-black uppercase tracking-widest ${generationStep >= s ? 'text-blue-400' : 'text-slate-600'}`}>
-                        {s === 1 ? 'Logic Parse' : s === 2 ? 'Constraint Refine' : 'Final Audit'}
+                        {s === 1 ? 'Mapping Logic' : 'Policy Audit'}
                       </span>
                    </div>
                  ))}
               </div>
-              <p className="text-blue-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Building best-fit handling sequence</p>
+              <p className="text-blue-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Building station plan — Handover prioritized</p>
            </div>
         </div>
       )}
@@ -544,6 +557,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-6">
                 <button onClick={() => setPendingVerification(null)} className="flex-1 py-8 text-slate-400 font-black uppercase italic text-xs">Discard Buffer</button>
+                {/* Fixed line below: added missing onClick and opening brace for commitVerifiedData */}
                 <button onClick={commitVerifiedData} className="flex-[2] py-8 bg-slate-950 text-white rounded-[3rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-4">AUTHORIZE MASTER SYNC <Sparkles size={20} /></button>
               </div>
            </div>

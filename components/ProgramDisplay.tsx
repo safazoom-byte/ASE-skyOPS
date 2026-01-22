@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
   CalendarOff, 
@@ -20,7 +20,8 @@ import {
   AlertCircle,
   BarChart3,
   Users,
-  CalendarDays
+  CalendarDays,
+  UserX
 } from 'lucide-react';
 
 interface Props {
@@ -43,7 +44,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  // Safe Date parsing helper
   const parseSafeDate = (dateStr?: string) => {
     if (!dateStr) return null;
     const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
@@ -66,7 +66,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const startObj = parseSafeDate(startDate);
     
     return sortedPrograms.map(p => {
-      // Robust flight filtering for the specific day
       const dayFlights = flights.filter(f => {
         if (f.date === p.dateString) return true;
         if (startObj && typeof p.day === 'number') {
@@ -79,7 +78,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
 
       const assignments = p.assignments || [];
-      const activeStaffIds = new Set(assignments.map(a => a.staffId));
+      const activeStaffIds = new Set(assignments.filter(a => a.staffId && a.staffId !== 'GAP').map(a => a.staffId));
       const activeStaffCount = activeStaffIds.size;
       
       const shiftAssignments: Record<string, Assignment[]> = {};
@@ -89,14 +88,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         }
       });
       
-      let hasShortage = false;
+      let hasShortage = assignments.some(a => !a.staffId || a.staffId === 'GAP');
       Object.keys(shiftAssignments).forEach(sid => {
         const assigs = shiftAssignments[sid];
         const sh = getShiftById(sid);
         if (sh) {
-          const hasSL = assigs.some(a => a.role === 'Shift Leader');
-          const hasLC = assigs.some(a => a.role === 'Load Control');
-          if (!hasSL || !hasLC || assigs.length < sh.minStaff) hasShortage = true;
+          const filled = assigs.filter(a => a.staffId && a.staffId !== 'GAP');
+          const hasSL = filled.some(a => a.role === 'Shift Leader');
+          const hasLC = filled.some(a => a.role === 'Load Control');
+          if (!hasSL || !hasLC || filled.length < sh.minStaff) hasShortage = true;
         }
       });
 
@@ -121,11 +121,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       Object.keys(shiftAssignments).forEach(sid => {
         const assigs = shiftAssignments[sid];
+        const filled = assigs.filter(a => a.staffId && a.staffId !== 'GAP');
         const sh = getShiftById(sid);
         if (!sh) return;
         
-        const hasSL = assigs.some(a => a.role === 'Shift Leader');
-        const hasLC = assigs.some(a => a.role === 'Load Control');
+        const hasSL = filled.some(a => a.role === 'Shift Leader');
+        const hasLC = filled.some(a => a.role === 'Load Control');
         
         if (!hasSL || !hasLC) {
           violations.push({ 
@@ -135,11 +136,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           });
         }
         
-        if (assigs.length < sh.minStaff) {
+        if (filled.length < sh.minStaff) {
           violations.push({ 
             type: 'CRITICAL', 
             day: p.day, 
-            message: `Day ${p.day+1}: Shift ${sh.pickupTime} FAILED MINIMUM (${assigs.length}/${sh.minStaff})` 
+            message: `Day ${p.day+1}: Shift ${sh.pickupTime} FAILED MINIMUM (${filled.length}/${sh.minStaff})` 
           });
         }
       });
@@ -148,7 +149,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const staffWorkCounts = new Map<string, number>();
     sortedPrograms.forEach(p => {
       (p.assignments || []).forEach(a => {
-        staffWorkCounts.set(a.staffId, (staffWorkCounts.get(a.staffId) || 0) + 1);
+        if (a.staffId && a.staffId !== 'GAP') {
+          staffWorkCounts.set(a.staffId, (staffWorkCounts.get(a.staffId) || 0) + 1);
+        }
       });
     });
 
@@ -193,9 +196,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   };
 
   const exportPDF = () => {
-    const doc = new jsPDF('l', 'mm', 'a4');
+    if (sortedPrograms.length === 0) {
+      alert("No roster detected. Please generate a program first.");
+      return;
+    }
+
+    const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
     doc.setFontSize(22).text(`SkyOPS Station Handling Plan`, 14, 20);
-    doc.setFontSize(10).text(`Window: ${startDate || 'N/A'} to ${endDate || 'N/A'}`, 14, 28);
+    doc.setFontSize(10).text(`Reporting Period: ${startDate || 'N/A'} to ${endDate || 'N/A'}`, 14, 28);
     
     sortedPrograms.forEach((program, pIdx) => {
       if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
@@ -213,20 +221,36 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
         const sh = getShiftById(sid);
         const flightList = (sh?.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
-        const personnel = assigs.map(a => `${getStaffById(a.staffId)?.initials || '??'} (${getRoleLabel([a.role])})`).join(' | ');
-        return [idx + 1, sh?.pickupTime || '--:--', sh?.endTime || '--:--', flightList || 'None', `${assigs.length}/${sh?.maxStaff || '--'}`, personnel];
+        const personnel = assigs.map(a => {
+           if (!a.staffId || a.staffId === 'GAP') return `[VACANT] (${getRoleLabel([a.role])})`;
+           const s = getStaffById(a.staffId);
+           return `${s?.initials || '??'} (${getRoleLabel([a.role])})`;
+        }).join(' | ');
+        
+        return [
+          idx + 1, 
+          sh?.pickupTime || '--:--', 
+          sh?.endTime || '--:--', 
+          flightList || 'Base Operations', 
+          `${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/${sh?.maxStaff || '--'}`, 
+          personnel
+        ];
       });
 
       autoTable(doc, { 
         startY: 45, 
-        head: [['#', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC/MAX', 'PERSONNEL & ROLES']], 
+        head: [['#', 'PICKUP', 'RELEASE', 'FLIGHT HANDLING', 'HC/MAX', 'PERSONNEL & ROLES']], 
         body: tableData, 
         theme: 'striped', 
-        styles: { fontSize: 8, cellPadding: 4 },
-        headStyles: { fillStyle: 'DF', fillColor: [15, 23, 42] }
+        styles: { fontSize: 8, cellPadding: 4, font: 'helvetica' },
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
+        columnStyles: {
+           5: { cellWidth: 80 }
+        }
       });
     });
-    doc.save(`SkyOPS_Station_Program.pdf`);
+    
+    doc.save(`SkyOPS_Roster_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   return (
@@ -239,7 +263,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
              <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{startDate} — {endDate}</p>
            </div>
         </div>
-        <button onClick={exportPDF} className="px-10 py-6 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 hover:bg-blue-600 transition-all shadow-xl shadow-slate-950/20">
+        <button 
+          onClick={exportPDF} 
+          disabled={sortedPrograms.length === 0}
+          className="px-10 py-6 bg-slate-950 text-white rounded-[2rem] text-[11px] font-black uppercase flex items-center gap-4 hover:bg-blue-600 transition-all shadow-xl shadow-slate-950/20 disabled:opacity-30"
+        >
           <FileText size={20} /> AUTHORIZE PDF EXPORT
         </button>
       </div>
@@ -270,13 +298,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
               </div>
             </div>
           ))}
+          {dayStats.length === 0 && (
+            <div className="col-span-full py-10 text-center text-[10px] font-black text-slate-300 uppercase italic">Awaiting Registry Draft...</div>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm">
            <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8 flex items-center gap-3"><Cpu size={16} className="text-blue-500" /> Operational Shadow Auditor</h4>
-           {shadowAudit.length === 0 ? (
+           {shadowAudit.length === 0 && sortedPrograms.length > 0 ? (
              <div className="flex items-center gap-6 p-10 bg-emerald-50 rounded-[2.5rem] border border-emerald-100">
                <CheckCircle2 className="text-emerald-500" size={40} />
                <p className="text-lg font-black text-emerald-900 uppercase italic">Station Health 100%</p>
@@ -289,6 +320,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                    <span className="text-[10px] font-black uppercase italic leading-tight">{v.message}</span>
                  </div>
                ))}
+               {sortedPrograms.length === 0 && (
+                 <p className="text-[10px] font-black text-slate-400 uppercase italic">No program generated yet.</p>
+               )}
              </div>
            )}
         </div>
@@ -326,7 +360,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                 <div className="flex gap-4">
                   <div className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-center">
                     <span className="block text-[8px] font-black text-slate-500 uppercase mb-1">Total HC</span>
-                    <span className="text-xl font-black italic text-white">{new Set((program.assignments || []).map(a => a.staffId)).size}</span>
+                    <span className="text-xl font-black italic text-white">{new Set((program.assignments || []).filter(a => a.staffId && a.staffId !== 'GAP').map(a => a.staffId)).size}</span>
                   </div>
                 </div>
               </div>
@@ -350,8 +384,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh?.pickupTime || '--:--'}</td>
                           <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh?.endTime || '--:--'}</td>
                           <td className="px-6 py-10 text-center">
-                            <span className={`font-black text-xl italic px-4 py-2 rounded-2xl ${assigs.length < (sh?.minStaff || 0) ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                              {assigs.length}/{sh?.maxStaff || '--'}
+                            <span className={`font-black text-xl italic px-4 py-2 rounded-2xl ${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length < (sh?.minStaff || 0) ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                              {assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/{sh?.maxStaff || '--'}
                             </span>
                           </td>
                           <td className="px-10 py-10">
@@ -360,16 +394,23 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                 <Plane size={14} className="text-blue-500" />{f!.flightNumber}
                               </div>
                             ))}
+                            {(sh?.flightIds || []).length === 0 && (
+                               <div className="text-[9px] font-black uppercase text-slate-300 italic">Base Operations</div>
+                            )}
                           </td>
                           <td className="px-10 py-10">
                             <div className="flex flex-wrap gap-4">
                               {assigs.map(a => {
-                                const s = getStaffById(a.staffId);
+                                const isGap = !a.staffId || a.staffId === 'GAP';
+                                const s = isGap ? null : getStaffById(a.staffId);
                                 const label = getRoleLabel([a.role]);
                                 return (
-                                  <div key={a.id} className={`px-5 py-4 rounded-2xl border shadow-sm transition-all hover:scale-105 ${label !== 'Duty' ? 'bg-slate-950 text-white border-slate-900' : 'bg-white border-slate-100 text-slate-900'}`}>
-                                    <span className="text-xl font-black italic tracking-tighter">{s?.initials || '??'}</span>
-                                    <span className="text-[7px] font-black uppercase block opacity-60 tracking-widest mt-1">{label}</span>
+                                  <div key={a.id} className={`px-5 py-4 rounded-2xl border shadow-sm transition-all hover:scale-105 ${isGap ? 'bg-white border-dashed border-rose-300 text-rose-500' : label !== 'Duty' ? 'bg-slate-950 text-white border-slate-900' : 'bg-white border-slate-100 text-slate-900'}`}>
+                                    <div className="flex items-center gap-2">
+                                       {isGap && <UserX size={14} />}
+                                       <span className="text-xl font-black italic tracking-tighter">{isGap ? 'GAP' : (s?.initials || '??')}</span>
+                                    </div>
+                                    <span className={`text-[7px] font-black uppercase block opacity-60 tracking-widest mt-1`}>{label}</span>
                                   </div>
                                 );
                               })}
