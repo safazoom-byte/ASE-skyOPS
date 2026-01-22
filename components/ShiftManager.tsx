@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill } from '../types.ts';
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants.tsx';
@@ -17,7 +16,9 @@ import {
   CheckCircle2,
   AlertCircle,
   MapPin,
-  ArrowRight
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface Props {
@@ -45,17 +46,16 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
   });
 
   const getDayOffset = (dateStr: string) => {
-    if (!startDate || !dateStr) return 0;
+    if (!startDate) return 0;
     const start = new Date(startDate);
-    const target = new Date(dateStr);
-    if (isNaN(start.getTime()) || isNaN(target.getTime())) return 0;
-    
     start.setHours(0,0,0,0);
+    const target = new Date(dateStr);
     target.setHours(0,0,0,0);
     const diffTime = target.getTime() - start.getTime();
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  // Filter flights available in a 3-day sliding window (Yesterday, Today, Tomorrow)
   const availableFlights = useMemo(() => {
     if (!formData.pickupDate) return [];
     const targetOffset = getDayOffset(formData.pickupDate);
@@ -63,10 +63,9 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
       const flightOffset = getDayOffset(f.date);
       return Math.abs(flightOffset - targetOffset) <= 1;
     });
-  }, [flights, formData.pickupDate, startDate]);
+  }, [flights, formData.pickupDate]);
 
   const getDayLabel = (dateStr: string) => {
-    if (!dateStr) return 'No Date';
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? 'Invalid Date' : DAYS_OF_WEEK_FULL[date.getDay()];
   };
@@ -83,23 +82,23 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
   const calculateDuration = () => {
     if (!formData.pickupTime || !formData.endTime) return null;
-    try {
-      const [h1, m1] = formData.pickupTime.split(':').map(Number);
-      const [h2, m2] = formData.endTime.split(':').map(Number);
-      const startMins = h1 * 60 + (m1 || 0);
-      let endMins = h2 * 60 + (m2 || 0);
-      
-      if (formData.endDate && formData.pickupDate && formData.endDate > formData.pickupDate) {
-        endMins += 1440;
-      } else if (endMins < startMins) {
-        endMins += 1440;
-      }
-      
-      const diff = endMins - startMins;
-      const hours = Math.floor(diff / 60);
-      const mins = diff % 60;
-      return `${hours}h ${mins}m`;
-    } catch(e) { return null; }
+    const [h1, m1] = formData.pickupTime.split(':').map(Number);
+    const [h2, m2] = formData.endTime.split(':').map(Number);
+    const startMins = h1 * 60 + m1;
+    let endMins = h2 * 60 + m2;
+    
+    // Day wrapping logic: if end date is different from start date
+    if (formData.endDate && formData.pickupDate && formData.endDate > formData.pickupDate) {
+      endMins += 1440;
+    } else if (endMins < startMins) {
+      // Automatic day wrap if times suggest it and date isn't explicitly tomorrow
+      endMins += 1440;
+    }
+    
+    const diff = endMins - startMins;
+    const hours = Math.floor(diff / 60);
+    const mins = diff % 60;
+    return `${hours}h ${mins}m`;
   };
 
   const getRoleSummary = (roleCounts: Partial<Record<Skill, number>> | undefined) => {
@@ -246,6 +245,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                   </div>
                 </div>
 
+                {/* FLIGHT ENGAGEMENT MATRIX */}
                 <div className="space-y-4 pt-4 border-t border-slate-50">
                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
                     <Plane size={14} className="text-indigo-600" /> Contextual Flights (+/- 1D)
@@ -301,6 +301,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                       })
                     )}
                   </div>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight">Link flights across dates for night shift coverage.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -334,6 +335,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                       </div>
                     ))}
                   </div>
+                  <p className="text-[7px] font-black uppercase text-slate-400 leading-tight italic">AI fills generic 'Duty' headcount automatically up to Max capacity.</p>
                 </div>
 
               <div className="flex gap-4 pt-4">
@@ -372,7 +374,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                       </td>
                     </tr>
                   ) : (
-                    [...shifts].sort((a,b) => (a.pickupDate || '').localeCompare(b.pickupDate || '') || (a.pickupTime || '').localeCompare(b.pickupTime || '')).map((s) => {
+                    [...shifts].sort((a,b) => a.pickupDate.localeCompare(b.pickupDate) || a.pickupTime.localeCompare(b.pickupTime)).map((s) => {
                       const engagedFlights = (s.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean);
                       return (
                         <tr key={s.id} className="hover:bg-slate-50/50 transition-colors align-top">

@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types.ts";
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, OffDutyRecord } from "../types.ts";
 
 export interface ExtractionMedia {
   data: string;
@@ -79,7 +79,7 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-const auditRoster = (result: any, data: ProgramData, _numDays: number): ConstraintViolation[] => {
+const auditRoster = (result: any, data: ProgramData, numDays: number): ConstraintViolation[] => {
   const violations: ConstraintViolation[] = [];
   const programs = result?.programs;
   
@@ -135,14 +135,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     COMMAND: Generate Station Roster Handling Plan.
     STATION CONTEXT: Aviation Ground Handling
     
-    PRIMARY OBJECTIVE: 100% Shift Coverage.
+    PRIMARY OBJECTIVE: 100% Shift Coverage. If manpower is low, fill the shifts first.
     
-    LAWS:
-    1. ROLE PRIORITY: Every shift MUST have specialists (isShiftLeader=true, isLoadControl=true, etc) as requested in roleCounts.
-    2. MIN REST: ${config.minRestHours} hours between shifts.
-    3. 5/2 LAW: Limit "Local" agents to 5 days, but prioritize coverage.
-    
-    Staff Data Schema: id, name, initials, type, isRamp, isShiftLeader, isOps, isLoadControl, isLostFound, powerRate.
+    LAWS (PRIORITY ORDER):
+    1. ROLE PRIORITY: Every shift MUST have requested specialists (Shift Leader, etc).
+    2. MIN REST: Exactly ${config.minRestHours} hours between shifts.
+    3. 5/2 LAW: Try to limit "Local" agents to 5 days, but PRIORITIZE COVERAGE if staff is short.
     
     Registry Context: ${constraintsLog}
     

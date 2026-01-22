@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Staff, Skill, StaffCategory } from '../types.ts';
+import { Staff, Skill, ProficiencyLevel, StaffCategory } from '../types.ts';
 import { AVAILABLE_SKILLS } from '../constants.tsx';
 import * as XLSX from 'xlsx';
 import { 
@@ -40,11 +39,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     initials: '',
     type: 'Local',
     powerRate: 75,
-    isRamp: false,
-    isShiftLeader: false,
-    isOps: false,
-    isLoadControl: false,
-    isLostFound: false,
+    skillRatings: {},
     workFromDate: '',
     workToDate: ''
   });
@@ -85,17 +80,13 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       type: (newStaff.type as StaffCategory) || 'Local',
       workPattern: isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off',
       powerRate: Number(newStaff.powerRate) || 75,
-      isRamp: !!newStaff.isRamp,
-      isShiftLeader: !!newStaff.isShiftLeader,
-      isOps: !!newStaff.isOps,
-      isLoadControl: !!newStaff.isLoadControl,
-      isLostFound: !!newStaff.isLostFound,
+      skillRatings: newStaff.skillRatings || {},
       maxShiftsPerWeek: defaultMaxShifts,
       workFromDate: isRoster ? newStaff.workFromDate : undefined,
       workToDate: isRoster ? newStaff.workToDate : undefined
     };
     onUpdate(staffData);
-    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, isRamp: false, isShiftLeader: false, isOps: false, isLoadControl: false, isLostFound: false, workFromDate: '', workToDate: '' });
+    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, skillRatings: {}, workFromDate: '', workToDate: '' });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>, isEdit: boolean) => {
@@ -131,36 +122,16 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
   };
 
   const toggleSkill = (skill: Skill, isEdit: boolean) => {
-    const skillMap: Record<Skill, keyof Staff> = {
-      'Ramp': 'isRamp',
-      'Load Control': 'isLoadControl',
-      'Lost and Found': 'isLostFound',
-      'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps',
-      'Duty': 'isOps' // Fallback
-    };
-    const field = skillMap[skill];
-    if (!field) return;
-
     if (isEdit) {
       if (!editingStaff) return;
-      setEditingStaff({ ...editingStaff, [field]: !editingStaff[field] });
+      const current = editingStaff.skillRatings || {};
+      const newRating: ProficiencyLevel = current[skill] === 'Yes' ? 'No' : 'Yes';
+      setEditingStaff({ ...editingStaff, skillRatings: { ...current, [skill]: newRating } });
     } else {
-      setNewStaff({ ...newStaff, [field]: !newStaff[field as keyof Partial<Staff>] });
+      const current = newStaff.skillRatings || {};
+      const newRating: ProficiencyLevel = current[skill] === 'Yes' ? 'No' : 'Yes';
+      setNewStaff({ ...newStaff, skillRatings: { ...current, [skill]: newRating } });
     }
-  };
-
-  const isSkillActive = (member: any, skill: Skill) => {
-    const skillMap: Record<Skill, string> = {
-      'Ramp': 'isRamp',
-      'Load Control': 'isLoadControl',
-      'Lost and Found': 'isLostFound',
-      'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps',
-      'Duty': ''
-    };
-    const field = skillMap[skill];
-    return !!member[field];
   };
 
   const exportStaffCSV = () => {
@@ -173,11 +144,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Work Pattern': s.workPattern,
       'From Date': s.type === 'Roster' ? (s.workFromDate || 'N/A') : 'Permanent',
       'To Date': s.type === 'Roster' ? (s.workToDate || 'N/A') : 'Permanent',
-      'Ramp': s.isRamp ? 'Yes' : 'No',
-      'Load Control': s.isLoadControl ? 'Yes' : 'No',
-      'Lost and Found': s.isLostFound ? 'Yes' : 'No',
-      'Shift Leader': s.isShiftLeader ? 'Yes' : 'No',
-      'Operations': s.isOps ? 'Yes' : 'No'
+      ...AVAILABLE_SKILLS.reduce((acc, skill) => ({ ...acc, [skill]: (s.skillRatings && s.skillRatings[skill]) || 'No' }), {})
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -273,7 +240,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
             <p className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"> Discipline Matrix</p>
             <div className="flex flex-wrap gap-3">
               {AVAILABLE_SKILLS.map(skill => {
-                const active = isSkillActive(newStaff, skill);
+                const active = String(newStaff.skillRatings?.[skill]).toLowerCase() === 'yes';
                 return (
                   <button key={skill} type="button" onClick={() => toggleSkill(skill, false)} className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase transition-all border-2 ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-white border-slate-100 text-slate-400'}`}>
                     {skill}
@@ -296,6 +263,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
           </div>
         ) : (
           staff.map((member) => {
+            const skillRatings = member.skillRatings || {};
             const power = member.powerRate || 75;
             const isRoster = member.type === 'Roster';
             return (
@@ -340,12 +308,12 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                     <div className="space-y-3">
                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Shield size={12} className="text-indigo-400" /> Qualifications</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {AVAILABLE_SKILLS.filter(s => isSkillActive(member, s)).map(s => (
+                        {AVAILABLE_SKILLS.filter(s => String(skillRatings[s as any]).toLowerCase() === 'yes').map(s => (
                           <span key={s} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[8px] font-black uppercase tracking-tight">
                             {s}
                           </span>
                         ))}
-                        {!member.isRamp && !member.isShiftLeader && !member.isOps && !member.isLoadControl && !member.isLostFound && (
+                        {AVAILABLE_SKILLS.every(s => String(skillRatings[s as any]).toLowerCase() !== 'yes') && (
                           <span className="text-[8px] font-bold text-slate-300 italic">Core Duty Only</span>
                         )}
                       </div>
@@ -412,7 +380,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                 <p className="text-[9px] font-black text-slate-400 uppercase"> Discipline Access</p>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_SKILLS.map(skill => {
-                    const active = isSkillActive(editingStaff, skill);
+                    const active = String(editingStaff.skillRatings?.[skill as any]).toLowerCase() === 'yes';
                     return (
                       <button key={skill} type="button" onClick={() => toggleSkill(skill, true)} className={`px-5 py-3 rounded-xl text-[9px] font-black uppercase transition-all border ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
                         {skill}
