@@ -81,13 +81,13 @@ export const db = {
           name: s.name,
           initials: s.initials,
           type: s.type,
-          workPattern: s.work_pattern,
+          workPattern: s.work_pattern, // Fixed: use workPattern
           isRamp: !!s.is_ramp,
           isShiftLeader: !!s.is_shift_leader,
           isOps: !!s.is_ops,
           isLoadControl: !!s.is_load_control,
           isLostFound: !!s.is_lost_found,
-          powerRate: s.power_rate,
+          powerRate: s.power_rate,     // Fixed: use powerRate
           maxShiftsPerWeek: s.max_shifts_per_week,
           workFromDate: s.work_from_date,
           workToDate: s.work_to_date
@@ -120,7 +120,7 @@ export const db = {
   async upsertFlight(f: Flight) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) return;
+    if (!session) throw new Error("Authentication required.");
     
     const payload = {
       id: f.id,
@@ -142,7 +142,7 @@ export const db = {
   async upsertStaff(s: Staff) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) return;
+    if (!session) throw new Error("Authentication required.");
 
     const payload = {
       id: s.id,
@@ -169,7 +169,7 @@ export const db = {
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
     const session = await auth.getSession();
-    if (!session) return;
+    if (!session) throw new Error("Authentication required.");
 
     const payload = {
       id: s.id,
