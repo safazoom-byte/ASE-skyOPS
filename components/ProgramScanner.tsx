@@ -1,5 +1,4 @@
 
-/* ... existing imports ... */
 import React, { useState, useRef, useEffect } from 'react';
 import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
@@ -371,7 +370,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
-      {/* ... existing header and content logic ... */}
+      /* ... existing header and content logic ... */
       <div className="p-8 lg:p-12 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
          <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/20"><Layers size={24} /></div>
@@ -525,7 +524,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                           <td className="px-6 py-4 text-slate-400 uppercase">{sh.pickupDate} | HC: {sh.minStaff}-{sh.maxStaff}</td>
                           <td className="px-6 py-4">
                             <div className="flex gap-1">
-                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (count || 0) > 0 && (
+                              {/* Fix: Explicitly cast count to number to resolve TypeScript operator comparison error */}
+                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (Number(count) || 0) > 0 && (
                                 <span key={role} className="bg-amber-100 text-amber-700 px-1 rounded text-[7px]">{role}: {count}</span>
                               ))}
                             </div>

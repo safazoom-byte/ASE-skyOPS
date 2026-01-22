@@ -175,6 +175,7 @@ export const db = {
       id: s.id,
       user_id: session.user.id,
       day: s.day,
+      day_name: new Date(s.pickupDate).toLocaleDateString('en-US', { weekday: 'long' }),
       pickup_date: s.pickupDate,
       pickup_time: s.pickupTime,
       end_date: s.endDate,
@@ -196,7 +197,6 @@ export const db = {
     const userId = session.user.id;
 
     try {
-      // Clean start for the day's program to prevent assignment duplication
       await supabase.from('programs').delete().eq('user_id', userId); 
       const { error } = await supabase.from('programs').insert(
         programs.map(p => ({
