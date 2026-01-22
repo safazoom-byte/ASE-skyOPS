@@ -29,11 +29,21 @@ export default defineConfig(({ mode }) => {
         }
       },
       rollupOptions: {
+        // Mark these as external because they are loaded via importmap in index.html
+        external: [
+          'react',
+          'react-dom',
+          'react-dom/client',
+          'lucide-react',
+          '@google/genai',
+          '@supabase/supabase-js',
+          'xlsx',
+          'jspdf',
+          'jspdf-autotable'
+        ],
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-utils': ['xlsx', 'jspdf', 'jspdf-autotable', 'lucide-react']
-          }
+          // Ensure the output remains clean without trying to chunk external libs
+          manualChunks: undefined 
         }
       }
     },
