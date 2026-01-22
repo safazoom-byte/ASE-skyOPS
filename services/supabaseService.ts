@@ -116,10 +116,7 @@ export const db = {
       flight_type: f.type,
       day: f.day
     });
-    if (error) {
-       console.error("Supabase Flight Upsert Error:", error);
-       throw error;
-    }
+    if (error) throw error;
   },
 
   async upsertStaff(s: Staff) {
@@ -140,48 +137,46 @@ export const db = {
       work_from_date: s.workFromDate,
       work_to_date: s.workToDate
     });
-    if (error) {
-       console.error("Supabase Staff Upsert Error:", error);
-       throw error;
-    }
+    if (error) throw error;
   },
 
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
-    const { error } = await supabase.from('shifts').upsert({
+    
+    // Explicit Column Reflection for DB Visibility
+    const payload = {
       id: s.id,
-      day: s.day,
-      pickup_date: s.pickupDate,
-      pickup_time: s.pickupTime,
-      end_date: s.endDate,
-      end_time: s.endTime,
-      min_staff: s.minStaff,
-      max_staff: s.maxStaff,
-      role_counts: s.roleCounts,
-      flight_ids: s.flightIds
-    });
+      day: s.day, // Day Index
+      day_name: new Date(s.pickupDate).toLocaleDateString('en-US', { weekday: 'long' }), // Day Name
+      pickup_date: s.pickupDate, // Shift Start Date
+      pickup_time: s.pickupTime, // Shift Start Time
+      end_date: s.endDate, // Shift End Date
+      end_time: s.endTime, // Shift End Time
+      min_staff: s.minStaff, // Min Staff
+      max_staff: s.maxStaff, // Max Staff
+      role_counts: s.roleCounts, // Role Matrix (JSONB)
+      flight_ids: s.flightIds // Flight ID Links (Array)
+    };
+
+    const { error } = await supabase.from('shifts').upsert(payload);
     if (error) {
-       console.error("Supabase Shift Upsert Error:", error);
-       throw error;
+      console.error("Supabase Shift Sync Failed:", error);
+      throw error;
     }
   },
 
   async savePrograms(programs: DailyProgram[]) {
     if (!supabase) return;
-    try {
-      await supabase.from('programs').delete().neq('id', '0'); 
-      const { error } = await supabase.from('programs').insert(
-        programs.map(p => ({
-          day: p.day,
-          date_string: p.dateString,
-          assignments: p.assignments,
-          off_duty: p.offDuty
-        }))
-      );
-      if (error) throw error;
-    } catch (e) {
-      console.error("Supabase Program Save Error:", e);
-    }
+    await supabase.from('programs').delete().neq('id', '0');
+    const { error } = await supabase.from('programs').insert(
+      programs.map(p => ({
+        day: p.day,
+        date_string: p.dateString,
+        assignments: p.assignments,
+        off_duty: p.offDuty
+      }))
+    );
+    if (error) throw error;
   },
 
   async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },

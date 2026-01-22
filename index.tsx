@@ -113,6 +113,7 @@ const App: React.FC = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
 
+  // Auth Listener
   useEffect(() => {
     auth.getSession().then(s => {
       setSession(s);
@@ -217,6 +218,7 @@ const App: React.FC = () => {
   };
 
   const confirmGenerateProgram = async () => {
+    // Critical Guard: Ensure shifts exist for the period
     if (activeShiftsInRange.length === 0) {
       setError("No Duty Master slots (shifts) found for this window. Define shifts first.");
       setShowConfirmDialog(false);
@@ -237,7 +239,7 @@ const App: React.FC = () => {
     try {
       const inputData: ProgramData = { flights: activeFlightsInRange, staff: staff || [], shifts: activeShiftsInRange, programs: [] };
       
-      setGenerationStep(1); 
+      setGenerationStep(1); // Structural Draft
       let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, minRestHours, startDate });
       
       if (result.hasBlockers) { 
@@ -246,7 +248,7 @@ const App: React.FC = () => {
         return; 
       }
 
-      setGenerationStep(2); 
+      setGenerationStep(2); // Quality Optimization
       result = await refineAIProgram(result, inputData, 1, { minRestHours, startDate, numDays });
       
       setProposedPrograms(result.programs);
@@ -469,7 +471,7 @@ const App: React.FC = () => {
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 space-y-6">
                   <h4 className="text-xl font-black italic uppercase flex items-center gap-4 text-slate-900">
-                    <Briefcase className="text-blue-600" /> Requested Day Off / Matrix
+                    <Briefcase className="text-blue-600" /> Requested Day Off / Leave Matrix
                   </h4>
                   <textarea 
                     className="w-full h-48 p-6 bg-slate-50 border border-slate-200 rounded-[2.5rem] font-medium text-sm outline-none focus:ring-4 focus:ring-blue-500/5 transition-all resize-none shadow-inner"
@@ -477,7 +479,7 @@ const App: React.FC = () => {
                     value={personnelRequests}
                     onChange={e => setPersonnelRequests(e.target.value)}
                   />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4 italic">Overrides standard rules for specific agents.</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4 italic">Overrides standard 5/2 Law for specific agents.</p>
                 </div>
                 
                 <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 space-y-6">
