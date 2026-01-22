@@ -163,7 +163,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     contents: prompt,
     config: { 
       responseMimeType: 'application/json',
-      systemInstruction: "You are a world-class aviation operations scheduler. Precision and compliance with 5/2 labor laws and rest hours are mandatory."
+      systemInstruction: "You are a world-class aviation operations scheduler. Precision and compliance with 5/2 labor laws and rest hours are mandatory. Always return JSON."
     }
   });
 
@@ -200,7 +200,7 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
     contents: prompt,
     config: { 
       responseMimeType: 'application/json',
-      systemInstruction: "Refine the provided roster. Fix rest hour violations and ensure shift leaders are assigned where missing."
+      systemInstruction: "Refine the provided roster. Fix rest hour violations and ensure shift leaders are assigned where missing. Always return JSON."
     }
   });
 
@@ -233,7 +233,7 @@ export const extractDataFromContent = async (options: { textData?: string, media
     contents: { parts },
     config: { 
       responseMimeType: 'application/json',
-      systemInstruction: "Extract flight numbers, times, staff names, and initials from images or text. Ensure YYYY-MM-DD date formatting."
+      systemInstruction: "Extract flight numbers, times, staff names, and initials from images or text. Ensure YYYY-MM-DD date formatting. Always return JSON."
     }
   });
 
@@ -275,7 +275,7 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      systemInstruction: "You are an expert aviation scheduler. Modify the existing roster based on user instructions. Ensure compliance with 5/2 Law and Rest Hours. Return the updated programs list and an explanation of changes."
+      systemInstruction: "You are an expert aviation scheduler. Modify the existing roster based on user instructions. Ensure compliance with 5/2 Law and Rest Hours. Return the updated programs list and an explanation of changes in JSON format."
     }
   });
 
