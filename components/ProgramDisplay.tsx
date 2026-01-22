@@ -66,44 +66,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const startObj = parseSafeDate(startDate);
     
     return sortedPrograms.map(p => {
-      const dayFlights = flights.filter(f => {
-        if (f.date === p.dateString) return true;
-        if (startObj && typeof p.day === 'number') {
-          const targetDate = new Date(startObj.getTime() + p.day * 86400000);
-          try {
-            return targetDate.toISOString().split('T')[0] === f.date;
-          } catch(e) { return false; }
-        }
-        return false;
-      });
-
+      const dayFlights = flights.filter(f => f.date === p.dateString);
       const assignments = p.assignments || [];
       const activeStaffIds = new Set(assignments.filter(a => a.staffId && a.staffId !== 'GAP').map(a => a.staffId));
-      const activeStaffCount = activeStaffIds.size;
       
-      const shiftAssignments: Record<string, Assignment[]> = {};
-      assignments.forEach(a => { 
-        if (a.shiftId) {
-          shiftAssignments[a.shiftId] = [...(shiftAssignments[a.shiftId] || []), a]; 
-        }
-      });
-      
-      let hasShortage = assignments.some(a => !a.staffId || a.staffId === 'GAP');
-      Object.keys(shiftAssignments).forEach(sid => {
-        const assigs = shiftAssignments[sid];
-        const sh = getShiftById(sid);
-        if (sh) {
-          const filled = assigs.filter(a => a.staffId && a.staffId !== 'GAP');
-          const hasSL = filled.some(a => a.role === 'Shift Leader');
-          const hasLC = filled.some(a => a.role === 'Load Control');
-          if (!hasSL || !hasLC || filled.length < sh.minStaff) hasShortage = true;
-        }
+      const dayShifts = shifts.filter(s => s.pickupDate === p.dateString);
+      let hasShortage = dayShifts.some(sh => {
+        const filled = assignments.filter(a => a.shiftId === sh.id && a.staffId && a.staffId !== 'GAP');
+        return filled.length < sh.minStaff;
       });
 
       return { 
         day: p.day, 
         flightCount: dayFlights.length, 
-        staffCount: activeStaffCount, 
+        staffCount: activeStaffIds.size, 
         hasShortage 
       };
     });
@@ -114,17 +90,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     
     sortedPrograms.forEach(p => {
       const assignments = p.assignments || [];
-      const shiftAssignments: Record<string, Assignment[]> = {};
-      assignments.forEach(a => { 
-        if (a.shiftId) shiftAssignments[a.shiftId] = [...(shiftAssignments[a.shiftId] || []), a]; 
-      });
+      const dayShifts = shifts.filter(sh => sh.pickupDate === p.dateString);
 
-      Object.keys(shiftAssignments).forEach(sid => {
-        const assigs = shiftAssignments[sid];
-        const filled = assigs.filter(a => a.staffId && a.staffId !== 'GAP');
-        const sh = getShiftById(sid);
-        if (!sh) return;
-        
+      dayShifts.forEach(sh => {
+        const filled = assignments.filter(a => a.shiftId === sh.id && a.staffId && a.staffId !== 'GAP');
         const hasSL = filled.some(a => a.role === 'Shift Leader');
         const hasLC = filled.some(a => a.role === 'Load Control');
         
@@ -132,7 +101,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           violations.push({ 
             type: 'CRITICAL', 
             day: p.day, 
-            message: `Day ${p.day+1}: Shift ${sh.pickupTime} MISSING ${!hasSL ? 'SL' : ''} ${!hasLC ? 'LC' : ''}` 
+            message: `Day ${p.day+1}: Shift ${sh.pickupTime} lacks specialist (${!hasSL ? 'SL' : ''} ${!hasLC ? 'LC' : ''})` 
           });
         }
         
@@ -140,7 +109,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           violations.push({ 
             type: 'CRITICAL', 
             day: p.day, 
-            message: `Day ${p.day+1}: Shift ${sh.pickupTime} FAILED MINIMUM (${filled.length}/${sh.minStaff})` 
+            message: `Day ${p.day+1}: Shift ${sh.pickupTime} below minimum (${filled.length}/${sh.minStaff})` 
           });
         }
       });
@@ -155,10 +124,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    staff.filter(s => s.type === 'Local').forEach(s => {
+    staff.forEach(s => {
       const count = staffWorkCounts.get(s.id) || 0;
-      if (count > 5) {
-        violations.push({ type: 'LEGAL', message: `${s.initials}: 5/2 LAW BREACH (${count} days). WAIVER ACTIVE.` });
+      if (count > (s.maxShiftsPerWeek || 5)) {
+        violations.push({ type: 'LEGAL', message: `${s.initials}: Duty limit exceeded (${count} days). Waiver Active.` });
       }
     });
     
@@ -202,50 +171,49 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     }
 
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
-    doc.setFontSize(22).text(`SkyOPS Station Handling Plan`, 14, 20);
-    doc.setFontSize(10).text(`Reporting Period: ${startDate || 'N/A'} to ${endDate || 'N/A'}`, 14, 28);
     
     sortedPrograms.forEach((program, pIdx) => {
-      if (pIdx > 0) doc.addPage('l', 'mm', 'a4');
+      // Fix: doc.addPage expects 0-2 arguments. Correcting call to addPage(format, orientation).
+      if (pIdx > 0) doc.addPage('a4', 'l');
+      
+      doc.setFontSize(22).text(`SkyOPS Station Handling Plan`, 14, 20);
+      doc.setFontSize(10).text(`Reporting Period: ${startDate || 'N/A'} to ${endDate || 'N/A'}`, 14, 28);
       doc.setFontSize(16).text(`${getDayName(program.day).toUpperCase()} - ${getDayDate(program.day)}`, 14, 40);
       
       const assignments = program.assignments || [];
-      const assignmentsByShift: Record<string, Assignment[]> = {};
-      
-      assignments.forEach(a => {
-        const sid = a.shiftId || 'unassigned';
-        if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
-        assignmentsByShift[sid].push(a);
-      });
+      const dayShifts = shifts.filter(sh => sh.pickupDate === program.dateString);
 
-      const tableData = Object.entries(assignmentsByShift).map(([sid, assigs], idx) => {
-        const sh = getShiftById(sid);
-        const flightList = (sh?.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
-        const personnel = assigs.map(a => {
-           if (!a.staffId || a.staffId === 'GAP') return `[VACANT] (${getRoleLabel([a.role])})`;
-           const s = getStaffById(a.staffId);
-           return `${s?.initials || '??'} (${getRoleLabel([a.role])})`;
-        }).join(' | ');
+      const tableData = dayShifts.sort((a,b) => a.pickupTime.localeCompare(b.pickupTime)).map((sh, idx) => {
+        const assigs = assignments.filter(a => a.shiftId === sh.id);
+        const flightList = (sh.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ');
+        
+        const personnel = assigs.length > 0 
+          ? assigs.map(a => {
+              if (!a.staffId || a.staffId === 'GAP') return `[VACANT] (${getRoleLabel([a.role])})`;
+              const s = getStaffById(a.staffId);
+              return `${s?.initials || '??'} (${getRoleLabel([a.role])})`;
+            }).join(' | ')
+          : "[VACANT / NO ASSIGNMENT]";
         
         return [
           idx + 1, 
-          sh?.pickupTime || '--:--', 
-          sh?.endTime || '--:--', 
+          sh.pickupTime, 
+          sh.endTime, 
           flightList || 'Base Operations', 
-          `${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/${sh?.maxStaff || '--'}`, 
+          `${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/${sh.minStaff}`, 
           personnel
         ];
       });
 
       autoTable(doc, { 
         startY: 45, 
-        head: [['#', 'PICKUP', 'RELEASE', 'FLIGHT HANDLING', 'HC/MAX', 'PERSONNEL & ROLES']], 
+        head: [['#', 'PICKUP', 'RELEASE', 'FLIGHT HANDLING', 'HC/MIN', 'PERSONNEL & ROLES']], 
         body: tableData, 
         theme: 'striped', 
         styles: { fontSize: 8, cellPadding: 4, font: 'helvetica' },
         headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
         columnStyles: {
-           5: { cellWidth: 80 }
+           5: { cellWidth: 100 }
         }
       });
     });
@@ -313,7 +281,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                <p className="text-lg font-black text-emerald-900 uppercase italic">Station Health 100%</p>
              </div>
            ) : (
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto no-scrollbar">
                {shadowAudit.map((v, i) => (
                  <div key={i} className={`flex items-center gap-4 p-5 rounded-2xl border ${v.type === 'CRITICAL' || v.type === 'LEGAL' ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
                    {v.type === 'CRITICAL' || v.type === 'LEGAL' ? <Shield size={18} className="text-rose-500 animate-pulse" /> : <AlertTriangle size={18} className="text-amber-500" />}
@@ -330,7 +298,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px]"></div>
           <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500 mb-8 flex items-center gap-3"><TrendingUp size={16} className="text-blue-500" /> Efficiency Meter</h4>
           <div className="space-y-6 relative z-10">
-            <div className="flex justify-between p-4 bg-white/5 rounded-2xl border border-white/10"><span className="text-[10px] font-black uppercase italic text-slate-400">Resource Saturation</span><span className="text-[10px] font-black uppercase text-blue-400">Locked</span></div>
+            <div className="flex justify-between p-4 bg-white/5 rounded-2xl border border-white/10"><span className="text-[10px] font-black uppercase italic text-slate-400">Resource Saturation</span><span className="text-[10px] font-black uppercase text-blue-400">Optimized</span></div>
             <div className="flex justify-between p-4 bg-white/5 rounded-2xl border border-white/10"><span className="text-[10px] font-black uppercase italic text-slate-400">5/2 Compliance</span><span className={`text-[10px] font-black uppercase ${shadowAudit.some(v => v.type === 'LEGAL') ? 'text-amber-400' : 'text-emerald-400'}`}>
               {shadowAudit.some(v => v.type === 'LEGAL') ? 'Waiver Active' : 'Verified'}
             </span></div>
@@ -340,12 +308,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       <div className="space-y-24">
         {sortedPrograms.map((program) => {
-          const assignmentsByShift: Record<string, Assignment[]> = {};
-          (program.assignments || []).forEach(a => {
-            const sid = a.shiftId || 'unassigned';
-            if (!assignmentsByShift[sid]) assignmentsByShift[sid] = [];
-            assignmentsByShift[sid].push(a);
-          });
+          const assignments = program.assignments || [];
+          const dayShifts = shifts.filter(sh => sh.pickupDate === program.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
 
           return (
             <div key={program.day} className="bg-white rounded-[4rem] overflow-hidden border border-slate-200 shadow-2xl animate-in slide-in-from-bottom-10 duration-700">
@@ -360,7 +324,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                 <div className="flex gap-4">
                   <div className="px-6 py-4 bg-white/5 border border-white/10 rounded-2xl text-center">
                     <span className="block text-[8px] font-black text-slate-500 uppercase mb-1">Total HC</span>
-                    <span className="text-xl font-black italic text-white">{new Set((program.assignments || []).filter(a => a.staffId && a.staffId !== 'GAP').map(a => a.staffId)).size}</span>
+                    <span className="text-xl font-black italic text-white">{new Set(assignments.filter(a => a.staffId && a.staffId !== 'GAP').map(a => a.staffId)).size}</span>
                   </div>
                 </div>
               </div>
@@ -371,36 +335,36 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     <tr>
                       <th className="px-6 py-7">PICKUP</th>
                       <th className="px-6 py-7">RELEASE</th>
-                      <th className="px-6 py-7 text-center">HC/MAX</th>
+                      <th className="px-6 py-7 text-center">HC/MIN</th>
                       <th className="px-10 py-7">FLIGHTS</th>
                       <th className="px-10 py-7">PERSONNEL & DISCIPLINE</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {Object.entries(assignmentsByShift).map(([sid, assigs]) => {
-                      const sh = getShiftById(sid);
+                    {dayShifts.map((sh) => {
+                      const assigs = assignments.filter(a => a.shiftId === sh.id);
                       return (
-                        <tr key={sid} className="align-top hover:bg-slate-50/30 transition-colors">
-                          <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh?.pickupTime || '--:--'}</td>
-                          <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh?.endTime || '--:--'}</td>
+                        <tr key={sh.id} className="align-top hover:bg-slate-50/30 transition-colors">
+                          <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh.pickupTime}</td>
+                          <td className="px-6 py-10 font-black text-slate-950 text-2xl italic tracking-tighter">{sh.endTime}</td>
                           <td className="px-6 py-10 text-center">
-                            <span className={`font-black text-xl italic px-4 py-2 rounded-2xl ${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length < (sh?.minStaff || 0) ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                              {assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/{sh?.maxStaff || '--'}
+                            <span className={`font-black text-xl italic px-4 py-2 rounded-2xl ${assigs.filter(x => x.staffId && x.staffId !== 'GAP').length < sh.minStaff ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                              {assigs.filter(x => x.staffId && x.staffId !== 'GAP').length}/{sh.minStaff}
                             </span>
                           </td>
                           <td className="px-10 py-10">
-                            {(sh?.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean).map(f => (
+                            {(sh.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean).map(f => (
                               <div key={f!.id} className="text-[10px] font-black uppercase text-slate-600 bg-slate-100/50 border border-slate-200/50 px-4 py-2 rounded-xl mb-2 flex items-center gap-3">
                                 <Plane size={14} className="text-blue-500" />{f!.flightNumber}
                               </div>
                             ))}
-                            {(sh?.flightIds || []).length === 0 && (
+                            {(sh.flightIds || []).length === 0 && (
                                <div className="text-[9px] font-black uppercase text-slate-300 italic">Base Operations</div>
                             )}
                           </td>
                           <td className="px-10 py-10">
                             <div className="flex flex-wrap gap-4">
-                              {assigs.map(a => {
+                              {assigs.length > 0 ? assigs.map(a => {
                                 const isGap = !a.staffId || a.staffId === 'GAP';
                                 const s = isGap ? null : getStaffById(a.staffId);
                                 const label = getRoleLabel([a.role]);
@@ -413,7 +377,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                     <span className={`text-[7px] font-black uppercase block opacity-60 tracking-widest mt-1`}>{label}</span>
                                   </div>
                                 );
-                              })}
+                              }) : (
+                                <div className="p-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center gap-3">
+                                  <UserX size={18} className="text-slate-300" />
+                                  <span className="text-[9px] font-black uppercase text-slate-300 italic">No Allocation Found</span>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

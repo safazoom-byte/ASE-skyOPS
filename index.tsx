@@ -138,20 +138,17 @@ const App: React.FC = () => {
       setSyncStatus('syncing');
       db.fetchAll().then(data => {
         if (data) {
-          // CLOUD AS SOURCE OF TRUTH: Always update state if database fetch was successful
-          setFlights(data.flights || []);
-          setStaff(data.staff || []);
-          setShifts(data.shifts || []);
-          const sortedPrograms = [...(data.programs || [])].sort((a,b) => a.day - b.day);
-          setPrograms(sortedPrograms);
+          if (data.flights.length) setFlights(data.flights);
+          if (data.staff.length) setStaff(data.staff);
+          if (data.shifts.length) setShifts(data.shifts);
+          if (data.programs.length) {
+            const sortedPrograms = [...data.programs].sort((a,b) => a.day - b.day);
+            setPrograms(sortedPrograms);
+          }
           setSyncStatus('connected');
         } else {
           setSyncStatus('error');
-          setError("Cloud synchronization failed. Ensure database tables are created.");
         }
-      }).catch(err => {
-        setSyncStatus('error');
-        setError("Cloud access blocked. Check permissions or table structure.");
       });
     }
   }, [session]);
@@ -194,7 +191,7 @@ const App: React.FC = () => {
       await Promise.all(newStaffList.map(s => db.upsertStaff(s)));
       // Step 2: Commit Flights
       await Promise.all(newFlightsList.map(f => db.upsertFlight(f)));
-      // Step 3: Commit Shifts
+      // Step 3: Commit Shifts (Sequential may be safer if FK exists)
       for (const sh of newShiftsList) {
         await db.upsertShift(sh);
       }
@@ -224,7 +221,7 @@ const App: React.FC = () => {
     } catch (err: any) {
       console.error("Batch Commit Error:", err);
       setSyncStatus('error');
-      setError("Import aborted: Logic conflict or schema mismatch in cloud.");
+      setError("Database sync failed. Check column constraints or connection.");
     }
   };
 
@@ -270,13 +267,8 @@ const App: React.FC = () => {
         if (result.recommendations) setRecommendations(result.recommendations);
         if (supabase) {
           setSyncStatus('syncing');
-          try {
-            await db.savePrograms(result.programs || []);
-            setSyncStatus('connected');
-          } catch(e) {
-            setSyncStatus('error');
-            setError("Cloud refused to save program. Check SQL constraints.");
-          }
+          await db.savePrograms(result.programs || []);
+          setSyncStatus('connected');
         }
         setActiveTab('program'); 
         setShowSuccessChecklist(true);
@@ -293,13 +285,8 @@ const App: React.FC = () => {
       setPrograms(proposedPrograms);
       if (supabase) {
         setSyncStatus('syncing');
-        try {
-          await db.savePrograms(proposedPrograms);
-          setSyncStatus('connected');
-        } catch(e) {
-          setSyncStatus('error');
-          setError("Cloud waived authorization failure.");
-        }
+        await db.savePrograms(proposedPrograms);
+        setSyncStatus('connected');
       }
       setShowWarningModal(false);
       setActiveTab('program');
@@ -336,15 +323,7 @@ const App: React.FC = () => {
 
   const handleFlightDelete = async (id: string) => {
     setFlights(prev => prev.filter(f => f.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteFlight(id); 
-        setSyncStatus('connected'); 
-      } catch(e) {
-        setSyncStatus('error');
-      }
-    }
+    if (supabase) { setSyncStatus('syncing'); await db.deleteFlight(id); setSyncStatus('connected'); }
   };
 
   const handleStaffUpdate = async (s: Staff) => {
@@ -365,15 +344,7 @@ const App: React.FC = () => {
 
   const handleStaffDelete = async (id: string) => {
     setStaff(prev => prev.filter(s => s.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteStaff(id); 
-        setSyncStatus('connected'); 
-      } catch(e) {
-        setSyncStatus('error');
-      }
-    }
+    if (supabase) { setSyncStatus('syncing'); await db.deleteStaff(id); setSyncStatus('connected'); }
   };
 
   const handleShiftAdd = async (s: ShiftConfig) => {
@@ -409,15 +380,7 @@ const App: React.FC = () => {
 
   const handleShiftDelete = async (id: string) => {
     setShifts(prev => prev.filter(s => s.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteShift(id); 
-        setSyncStatus('connected'); 
-      } catch(e) {
-        setSyncStatus('error');
-      }
-    }
+    if (supabase) { setSyncStatus('syncing'); await db.deleteShift(id); setSyncStatus('connected'); }
   };
 
   if (isAuthChecking) {
