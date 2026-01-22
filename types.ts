@@ -5,11 +5,6 @@ export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
 export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'LIEU LEAVE' | 'NIL';
 
-export interface StaffSkill {
-  skill: Skill;
-  level: ProficiencyLevel;
-}
-
 export interface Flight {
   id: string;
   flightNumber: string;
@@ -28,7 +23,12 @@ export interface Staff {
   initials: string; 
   type: StaffCategory;
   workPattern: WorkPattern;
-  skillRatings: Partial<Record<Skill, ProficiencyLevel>>;
+  // Flattened for direct DB/Excel mapping
+  isRamp: boolean;
+  isShiftLeader: boolean;
+  isOps: boolean;
+  isLoadControl: boolean;
+  isLostFound: boolean;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;
   workFromDate?: string;

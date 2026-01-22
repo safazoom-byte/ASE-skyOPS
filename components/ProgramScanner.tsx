@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService.ts';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types.ts';
@@ -35,7 +36,7 @@ interface ScanError {
 
 type PasteTarget = 'flights' | 'staff' | 'shifts' | 'all';
 
-// Enhanced Header Heuristics
+// Enhanced Header Heuristics for direct Excel mapping
 const HEADER_ALIASES: Record<string, string[]> = {
   flightNumber: ['flight', 'flt', 'fn', 'flight no', 'flight number', 'f/n', 'service'],
   from: ['from', 'origin', 'dep', 'departure station', 'org', 'sector from'],
@@ -52,6 +53,12 @@ const HEADER_ALIASES: Record<string, string[]> = {
   pickupDate: ['shift date', 'start date', 'pickup date'],
   minStaff: ['min', 'minimum', 'min hc', 'staff required'],
   maxStaff: ['max', 'maximum', 'max hc', 'staff max'],
+  // Skill Mapping Aliases
+  isRamp: ['ramp', 'rmp', 'ramp qualified'],
+  isLoadControl: ['load control', 'lc', 'loadcontrol', 'l/c'],
+  isOps: ['ops', 'operations', 'operation', 'ground ops'],
+  isShiftLeader: ['shift leader', 'sl', 'shiftleader', 'lead', 'team lead'],
+  isLostFound: ['lost and found', 'lost & found', 'l&f', 'lf', 'lost/found']
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
@@ -113,7 +120,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
              String(date.getUTCDate()).padStart(2, '0');
     }
     const str = String(val).trim();
-    // Handle DD/MM/YYYY
     if (str.includes('/')) {
       const parts = str.split('/');
       if (parts.length === 3) {
@@ -140,6 +146,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       return `${str.slice(0, 2)}:${str.slice(2, 4)}`;
     }
     return str;
+  };
+
+  const parseBoolean = (val: any): boolean => {
+    if (val === null || val === undefined) return false;
+    const str = String(val).toLowerCase().trim();
+    return ['yes', 'y', 'true', '1', 'ok', 'active'].includes(str);
   };
 
   const processLocalRows = (rows: any[][], map: Record<string, number>) => {
@@ -180,7 +192,11 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           powerRate: map.powerRate !== -1 ? (parseInt(row[map.powerRate]) || 75) : 75,
           workPattern: isRoster ? 'Continuous (Roster)' : '5 Days On / 2 Off',
           maxShiftsPerWeek: 5,
-          skillRatings: {}
+          isRamp: map.isRamp !== -1 ? parseBoolean(row[map.isRamp]) : false,
+          isLoadControl: map.isLoadControl !== -1 ? parseBoolean(row[map.isLoadControl]) : false,
+          isOps: map.isOps !== -1 ? parseBoolean(row[map.isOps]) : false,
+          isShiftLeader: map.isShiftLeader !== -1 ? parseBoolean(row[map.isShiftLeader]) : false,
+          isLostFound: map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false
         });
       }
 
@@ -195,7 +211,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           minStaff: map.minStaff !== -1 ? (parseInt(row[map.minStaff]) || 2) : 2,
           maxStaff: map.maxStaff !== -1 ? (parseInt(row[map.maxStaff]) || 8) : 8,
           day: 0,
-          flightIds: []
+          flightIds: [],
+          roleCounts: {}
         });
       }
     });
@@ -221,7 +238,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           const workbook = XLSX.read(data, { type: 'binary' });
           rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
         } else {
-          // CSV / Text
           const workbook = XLSX.read(data, { type: 'string' });
           rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
         }
@@ -234,7 +250,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         if (identifiedCount >= 2) {
           processLocalRows(rows, localMap);
         } else {
-          // Manual mapping fallback
           setPendingMapping({ rows, target: pasteTarget, map: localMap });
           setIsScanning(false);
         }
@@ -255,7 +270,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     if (!pastedText.trim()) return;
     setIsScanning(true);
     
-    // Try to parse pasted text as TSV/CSV locally
     try {
       const workbook = XLSX.read(pastedText, { type: 'string' });
       const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
@@ -270,7 +284,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         setIsScanning(false);
       }
     } catch (e) {
-      // If structured parsing fails, fall back to AI for text blobs
       processAIImport(pastedText, [], pasteTarget);
     }
   };
@@ -356,7 +369,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
             </div>
             <div>
               <h4 className="text-2xl font-black italic uppercase text-slate-950 tracking-tighter">{phases[scanPhase]}</h4>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 animate-pulse">Running Local Heuristics (Bypassing AI Latency)</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 animate-pulse">Running Local Heuristics</p>
             </div>
           </div>
         )}
@@ -399,8 +412,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                    <div className="flex items-center gap-8">
                       <div className="w-20 h-20 bg-emerald-600 rounded-[2.5rem] flex items-center justify-center text-white shadow-xl shadow-emerald-600/20"><CheckCircle2 size={40} /></div>
                       <div>
-                        <h3 className="text-3xl font-black uppercase italic tracking-tighter">100% Data Integrity</h3>
-                        <p className="text-slate-400 text-[10px] font-black uppercase mt-1 italic">Verified locally — No data loss or truncation</p>
+                        <h3 className="text-3xl font-black uppercase italic tracking-tighter">Data Synchronized</h3>
+                        <p className="text-slate-400 text-[10px] font-black uppercase mt-1 italic">Verified locally — Mapping successful</p>
                       </div>
                    </div>
                    <div className="flex gap-4">
@@ -417,7 +430,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                         <th className="px-6 py-4">ENTITY</th>
                         <th className="px-6 py-4">IDENTIFIER</th>
                         <th className="px-6 py-4">DETAILS</th>
-                        <th className="px-6 py-4">STATUS</th>
+                        <th className="px-6 py-4">QUALIFICATIONS</th>
                         <th className="px-6 py-4 text-right">ACTION</th>
                       </tr>
                     </thead>
@@ -438,7 +451,13 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                           <td className="px-6 py-4 text-indigo-600 uppercase flex items-center gap-2"><Users size={12}/> STAFF</td>
                           <td className="px-6 py-4">{s.name} ({s.initials})</td>
                           <td className="px-6 py-4 text-slate-400 uppercase">{s.type} | PR: {s.powerRate}%</td>
-                          <td className="px-6 py-4 text-emerald-500">PARSED</td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-1">
+                              {s.isShiftLeader && <span className="bg-slate-200 px-1 rounded text-[7px]">SL</span>}
+                              {s.isRamp && <span className="bg-slate-200 px-1 rounded text-[7px]">RMP</span>}
+                              {s.isLoadControl && <span className="bg-slate-200 px-1 rounded text-[7px]">LC</span>}
+                            </div>
+                          </td>
                           <td className="px-6 py-4 text-right">
                             <button onClick={() => setExtractedData(prev => prev ? {...prev, staff: prev.staff.filter((_, idx) => idx !== i)} : null)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={14}/></button>
                           </td>
