@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Flight, Staff, ShiftConfig, DailyProgram } from '../types.ts';
+import { Flight, Staff, ShiftConfig, DailyProgram, Skill, ProficiencyLevel } from '../types.ts';
 
 const SUPABASE_URL = (process.env as any).SUPABASE_URL;
 const SUPABASE_ANON_KEY = (process.env as any).SUPABASE_ANON_KEY;
@@ -53,7 +53,29 @@ export const db = {
 
       return {
         flights: flights.data || [],
-        staff: staff.data || [],
+        staff: (staff.data || []).map(s => {
+          // Reconstruct skillRatings object from flat columns for the UI
+          const skillRatings: Partial<Record<Skill, ProficiencyLevel>> = s.skill_ratings || {};
+          
+          if (s.is_shift_leader !== undefined) skillRatings['Shift Leader'] = s.is_shift_leader ? 'Yes' : 'No';
+          if (s.is_operations !== undefined) skillRatings['Operations'] = s.is_operations ? 'Yes' : 'No';
+          if (s.is_ramp !== undefined) skillRatings['Ramp'] = s.is_ramp ? 'Yes' : 'No';
+          if (s.is_load_control !== undefined) skillRatings['Load Control'] = s.is_load_control ? 'Yes' : 'No';
+          if (s.is_lost_found !== undefined) skillRatings['Lost and Found'] = s.is_lost_found ? 'Yes' : 'No';
+
+          return {
+            id: s.id,
+            name: s.name,
+            initials: s.initials,
+            type: s.type,
+            workPattern: s.work_pattern,
+            powerRate: s.power_rate,
+            skillRatings,
+            workFromDate: s.work_from_date,
+            workToDate: s.work_to_date,
+            maxShiftsPerWeek: 5
+          };
+        }),
         shifts: shifts.data || [],
         programs: (programs.data || []).map(p => ({
           day: p.roster_day,
@@ -90,6 +112,7 @@ export const db = {
 
   async upsertStaff(s: Staff) {
     if (!supabase) return;
+    // Map JSON skills to flat boolean columns for Excel/DB compatibility
     const dbData = {
       id: s.id,
       name: s.name,
@@ -97,9 +120,14 @@ export const db = {
       type: s.type,
       work_pattern: s.workPattern,
       power_rate: s.powerRate,
-      skill_ratings: s.skillRatings,
+      skill_ratings: s.skillRatings, // Keep as backup
       work_from_date: s.workFromDate,
-      work_to_date: s.workToDate
+      work_to_date: s.workToDate,
+      is_shift_leader: s.skillRatings?.['Shift Leader'] === 'Yes',
+      is_operations: s.skillRatings?.['Operations'] === 'Yes',
+      is_ramp: s.skillRatings?.['Ramp'] === 'Yes',
+      is_load_control: s.skillRatings?.['Load Control'] === 'Yes',
+      is_lost_found: s.skillRatings?.['Lost and Found'] === 'Yes'
     };
     await supabase.from('staff').upsert(dbData);
   },
