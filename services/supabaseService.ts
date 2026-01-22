@@ -81,13 +81,13 @@ export const db = {
           name: s.name,
           initials: s.initials,
           type: s.type,
-          workPattern: s.work_pattern, // Fixed: use workPattern
+          workPattern: s.work_pattern,
           isRamp: !!s.is_ramp,
           isShiftLeader: !!s.is_shift_leader,
           isOps: !!s.is_ops,
           isLoadControl: !!s.is_load_control,
           isLostFound: !!s.is_lost_found,
-          powerRate: s.power_rate,     // Fixed: use powerRate
+          powerRate: s.power_rate,
           maxShiftsPerWeek: s.max_shifts_per_week,
           workFromDate: s.work_from_date,
           workToDate: s.work_to_date
@@ -106,7 +106,7 @@ export const db = {
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
-          dateString: p.date_string,
+          dateString: p.date_string, // Corrected mapping
           assignments: p.assignments || [],
           offDuty: p.off_duty || []
         }))
@@ -171,16 +171,17 @@ export const db = {
     const session = await auth.getSession();
     if (!session) throw new Error("Authentication required.");
 
+    // Defensive check to prevent invalid numbers hitting the DB
     const payload = {
       id: s.id,
       user_id: session.user.id,
-      day: s.day,
+      day: s.day || 0,
       pickup_date: s.pickupDate,
       pickup_time: s.pickupTime,
-      end_date: s.endDate,
+      end_date: s.endDate || s.pickupDate,
       end_time: s.endTime,
-      min_staff: s.minStaff,
-      max_staff: s.maxStaff,
+      min_staff: Number(s.minStaff) || 0,
+      max_staff: Number(s.maxStaff) || 0,
       role_counts: s.roleCounts || {},
       flight_ids: s.flightIds || []
     };
