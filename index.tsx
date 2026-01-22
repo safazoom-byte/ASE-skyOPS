@@ -290,14 +290,6 @@ const App: React.FC = () => {
     setStaff(prev => prev.filter(s => s.id !== id));
     if (supabase) { setSyncStatus('syncing'); await db.deleteStaff(id); setSyncStatus('connected'); }
   };
-  const handleStaffClearAll = async () => {
-    setStaff([]);
-    if (supabase) {
-      setSyncStatus('syncing');
-      await db.truncateStaff();
-      setSyncStatus('connected');
-    }
-  };
   const handleShiftUpdate = async (s: ShiftConfig) => {
     setShifts(prev => {
       const exists = prev.find(old => old.id === s.id);
@@ -493,7 +485,7 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'flights' && <FlightManager flights={flights || []} startDate={startDate} endDate={endDate} onAdd={f => { setFlights(p => [...p, f]); if(supabase) db.upsertFlight(f); }} onUpdate={handleFlightUpdate} onDelete={handleFlightDelete} onOpenScanner={() => {setScannerTarget('flights'); setIsScannerOpen(true);}} />}
-        {activeTab === 'staff' && <StaffManager staff={staff || []} onUpdate={handleStaffUpdate} onDelete={handleStaffDelete} onClearAll={handleStaffClearAll} defaultMaxShifts={5} onOpenScanner={() => {setScannerTarget('staff'); setIsScannerOpen(true);}} />}
+        {activeTab === 'staff' && <StaffManager staff={staff || []} onUpdate={handleStaffUpdate} onDelete={handleStaffDelete} onClearAll={() => setStaff([])} defaultMaxShifts={5} onOpenScanner={() => {setScannerTarget('staff'); setIsScannerOpen(true);}} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts || []} flights={flights || []} startDate={startDate} onAdd={s => { setShifts(p => [...p, s]); if(supabase) db.upsertShift(s); }} onUpdate={handleShiftUpdate} onDelete={handleShiftDelete} onOpenScanner={() => {setScannerTarget('shifts'); setIsScannerOpen(true);}} />}
         {activeTab === 'program' && <ProgramDisplay programs={programs || []} flights={flights || []} staff={staff || []} shifts={shifts || []} startDate={startDate} endDate={endDate} onUpdatePrograms={setPrograms} />}
       </main>
