@@ -49,7 +49,6 @@ export const db = {
       const session = await auth.getSession();
       if (!session) return null;
 
-      // GLOBAL FETCH: No user_id filtering to allow all users to see all data
       const [fRes, sRes, shRes, pRes] = await Promise.all([
         supabase.from('flights').select('*'),
         supabase.from('staff').select('*'),
@@ -62,6 +61,7 @@ export const db = {
       if (shRes.error) throw shRes.error;
       if (pRes.error) throw pRes.error;
 
+      // MAP SNAKE_CASE DB TO CAMEL_CASE APP
       return {
         flights: (fRes.data || []).map(f => ({
           id: f.id,
@@ -79,35 +79,33 @@ export const db = {
           name: s.name,
           initials: s.initials,
           type: s.type,
-          work_pattern: s.work_pattern,
-          is_ramp: !!s.is_ramp,
-          is_shift_leader: !!s.is_shift_leader,
-          is_operations: !!s.is_operations,
-          is_load_control: !!s.is_load_control,
-          is_lost_found: !!s.is_lost_found,
-          power_rate: s.power_rate || 75,
-          max_shifts_per_week: s.max_shifts_per_week || 5,
-          work_from_date: s.work_from_date,
-          work_to_date: s.work_to_date
+          workPattern: s.work_pattern,
+          isRamp: !!s.is_ramp,
+          isShiftLeader: !!s.is_shift_leader,
+          isOps: !!s.is_operations,
+          isLoadControl: !!s.is_load_control,
+          isLostFound: !!s.is_lost_found,
+          powerRate: s.power_rate || 75,
+          maxShiftsPerWeek: s.max_shifts_per_week || 5,
+          workFromDate: s.work_from_date,
+          workToDate: s.work_to_date
         })),
         shifts: (shRes.data || []).map(s => ({
           id: s.id,
           day: s.day || 0,
-          pickup_date: s.pickup_date,
-          pickup_time: s.pickup_time,
-          end_date: s.end_date,
-          end_time: s.end_time,
-          min_staff: s.min_staff || 1,
-          max_staff: s.max_staff || 10,
-          role_counts: s.role_counts || {},
-          flight_ids: s.flight_ids || []
+          pickupDate: s.pickup_date,
+          pickupTime: s.pickup_time,
+          endDate: s.end_date,
+          endTime: s.end_time,
+          minStaff: s.min_staff || 1,
+          maxStaff: s.max_staff || 10,
+          roleCounts: s.role_counts || {},
+          flightIds: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
-          // FIX: Map date_string to dateString to match DailyProgram interface
           dateString: p.date_string,
           assignments: p.assignments || [],
-          // FIX: Map off_duty to offDuty to match DailyProgram interface
           offDuty: p.off_duty || []
         }))
       };
@@ -192,9 +190,10 @@ export const db = {
           programs.map(p => ({
             user_id: session.user.id,
             day: p.day,
+            // Fixed: use p.dateString instead of p.date_string to match interface
             date_string: p.dateString,
             assignments: p.assignments,
-            // FIX: Use camelCase property 'offDuty' from DailyProgram interface to resolve 'off_duty' error
+            // Fixed: use p.offDuty instead of p.off_duty to match interface
             off_duty: p.offDuty || []
           }))
         );
