@@ -64,6 +64,25 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  const availableFlights = useMemo(() => {
+    if (!formData.pickupDate) return [];
+    // Show flights within a 1-day window of the shift date to handle overnight rotations
+    const targetDate = new Date(formData.pickupDate);
+    return flights.filter(f => {
+      const flightDate = new Date(f.date);
+      const diffDays = Math.abs(flightDate.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24);
+      return diffDays <= 1;
+    });
+  }, [flights, formData.pickupDate]);
+
+  const toggleFlightEngagement = (flightId: string) => {
+    const current = formData.flightIds || [];
+    const next = current.includes(flightId) 
+      ? current.filter(id => id !== flightId) 
+      : [...current, flightId];
+    setFormData(prev => ({ ...prev, flightIds: next }));
+  };
+
   const getDayLabel = (dateStr: string) => {
     if (!dateStr) return 'No Date';
     const date = new Date(dateStr);
@@ -258,7 +277,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 md:gap-10">
         <div className="xl:col-span-1">
-          <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 xl:sticky xl:top-24">
+          <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 xl:sticky xl:top-24 max-h-[85vh] overflow-y-auto no-scrollbar">
             <h4 className="text-lg md:text-xl font-black italic uppercase mb-8 flex items-center gap-3 text-slate-900 leading-none">
               {editingId ? <Edit2 size={20} className="text-indigo-600" /> : <Plus size={20} className="text-blue-600" />}
               {editingId ? 'Modify Logic' : 'New Duty'}
@@ -284,6 +303,37 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                      <span className="text-[7px] font-black text-slate-300 uppercase ml-1">Release Time</span>
                      <input type="text" maxLength={5} placeholder="14:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-sm outline-none" value={formData.endTime} onChange={e => setFormData({...formData, endTime: formatTimeInput(e.target.value)})} />
                    </div>
+                </div>
+              </div>
+
+              {/* RESTORED LINKED TRAFFIC GRID */}
+              <div className="space-y-4 pt-4 border-t border-slate-50">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Plane size={12} className="text-blue-500" /> Linked Traffic</label>
+                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar p-1">
+                  {availableFlights.length === 0 ? (
+                    <p className="col-span-2 text-[8px] font-black text-slate-300 uppercase italic py-4 text-center">No matching flights in range</p>
+                  ) : (
+                    availableFlights.map(f => {
+                      const isSelected = (formData.flightIds || []).includes(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => toggleFlightEngagement(f.id)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            isSelected 
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-lg' 
+                              : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'
+                          }`}
+                        >
+                          <div className="text-[10px] font-black leading-none mb-1">{f.flightNumber}</div>
+                          <div className={`text-[7px] font-bold uppercase opacity-60 ${isSelected ? 'text-white' : 'text-slate-400'}`}>
+                            {f.sta || f.std || '--:--'}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 

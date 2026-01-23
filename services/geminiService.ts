@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
 
@@ -50,13 +49,11 @@ export const sanitizeRole = (role: string): Skill => {
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  // Deep clean for markdown blocks or leading/trailing text
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
   
   try {
     return JSON.parse(cleanText);
   } catch (e) {
-    // If standard parse fails, try searching for the first object or array start
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
@@ -64,7 +61,6 @@ const safeParseJson = (text: string | undefined): any => {
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
     
-    // Attempt to find the matching closing bracket
     const stack: string[] = [];
     let lastValidIdx = 0;
     for (let i = 0; i < candidate.length; i++) {
@@ -102,8 +98,6 @@ const auditRoster = (result: any, data: ProgramData, numDays: number): Constrain
 
   programs.forEach(prog => {
     const assignments = prog.assignments || [];
-    
-    // Check if assignments are missing staffIds (GAPS)
     const gaps = assignments.filter(a => !a.staffId || a.staffId === 'GAP');
     if (gaps.length > 0) {
       violations.push({
@@ -134,11 +128,12 @@ const auditRoster = (result: any, data: ProgramData, numDays: number): Constrain
   });
 
   staffWorkCounts.forEach((count, id) => {
-    if (count > 5) {
-      const s = safeStaff.find(st => st.id === id);
+    const s = safeStaff.find(st => st.id === id);
+    const max = s?.maxShiftsPerWeek || 5;
+    if (count > max) {
       violations.push({ 
         type: '5/2_VIOLATION', 
-        message: `Agent ${s?.initials || id}: 5/2 Law violation (${count} days). Coverage prioritized.`,
+        message: `Agent ${s?.initials || id}: Overworked (${count}/${max} days). Coverage prioritized.`,
         severity: 'WARNING'
       });
     }
@@ -150,26 +145,28 @@ const auditRoster = (result: any, data: ProgramData, numDays: number): Constrain
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string, customRules?: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Using Flash for initial draft to prioritize speed and basic structural adherence
   const prompt = `
-    COMMAND: Generate Preliminary Station Roster.
-    STATION: Aviation Ground Handling Operations
+    COMMAND: Generate Operations Roster.
+    STATION: Aviation Ground Handling
     
-    GOAL: 100% COVERAGE FOR ALL SHIFTS.
+    GOAL: 100% COVERAGE FOR ALL SLOTS AND LINKED FLIGHTS.
+    
+    DATASETS:
+    - Staff: ${JSON.stringify(data.staff.map(s => ({
+        id: s.id, 
+        initials: s.initials, 
+        skills: [s.isShiftLeader?'Shift Leader':'', s.isLoadControl?'Load Control':'', s.isRamp?'Ramp':'', s.isOps?'Operations':'', s.isLostFound?'Lost and Found':''].filter(Boolean),
+        max: s.maxShiftsPerWeek
+      })))}
+    - Flights: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
+    - Shifts: ${JSON.stringify(data.shifts)}
     
     INSTRUCTIONS:
-    1. If you cannot find enough staff for a shift, assign "GAP" to the staffId. DO NOT leave the shift empty.
-    2. Prioritize Coverage > Shift Leader Presence > Rest Hours > 5/2 Law.
-    3. Ensure every shift in the DATA list is represented in the output for its corresponding date.
-    
-    CONSTRAINTS:
-    - Minimum Rest: ${config.minRestHours}h
-    - Max Days/Week: 5 (Preferred)
-    - Context: ${constraintsLog}
-    
-    DATA:
-    - Staff: ${JSON.stringify(data.staff.map(s => ({id: s.id, initials: s.initials, skills: [s.isShiftLeader?'Shift Leader':'', s.isLoadControl?'Load Control':'', s.isRamp?'Ramp':'', s.isOps?'Operations':'', s.isLostFound?'Lost and Found':''].filter(Boolean)})))}
-    - Shifts: ${JSON.stringify(data.shifts)}
+    1. For each Shift in the DATA, you must create assignments to fulfill the 'minStaff' requirement.
+    2. If a Shift has 'flightIds', prioritize assigning staff roles (Shift Leader, Load Control, etc.) specific to those flights.
+    3. Use "GAP" if no staff member is available. NEVER leave a shift or linked flight uncovered.
+    4. Adhere to ${config.minRestHours}h minimum rest between duties.
+    5. USER CONTEXT: ${constraintsLog}
     
     OUTPUT FORMAT: JSON ONLY
     {
@@ -178,7 +175,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
           "day": number,
           "dateString": "YYYY-MM-DD",
           "assignments": [
-             { "id": "uuid", "staffId": "staff_id_or_GAP", "flightId": "optional", "role": "Skill", "shiftId": "shift_id" }
+             { "id": "uuid", "staffId": "staff_id_or_GAP", "flightId": "linked_flight_id", "role": "Skill", "shiftId": "shift_id" }
           ],
           "offDuty": []
         }
@@ -193,13 +190,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        systemInstruction: "You are a specialized Roster Engine. You output valid JSON representing a ground handling schedule. You never say 'I cannot' - you always provide a draft, using 'GAP' for unfilled spots."
+        systemInstruction: "You are SkyOPS AI, a precision aviation rostering engine. You prioritize flight coverage and operational safety above all. You always return valid JSON."
       }
     });
 
     const parsed = safeParseJson(response.text);
     const violations = auditRoster(parsed, data, config.numDays);
-    const hasBlockers = violations.some(v => v.severity === 'BLOCKER');
 
     return {
       programs: parsed?.programs || [],
@@ -207,11 +203,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       recommendations: parsed?.recommendations,
       validationLog: violations.map(v => v.message),
       isCompliant: violations.length === 0,
-      hasBlockers
+      hasBlockers: violations.some(v => v.severity === 'BLOCKER')
     };
   } catch (err) {
     console.error("AI Generation Error:", err);
-    throw new Error("The logic engine timed out or returned an invalid structure. Please reduce the date range or check your registry.");
+    throw new Error("Logic Engine Fault: Check data density or registry alignment.");
   }
 };
 
@@ -220,16 +216,15 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
   
   const prompt = `
     REFINEMENT PASS ${pass}: 
-    Current Roster Status: ${previous.validationLog?.join('; ') || 'No major issues'}.
+    Current Violations: ${previous.validationLog?.join('; ') || 'None'}.
     
     TASK: 
-    1. Swap staff to fix Rest Hour violations where possible.
-    2. Try to replace "GAP" staffIds with available agents who aren't working that day.
-    3. Ensure Shift Leaders are present in all slots that require them.
+    1. Resolve "GAP" assignments by checking if any staff member is free on that day without violating the ${config.minRestHours}h rest rule.
+    2. Ensure every assignment has a valid 'shiftId' and, if applicable, a 'flightId' from the provided data.
     
     INPUT ROSTER: ${JSON.stringify(previous.programs)}
     
-    Return the FULL UPDATED JSON object.
+    Return the FULL UPDATED JSON object with the same structure.
   `;
 
   const response = await ai.models.generateContent({
@@ -237,13 +232,12 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
     contents: prompt,
     config: { 
       responseMimeType: 'application/json',
-      systemInstruction: "You are a Roster Optimizer. Focus on fixing specific logic errors and filling GAPs in the provided JSON."
+      systemInstruction: "You are SkyOPS Optimizer. You fix scheduling gaps and rest hour violations."
     }
   });
 
   const parsed = safeParseJson(response.text);
   const violations = auditRoster(parsed, data, config.numDays);
-  const hasBlockers = violations.some(v => v.severity === 'BLOCKER');
 
   return {
     programs: parsed?.programs || [],
@@ -251,15 +245,13 @@ export const refineAIProgram = async (previous: BuildResult, data: ProgramData, 
     recommendations: parsed?.recommendations,
     validationLog: violations.map(v => v.message),
     isCompliant: violations.length === 0,
-    hasBlockers
+    hasBlockers: violations.some(v => v.severity === 'BLOCKER')
   };
 };
 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   const parts: any[] = [{ text: `Extract station handling data (${options.targetType}) into JSON. Use ${options.startDate} as base date if needed.` }];
-  
   if (options.textData) parts.push({ text: options.textData });
   if (options.media) {
     options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -270,7 +262,7 @@ export const extractDataFromContent = async (options: { textData?: string, media
     contents: { parts },
     config: { 
       responseMimeType: 'application/json',
-      systemInstruction: "Extract flight numbers, times, staff names, and initials from images or text. Ensure YYYY-MM-DD date formatting."
+      systemInstruction: "Extract flight numbers, times, staff names, and initials. Return standard JSON."
     }
   });
 
@@ -279,42 +271,31 @@ export const extractDataFromContent = async (options: { textData?: string, media
 
 export const identifyMapping = async (rows: any[][], target: string): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const prompt = `
-    Given these sample rows from a sheet, map the columns to these fields: ${target}.
-    Rows: ${JSON.stringify(rows.slice(0, 5))}
-    Return JSON: { "columnMap": { "field": index } }
-  `;
-
+  const prompt = ` Map columns: ${target}. Rows: ${JSON.stringify(rows.slice(0, 5))}. Return JSON columnMap.`;
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
     config: { responseMimeType: 'application/json' }
   });
-
   return safeParseJson(response.text);
 };
 
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   const parts: any[] = [
     { text: `INSTRUCTION: ${instruction}` },
     { text: `CURRENT DATA: ${JSON.stringify(data)}` }
   ];
-
   if (media.length > 0) {
     media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
-
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      systemInstruction: "You are an expert aviation scheduler. Modify the existing roster based on user instructions. Ensure compliance with 5/2 Law and Rest Hours. Return the updated programs list and an explanation of changes."
+      systemInstruction: "Expert station scheduler. Modify roster accurately. Ensure compliance. Return JSON programs and explanation."
     }
   });
-
   return safeParseJson(response.text);
 };
