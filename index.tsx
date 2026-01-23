@@ -70,7 +70,7 @@ const App: React.FC = () => {
   const [shifts, setShifts] = useState<ShiftConfig[]>(() => getSafeLocalStorageArray(STORAGE_KEYS.SHIFTS));
   const [programs, setPrograms] = useState<DailyProgram[]>(() => getSafeLocalStorageArray(STORAGE_KEYS.PROGRAMS));
   
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'connected'>(supabase ? 'connected' : 'idle');
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'connected'>(supabase ? 'connected' : 'error');
   const [previousDutyLog, setPreviousDutyLog] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.PREV_DUTY_LOG) || '');
   const [personnelRequests, setPersonnelRequests] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.PERSONNEL_REQUESTS) || '');
   const [minRestHours, setMinRestHours] = useState<number>(() => parseInt(localStorage.getItem(STORAGE_KEYS.REST_HOURS) || '12'));
@@ -105,16 +105,19 @@ const App: React.FC = () => {
       setSyncStatus('syncing');
       db.fetchAll().then(data => {
         if (data) {
-          setFlights(data.flights || []);
-          setStaff(data.staff || []);
-          setShifts(data.shifts || []);
-          setPrograms(data.programs || []);
+          if (data.flights?.length > 0) setFlights(data.flights);
+          if (data.staff?.length > 0) setStaff(data.staff);
+          if (data.shifts?.length > 0) setShifts(data.shifts);
+          if (data.programs?.length > 0) setPrograms(data.programs);
           setSyncStatus('connected');
         }
       }).catch(err => {
+        console.error("Cloud Sync Error:", err);
         setSyncStatus('error');
-        setError("Cloud Sync Error. Operational data is currently local-only.");
+        setError("Could not retrieve cloud data. Using local cache.");
       });
+    } else if (!supabase) {
+      setSyncStatus('error');
     }
   }, [session]);
 
@@ -257,7 +260,7 @@ const App: React.FC = () => {
                    syncStatus === 'connected' ? <Cloud size={10} className="text-emerald-400" /> : 
                    <CloudOff size={10} className="text-rose-400" />}
                   <span className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${syncStatus === 'syncing' ? 'text-blue-400' : syncStatus === 'connected' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {syncStatus === 'syncing' ? 'Sync' : syncStatus === 'connected' ? 'Cloud' : 'Offline'}
+                    {syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'connected' ? 'Cloud' : 'Offline'}
                   </span>
                </div>
              </div>

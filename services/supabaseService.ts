@@ -1,14 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 
-// These are injected by Vite define or environment variables
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+// Standard Vite approach for environment variables
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 const isConfigured = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 20;
 
 if (!isConfigured) {
-  console.warn("SkyOPS Warning: Cloud credentials missing. Operating in offline/local mode.");
+  console.warn("SkyOPS Warning: Supabase credentials not detected. App will run in offline mode.");
 }
 
 export const supabase = isConfigured 
@@ -17,11 +17,11 @@ export const supabase = isConfigured
 
 export const auth = {
   async signUp(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Cloud uplink unavailable.") };
+    if (!supabase) return { error: new Error("Database configuration missing.") };
     return await supabase.auth.signUp({ email, password: pass });
   },
   async signIn(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Cloud uplink unavailable.") };
+    if (!supabase) return { error: new Error("Database configuration missing.") };
     return await supabase.auth.signInWithPassword({ email, password: pass });
   },
   async signOut() {
@@ -110,7 +110,7 @@ export const db = {
         }))
       };
     } catch (e) {
-      console.error("Supabase Sync Error:", e);
+      console.error("Database Connection Failure:", e);
       throw e;
     }
   },
@@ -151,7 +151,6 @@ export const db = {
       is_operations: s.isOps,
       is_load_control: s.isLoadControl,
       is_lost_found: s.isLostFound,
-      // Fixed: property access changed from power_rate to powerRate to match Staff interface
       power_rate: s.powerRate,
       max_shifts_per_week: s.maxShiftsPerWeek,
       work_from_date: s.workFromDate,
@@ -188,19 +187,19 @@ export const db = {
     try {
       await supabase.from('programs').delete().eq('user_id', userId); 
       if (programs.length > 0) {
-        await supabase.from('programs').insert(
+        const { error } = await supabase.from('programs').insert(
           programs.map(p => ({
             user_id: userId,
             day: p.day,
-            date_string: p.date_string,
+            date_string: p.dateString,
             assignments: p.assignments,
-            // Fixed: changed p.off_duty to p.offDuty to match DailyProgram type
             off_duty: p.offDuty || []
           }))
         );
+        if (error) throw error;
       }
     } catch (e) {
-      console.error("Program save failed:", e);
+      console.error("Program cloud save failed:", e);
     }
   },
 
