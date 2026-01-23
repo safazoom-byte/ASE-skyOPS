@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { auth, supabase } from '../services/supabaseService';
 import { Lock, Mail, Plane, ChevronRight, Loader2, ShieldCheck, AlertCircle, Settings } from 'lucide-react';
@@ -15,18 +14,18 @@ export const Auth: React.FC = () => {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) {
-      setError("Cloud configuration missing. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your environment variables in Vercel.");
+      setError("Cloud configuration missing. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables in Vercel.");
       return;
     }
     setLoading(true);
     setError(null);
     
     try {
-      const { error } = isLogin 
+      const { error: authError } = isLogin 
         ? await auth.signIn(email, password)
         : await auth.signUp(email, password);
         
-      if (error) throw error;
+      if (authError) throw authError;
       if (!isLogin) alert("Registration successful! You can now log in.");
     } catch (err: any) {
       setError(err.message || "Authentication failed");
@@ -37,7 +36,6 @@ export const Auth: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Decorative Background Elements */}
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-600/10 blur-[120px] rounded-full"></div>
       <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full"></div>
 
@@ -54,8 +52,8 @@ export const Auth: React.FC = () => {
           <div className="mb-8 p-6 bg-amber-500/10 border border-amber-500/20 rounded-[2rem] flex flex-col items-center gap-3 text-amber-500 text-center animate-in fade-in zoom-in-95">
             <Settings size={24} className="animate-spin" />
             <div className="space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-widest">Configuration Required</p>
-              <p className="text-[9px] font-bold text-slate-400">Missing Supabase credentials in environment. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.</p>
+              <p className="text-[10px] font-black uppercase tracking-widest">Connection Config Required</p>
+              <p className="text-[9px] font-bold text-slate-400">Environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be defined in Vercel settings for cloud sync.</p>
             </div>
           </div>
         )}
@@ -124,7 +122,7 @@ export const Auth: React.FC = () => {
 
         <div className="mt-12 flex items-center justify-center gap-4">
            <ShieldCheck size={16} className="text-emerald-500" />
-           <span className="text-[8px] font-black text-slate-600 uppercase tracking-[0.5em]">AES-256 Encrypted Stream</span>
+           <span className="text-[8px] font-black text-slate-600 uppercase tracking-[0.5em]">AES-256 Cloud Encryption</span>
         </div>
       </div>
     </div>

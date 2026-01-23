@@ -1,14 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 
-// Standard Vite approach for environment variables
+// Detect environment variables from both Vite define and standard import.meta.env
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 const isConfigured = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 20;
 
 if (!isConfigured) {
-  console.warn("SkyOPS Warning: Supabase credentials not detected. App will run in offline mode.");
+  console.warn("SkyOPS Warning: Supabase credentials not detected. Check your environment variables (VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY).");
 }
 
 export const supabase = isConfigured 
@@ -48,13 +48,13 @@ export const db = {
     try {
       const session = await auth.getSession();
       if (!session) return null;
-      const userId = session.user.id;
 
+      // GLOBAL FETCH: No user_id filtering to allow all users to see all data
       const [fRes, sRes, shRes, pRes] = await Promise.all([
-        supabase.from('flights').select('*').eq('user_id', userId),
-        supabase.from('staff').select('*').eq('user_id', userId),
-        supabase.from('shifts').select('*').eq('user_id', userId),
-        supabase.from('programs').select('*').eq('user_id', userId)
+        supabase.from('flights').select('*'),
+        supabase.from('staff').select('*'),
+        supabase.from('shifts').select('*'),
+        supabase.from('programs').select('*')
       ]);
 
       if (fRes.error) throw fRes.error;
@@ -122,7 +122,7 @@ export const db = {
     
     await supabase.from('flights').upsert({
       id: f.id,
-      user_id: session.user.id,
+      user_id: session.user.id, // Keep track of last editor
       flight_number: f.flightNumber,
       origin: f.from,
       destination: f.to,
@@ -182,14 +182,15 @@ export const db = {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    const userId = session.user.id;
 
     try {
-      await supabase.from('programs').delete().eq('user_id', userId); 
+      // GLOBAL SYNC: Wipe all current programs to refresh with the new shared version
+      await supabase.from('programs').delete().neq('day', -1); 
+      
       if (programs.length > 0) {
         const { error } = await supabase.from('programs').insert(
           programs.map(p => ({
-            user_id: userId,
+            user_id: session.user.id,
             day: p.day,
             date_string: p.dateString,
             assignments: p.assignments,
@@ -199,23 +200,21 @@ export const db = {
         if (error) throw error;
       }
     } catch (e) {
-      console.error("Program cloud save failed:", e);
+      console.error("Global Program Sync Failure:", e);
     }
   },
 
   async deleteFlight(id: string) { 
     if (!supabase) return;
-    const session = await auth.getSession();
-    if (session) await supabase.from('flights').delete().eq('id', id).eq('user_id', session.user.id); 
+    // No user_id check to allow global deletion
+    await supabase.from('flights').delete().eq('id', id); 
   },
   async deleteStaff(id: string) { 
     if (!supabase) return;
-    const session = await auth.getSession();
-    if (session) await supabase.from('staff').delete().eq('id', id).eq('user_id', session.user.id); 
+    await supabase.from('staff').delete().eq('id', id); 
   },
   async deleteShift(id: string) { 
     if (!supabase) return;
-    const session = await auth.getSession();
-    if (session) await supabase.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); 
+    await supabase.from('shifts').delete().eq('id', id); 
   }
 };
