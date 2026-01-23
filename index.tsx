@@ -20,7 +20,9 @@ import {
   CloudOff,
   LogOut,
   ChevronRight,
-  ArrowUpRight
+  ArrowUpRight,
+  FileText,
+  UserX
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -374,6 +376,26 @@ const App: React.FC = () => {
                           <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">MIN</span>
                         </div>
                       </div>
+                   </div>
+
+                   {/* RESTORED INPUT BOXES */}
+                   <div className="space-y-4 md:space-y-6">
+                      <label className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><UserX size={14} className="text-rose-500"/> Personnel Requests & Leave</label>
+                      <textarea 
+                        value={personnelRequests} 
+                        onChange={e => setPersonnelRequests(e.target.value)} 
+                        placeholder="e.g. 'MZ on Leave Monday', 'Shift Leader needed for EK on Day 2'..."
+                        className="w-full h-32 md:h-40 p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2.5rem] font-bold text-slate-900 text-xs outline-none focus:ring-4 focus:ring-blue-600/10 transition-all resize-none"
+                      />
+                   </div>
+                   <div className="space-y-4 md:space-y-6">
+                      <label className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><FileText size={14} className="text-emerald-500"/> Legacy Duty Log (Pre-Roster)</label>
+                      <textarea 
+                        value={previousDutyLog} 
+                        onChange={e => setPreviousDutyLog(e.target.value)} 
+                        placeholder="Paste previous shift endings here to ensure AI calculates 12h rest for the first day..."
+                        className="w-full h-32 md:h-40 p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2.5rem] font-bold text-slate-900 text-xs outline-none focus:ring-4 focus:ring-blue-600/10 transition-all resize-none"
+                      />
                    </div>
                 </div>
 
