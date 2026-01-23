@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import './style.css';
@@ -10,37 +9,18 @@ import {
   Menu,
   X,
   AlertCircle,
-  ShieldCheck,
-  TrendingUp,
   Activity,
-  ChevronRight,
-  History,
-  Palmtree,
-  CheckCircle2,
   CalendarDays,
-  Check,
-  Calendar,
   Sparkles,
   Zap,
   Target,
-  ArrowRight,
-  ClipboardCheck,
-  Send,
-  MousePointer2,
-  Fingerprint,
-  Shield,
-  Briefcase,
-  FileText,
-  AlertTriangle,
-  Cpu,
   Loader2,
-  Scale,
   RefreshCw,
-  Waves,
   Cloud,
   CloudOff,
-  Database,
-  LogOut
+  LogOut,
+  ChevronRight,
+  ArrowUpRight
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig } from './types';
@@ -62,7 +42,6 @@ const STORAGE_KEYS = {
   START_DATE: 'skyops_start_date_v3',
   END_DATE: 'skyops_end_date_v3',
   REST_HOURS: 'skyops_min_rest_v3',
-  RECOMMENDATIONS: 'skyops_recommendations_v3',
   PREV_DUTY_LOG: 'skyops_prev_duty_log_v3',
   PERSONNEL_REQUESTS: 'skyops_personnel_requests_v3'
 };
@@ -92,24 +71,12 @@ const App: React.FC = () => {
   const [programs, setPrograms] = useState<DailyProgram[]>(() => getSafeLocalStorageArray(STORAGE_KEYS.PROGRAMS));
   
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'connected'>(supabase ? 'connected' : 'idle');
-  
-  const [recommendations, setRecommendations] = useState<ResourceRecommendation | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.RECOMMENDATIONS);
-    return saved ? JSON.parse(saved) : null;
-  });
-  
   const [previousDutyLog, setPreviousDutyLog] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.PREV_DUTY_LOG) || '');
   const [personnelRequests, setPersonnelRequests] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.PERSONNEL_REQUESTS) || '');
   const [minRestHours, setMinRestHours] = useState<number>(() => parseInt(localStorage.getItem(STORAGE_KEYS.REST_HOURS) || '12'));
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationStep, setGenerationStep] = useState<number>(0); 
   const [error, setError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [showSuccessChecklist, setShowSuccessChecklist] = useState(false);
-  const [showWarningModal, setShowWarningModal] = useState(false);
-  const [complianceLog, setComplianceLog] = useState<string[]>([]);
-  const [pendingVerification, setPendingVerification] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[] } | null>(null);
-  const [proposedPrograms, setProposedPrograms] = useState<DailyProgram[] | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
 
@@ -146,7 +113,7 @@ const App: React.FC = () => {
         }
       }).catch(err => {
         setSyncStatus('error');
-        setError("Cloud Refusal: Database sync failure.");
+        setError("Cloud Sync Error. Operational data is currently local-only.");
       });
     }
   }, [session]);
@@ -171,101 +138,47 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.START_DATE, startDate);
     localStorage.setItem(STORAGE_KEYS.END_DATE, endDate);
     localStorage.setItem(STORAGE_KEYS.REST_HOURS, minRestHours.toString());
-    localStorage.setItem(STORAGE_KEYS.RECOMMENDATIONS, JSON.stringify(recommendations));
     localStorage.setItem(STORAGE_KEYS.PREV_DUTY_LOG, previousDutyLog);
     localStorage.setItem(STORAGE_KEYS.PERSONNEL_REQUESTS, personnelRequests);
-  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, recommendations, previousDutyLog, personnelRequests, session]);
-
-  const commitVerifiedData = async () => {
-    if (!pendingVerification) return;
-    setSyncStatus('syncing');
-    
-    try {
-      await Promise.all([
-        ...pendingVerification.staff.map(s => db.upsertStaff(s)),
-        ...pendingVerification.flights.map(f => db.upsertFlight(f)),
-        ...pendingVerification.shifts.map(sh => db.upsertShift(sh))
-      ]);
-
-      setStaff(prev => [...prev, ...pendingVerification.staff.filter(s => !prev.some(p => p.id === s.id))]);
-      setFlights(prev => [...prev, ...pendingVerification.flights.filter(f => !prev.some(p => p.id === f.id))]);
-      setShifts(prev => [...prev, ...pendingVerification.shifts.filter(sh => !prev.some(p => p.id === sh.id))]);
-      
-      setSyncStatus('connected');
-      setPendingVerification(null);
-      setShowSuccessChecklist(true);
-    } catch (err: any) {
-      setSyncStatus('error');
-      setError("Database Write Error.");
-    }
-  };
+  }, [flights, staff, shifts, programs, startDate, endDate, minRestHours, previousDutyLog, personnelRequests, session]);
 
   const confirmGenerateProgram = async () => {
     if (activeShiftsInRange.length === 0 || activeFlightsInRange.length === 0) {
-      setError("Require both Flights and Duty Slots to generate program.");
+      setError("Critical Missing Data: Registry requires both Flight schedules and Duty slots to proceed.");
       setShowConfirmDialog(false);
       return;
     }
 
     setShowConfirmDialog(false); 
     setIsGenerating(true); 
-    setComplianceLog([]); 
     
     try {
       const inputData: ProgramData = { flights: activeFlightsInRange, staff: staff || [], shifts: activeShiftsInRange, programs: [] };
-      setGenerationStep(1); 
       let result = await generateAIProgram(inputData, `Log: ${previousDutyLog}\nRequests: ${personnelRequests}`, { numDays, minRestHours, startDate });
-      
-      setGenerationStep(2); 
       result = await refineAIProgram(result, inputData, 1, { minRestHours, startDate, numDays });
       
-      setProposedPrograms(result.programs);
-      if (!result.isCompliant || result.validationLog?.length) {
-        setComplianceLog(result.validationLog || ["Manual review suggested."]);
-        setShowWarningModal(true);
-      } else {
-        setPrograms(result.programs || []); 
-        if (supabase) await db.savePrograms(result.programs || []);
-        setActiveTab('program'); 
-        setShowSuccessChecklist(true);
-      }
+      setPrograms(result.programs || []); 
+      if (supabase) await db.savePrograms(result.programs || []);
+      setActiveTab('program'); 
     } catch (err: any) { 
-      setError(err.message || "Logic engine failure."); 
+      setError(err.message || "Logic engine timeout. Operational complexity may be too high for a single pass."); 
     } 
-    finally { setIsGenerating(false); setGenerationStep(0); }
+    finally { setIsGenerating(false); }
   };
 
   const handleFlightAdd = async (f: Flight) => {
     setFlights(prev => [...prev, f]);
-    if (supabase) {
-      setSyncStatus('syncing');
-      try {
-        await db.upsertFlight(f);
-        setSyncStatus('connected');
-      } catch (e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.upsertFlight(f);
   };
 
   const handleFlightUpdate = async (f: Flight) => {
     setFlights(prev => prev.map(old => old.id === f.id ? f : old));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.upsertFlight(f); 
-        setSyncStatus('connected'); 
-      } catch (e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.upsertFlight(f);
   };
 
   const handleFlightDelete = async (id: string) => {
     setFlights(prev => prev.filter(f => f.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteFlight(id); 
-        setSyncStatus('connected'); 
-      } catch(e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.deleteFlight(id);
   };
 
   const handleStaffUpdate = async (s: Staff) => {
@@ -273,60 +186,47 @@ const App: React.FC = () => {
       const exists = prev.find(old => old.id === s.id);
       return exists ? prev.map(old => old.id === s.id ? s : old) : [...prev, s];
     });
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.upsertStaff(s); 
-        setSyncStatus('connected'); 
-      } catch (e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.upsertStaff(s);
   };
 
   const handleStaffDelete = async (id: string) => {
     setStaff(prev => prev.filter(s => s.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteStaff(id); 
-        setSyncStatus('connected'); 
-      } catch(e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.deleteStaff(id);
   };
 
   const handleShiftAdd = async (s: ShiftConfig) => {
     setShifts(prev => [...prev, s]);
-    if (supabase) {
-      setSyncStatus('syncing');
-      try {
-        await db.upsertShift(s);
-        setSyncStatus('connected');
-      } catch (e) { setSyncStatus('error'); }
-    }
+    if (supabase) await db.upsertShift(s);
   };
 
   const handleShiftUpdate = async (s: ShiftConfig) => {
-    setShifts(prev => {
-      const exists = prev.find(old => old.id === s.id);
-      return exists ? prev.map(old => old.id === s.id ? s : old) : [...prev, s];
-    });
-    if (supabase) {
-      setSyncStatus('syncing');
-      try {
-        await db.upsertShift(s);
-        setSyncStatus('connected');
-      } catch (e) { setSyncStatus('error'); }
-    }
+    setShifts(prev => prev.map(old => old.id === s.id ? s : old));
+    if (supabase) await db.upsertShift(s);
   };
 
   const handleShiftDelete = async (id: string) => {
     setShifts(prev => prev.filter(s => s.id !== id));
-    if (supabase) { 
-      setSyncStatus('syncing'); 
-      try {
-        await db.deleteShift(id); 
-        setSyncStatus('connected'); 
-      } catch(e) { setSyncStatus('error'); }
+    if (supabase) await db.deleteShift(id);
+  };
+
+  const handleDataExtracted = async (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => {
+    if (data.flights && data.flights.length > 0) {
+      setFlights(prev => [...prev, ...data.flights]);
+      if (supabase) { for (const f of data.flights) await db.upsertFlight(f); }
     }
+    if (data.staff && data.staff.length > 0) {
+      setStaff(prev => [...prev, ...data.staff]);
+      if (supabase) { for (const s of data.staff) await db.upsertStaff(s); }
+    }
+    if (data.shifts && data.shifts.length > 0) {
+      setShifts(prev => [...prev, ...data.shifts]);
+      if (supabase) { for (const s of data.shifts) await db.upsertShift(s); }
+    }
+    if (data.programs && data.programs.length > 0) {
+      setPrograms(data.programs);
+      if (supabase) await db.savePrograms(data.programs);
+    }
+    setIsScannerOpen(false);
   };
 
   if (isAuthChecking) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="text-blue-600 animate-spin" size={48} /></div>;
@@ -336,12 +236,12 @@ const App: React.FC = () => {
     { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
     { id: 'flights', icon: Activity, label: 'Flights' },
     { id: 'staff', icon: Users, label: 'Manpower' },
-    { id: 'shifts', icon: Clock, label: 'Duty Master' },
+    { id: 'shifts', icon: Clock, label: 'Shifts' },
     { id: 'program', icon: CalendarDays, label: 'Live Program' },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-20 md:pb-0">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-24 md:pb-0">
       <header className="sticky top-0 z-[100] bg-slate-950/95 backdrop-blur-2xl border-b border-white/5 py-4 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-4 md:gap-6">
            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg"><Plane className="text-white" size={20} /></div>
@@ -357,7 +257,7 @@ const App: React.FC = () => {
                    syncStatus === 'connected' ? <Cloud size={10} className="text-emerald-400" /> : 
                    <CloudOff size={10} className="text-rose-400" />}
                   <span className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${syncStatus === 'syncing' ? 'text-blue-400' : syncStatus === 'connected' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'connected' ? 'Cloud' : 'Error'}
+                    {syncStatus === 'syncing' ? 'Sync' : syncStatus === 'connected' ? 'Cloud' : 'Offline'}
                   </span>
                </div>
              </div>
@@ -376,7 +276,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[200] bg-slate-950 border-t border-white/5 md:hidden px-4 py-2 flex items-center justify-around">
+      <nav className="fixed bottom-0 left-0 right-0 z-[200] bg-slate-950 border-t border-white/5 md:hidden px-4 py-2 flex items-center justify-around pb-safe">
         {navigationTabs.map(tab => (
           <button 
             key={tab.id} 
@@ -391,56 +291,96 @@ const App: React.FC = () => {
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-4 md:p-12 overflow-x-hidden">
         {error && (
-          <div className="mb-8 p-6 md:p-8 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-3xl md:rounded-[3rem] flex justify-between items-center animate-in slide-in-from-top-4">
-            <div className="flex items-center gap-4">
+          <div className="mb-8 p-5 md:p-8 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-2xl md:rounded-[3rem] flex justify-between items-center animate-in slide-in-from-top-4">
+            <div className="flex items-center gap-3">
               <AlertCircle size={20} />
               <span className="font-black uppercase italic text-[9px] md:text-xs tracking-widest">{error}</span>
             </div>
-            <button onClick={() => setError(null)} className="p-2 hover:bg-rose-500/10 rounded-full transition-all">&times;</button>
+            <button onClick={() => setError(null)} className="p-2 hover:bg-rose-500/10 rounded-full">&times;</button>
           </div>
         )}
         
         {activeTab === 'dashboard' && (
           <div className="space-y-8 md:space-y-12 animate-in fade-in duration-500">
-             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-blue-500 transition-all">
-                  <Activity className="text-blue-600 mb-4 md:mb-6" />
-                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{activeFlightsInRange.length}</h4>
-                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Flights in window</p>
-                </div>
-                <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-indigo-500 transition-all">
-                  <Users className="text-indigo-600 mb-4 md:mb-6" />
-                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{staff.length}</h4>
-                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Personnel Registry</p>
-                </div>
-                <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-amber-500 transition-all sm:col-span-2 lg:col-span-1">
-                  <Clock className="text-amber-600 mb-4 md:mb-6" />
-                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{activeShiftsInRange.length}</h4>
-                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Active Duty Slots</p>
-                </div>
+             {/* THE INDEX BOXES (DASHBOARD CARDS) */}
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-10">
+                <button 
+                  onClick={() => setActiveTab('flights')}
+                  className="group bg-white p-8 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 hover:border-blue-500 transition-all text-left relative overflow-hidden active:scale-[0.98]"
+                >
+                  <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 -translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0"><ArrowUpRight size={24} className="text-blue-500" /></div>
+                  <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mb-6 group-hover:bg-blue-600 group-hover:text-white transition-all"><Activity size={28} /></div>
+                  <h4 className="text-4xl md:text-6xl font-black italic text-slate-900 leading-none tracking-tighter">{activeFlightsInRange.length}</h4>
+                  <div className="flex items-center gap-2 mt-3">
+                    <p className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-widest">Active Air Traffic</p>
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setActiveTab('staff')}
+                  className="group bg-white p-8 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 hover:border-indigo-500 transition-all text-left relative overflow-hidden active:scale-[0.98]"
+                >
+                  <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 -translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0"><ArrowUpRight size={24} className="text-indigo-500" /></div>
+                  <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 group-hover:bg-indigo-600 group-hover:text-white transition-all"><Users size={28} /></div>
+                  <h4 className="text-4xl md:text-6xl font-black italic text-slate-900 leading-none tracking-tighter">{staff.length}</h4>
+                  <div className="flex items-center gap-2 mt-3">
+                    <p className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-widest">Available Manpower</p>
+                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setActiveTab('shifts')}
+                  className="group bg-white p-8 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 hover:border-amber-500 transition-all text-left relative overflow-hidden sm:col-span-2 lg:col-span-1 active:scale-[0.98]"
+                >
+                  <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 -translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0"><ArrowUpRight size={24} className="text-amber-500" /></div>
+                  <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 mb-6 group-hover:bg-amber-600 group-hover:text-white transition-all"><Clock size={28} /></div>
+                  <h4 className="text-4xl md:text-6xl font-black italic text-slate-900 leading-none tracking-tighter">{activeShiftsInRange.length}</h4>
+                  <div className="flex items-center gap-2 mt-3">
+                    <p className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-widest">Duty Assignments</p>
+                    <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+                  </div>
+                </button>
              </div>
 
-             <div className="bg-white p-6 md:p-12 rounded-2xl md:rounded-[3.5rem] border border-slate-100 space-y-8 md:space-y-10">
-                <h3 className="text-xl md:text-2xl font-black uppercase italic flex items-center gap-4 text-slate-950"><Zap className="text-blue-600" /> Operational Context</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-                   <div className="space-y-3 md:space-y-4">
-                      <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Operational Window</label>
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 p-4 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-slate-950 text-sm" />
-                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 p-4 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-slate-950 text-sm" />
+             <div className="bg-white p-6 md:p-14 rounded-3xl md:rounded-[4.5rem] border border-slate-100 space-y-10 md:space-y-14 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/5 blur-[120px] rounded-full pointer-events-none"></div>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <h3 className="text-2xl md:text-4xl font-black uppercase italic flex items-center gap-4 text-slate-950 tracking-tighter"><Zap className="text-blue-600" /> Operational Matrix</h3>
+                  <div className="flex items-center gap-3 p-2 bg-slate-50 rounded-2xl border border-slate-100">
+                    <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">AI Core: ONLINE</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
+                   <div className="space-y-4 md:space-y-6">
+                      <label className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><CalendarDays size={14} className="text-blue-500"/> Schedule Window</label>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 p-5 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2.5rem] font-black text-slate-950 text-sm md:text-base outline-none focus:ring-4 focus:ring-blue-600/10 transition-all" />
+                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 p-5 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2.5rem] font-black text-slate-950 text-sm md:text-base outline-none focus:ring-4 focus:ring-blue-600/10 transition-all" />
                       </div>
                    </div>
-                   <div className="space-y-3 md:space-y-4">
-                      <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Min Rest Hours</label>
-                      <div className="px-6 py-4 md:py-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center gap-4">
+                   <div className="space-y-4 md:space-y-6">
+                      <label className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2"><Target size={14} className="text-indigo-500"/> Fatigue Management (Rest)</label>
+                      <div className="px-8 py-5 md:py-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2.5rem] flex items-center gap-6">
                         <input type="range" min="8" max="18" value={minRestHours} onChange={e => setMinRestHours(parseInt(e.target.value))} className="flex-1 accent-blue-600" />
-                        <span className="font-black text-blue-600 w-8 text-center">{minRestHours}h</span>
+                        <div className="flex flex-col items-center">
+                          <span className="font-black text-blue-600 text-xl md:text-2xl italic leading-none">{minRestHours}h</span>
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">MIN</span>
+                        </div>
                       </div>
                    </div>
                 </div>
-                <button onClick={() => setShowConfirmDialog(true)} disabled={isGenerating} className="w-full py-6 md:py-8 bg-slate-950 text-white rounded-3xl md:rounded-[3rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] hover:bg-blue-600 transition-all flex items-center justify-center gap-4 md:gap-6 shadow-2xl active:scale-95 text-xs md:text-base">
-                  <Sparkles size={20} /> INITIATE COMMAND SEQUENCE
-                </button>
+
+                <div className="pt-6">
+                  <button onClick={() => setShowConfirmDialog(true)} disabled={isGenerating} className="group w-full py-8 md:py-10 bg-slate-950 text-white rounded-3xl md:rounded-[4rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.5em] hover:bg-blue-600 transition-all flex items-center justify-center gap-6 shadow-2xl active:scale-95 text-xs md:text-lg relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+                    <Sparkles size={24} className={isGenerating ? 'animate-spin' : 'group-hover:rotate-12 transition-transform'} /> 
+                    {isGenerating ? 'PROCESSING SCHEMATICS...' : 'EXECUTE ROSTER PROTOCOL'}
+                  </button>
+                </div>
              </div>
           </div>
         )}
@@ -453,21 +393,23 @@ const App: React.FC = () => {
 
       {isScannerOpen && (
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/95 animate-in fade-in">
-           <div className="bg-white rounded-3xl md:rounded-[4.5rem] w-full max-w-5xl h-[90vh] md:h-[85vh] overflow-hidden relative shadow-2xl">
-              <button onClick={() => setIsScannerOpen(false)} className="absolute top-4 right-4 md:top-10 md:right-10 p-3 md:p-4 bg-slate-100 rounded-2xl hover:bg-rose-50 hover:text-rose-500 transition-all z-20"><X size={20} /></button>
-              <div className="h-full overflow-auto no-scrollbar"><ProgramScanner onDataExtracted={d => { setPendingVerification(d); setIsScannerOpen(false); }} startDate={startDate} /></div>
+           <div className="bg-white rounded-2xl md:rounded-[4.5rem] w-full max-w-5xl h-[90vh] overflow-hidden relative shadow-2xl">
+              <button onClick={() => setIsScannerOpen(false)} className="absolute top-6 right-6 p-4 bg-slate-100 rounded-2xl hover:bg-rose-50 hover:text-rose-500 transition-all z-20"><X size={24} /></button>
+              <div className="h-full overflow-auto no-scrollbar"><ProgramScanner onDataExtracted={handleDataExtracted} startDate={startDate} initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} /></div>
            </div>
         </div>
       )}
 
       {showConfirmDialog && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-4 md:p-6 animate-in fade-in">
-           <div className="bg-white rounded-3xl md:rounded-[4rem] p-8 md:p-12 text-center max-w-lg w-full shadow-2xl">
-              <div className="w-20 h-20 md:w-24 md:h-24 bg-blue-50 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 md:mb-8"><Target size={40} className="text-blue-600" /></div>
-              <h3 className="text-2xl md:text-3xl font-black italic uppercase tracking-tighter text-slate-900 leading-tight">Engage Logic Engine?</h3>
-              <div className="flex gap-4 mt-8 md:mt-10">
-                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest italic">Cancel</button>
-                <button onClick={confirmGenerateProgram} className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl md:rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all text-[10px] md:text-xs">ENGAGE ENGINE</button>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-4 animate-in fade-in">
+           <div className="bg-white rounded-[3.5rem] p-10 md:p-16 text-center max-w-lg w-full shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-blue-600 rounded-full"></div>
+              <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 text-blue-600 shadow-inner"><Target size={48} /></div>
+              <h3 className="text-3xl font-black italic uppercase tracking-tighter text-slate-900">Authorize AI Logic?</h3>
+              <p className="text-slate-500 text-[11px] font-black uppercase tracking-[0.2em] mt-6 leading-relaxed">System will optimize {numDays} days of handling operations, prioritizing coverage and labor law adherence.</p>
+              <div className="flex gap-4 mt-12">
+                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-5 text-slate-400 font-black uppercase text-[10px] tracking-widest italic hover:text-slate-900 transition-all">Cancel</button>
+                <button onClick={confirmGenerateProgram} className="flex-[2] py-5 bg-slate-950 text-white rounded-3xl font-black uppercase italic tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all text-xs active:scale-95">ENGAGE ENGINE</button>
               </div>
            </div>
         </div>

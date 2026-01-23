@@ -15,7 +15,7 @@ export const Auth: React.FC = () => {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) {
-      setError("Cloud configuration missing. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your environment variables.");
+      setError("Cloud configuration missing. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your environment variables in Vercel.");
       return;
     }
     setLoading(true);
@@ -52,10 +52,10 @@ export const Auth: React.FC = () => {
 
         {!isConfigured && (
           <div className="mb-8 p-6 bg-amber-500/10 border border-amber-500/20 rounded-[2rem] flex flex-col items-center gap-3 text-amber-500 text-center animate-in fade-in zoom-in-95">
-            <Settings size={24} className="animate-spin-slow" />
+            <Settings size={24} className="animate-spin" />
             <div className="space-y-1">
               <p className="text-[10px] font-black uppercase tracking-widest">Configuration Required</p>
-              <p className="text-[9px] font-bold text-slate-400">Missing Supabase credentials in environment. Check Vercel Dashboard.</p>
+              <p className="text-[9px] font-bold text-slate-400">Missing Supabase credentials in environment. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.</p>
             </div>
           </div>
         )}
