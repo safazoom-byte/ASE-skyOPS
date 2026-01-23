@@ -51,7 +51,7 @@ import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramScanner } from './components/ProgramScanner';
 import { ProgramChat } from './components/ProgramChat';
 import { Auth } from './components/Auth';
-import { generateAIProgram, refineAIProgram, extractDataFromContent, ShortageWarning, ResourceRecommendation, BuildResult } from './services/geminiService';
+import { generateAIProgram, refineAIProgram, ResourceRecommendation } from './services/geminiService';
 import { db, supabase, auth } from './services/supabaseService';
 
 const STORAGE_KEYS = {
@@ -146,7 +146,7 @@ const App: React.FC = () => {
         }
       }).catch(err => {
         setSyncStatus('error');
-        setError("Cloud Refusal: Database schema mismatch or RLS policy failure.");
+        setError("Cloud Refusal: Database sync failure.");
       });
     }
   }, [session]);
@@ -196,7 +196,7 @@ const App: React.FC = () => {
       setShowSuccessChecklist(true);
     } catch (err: any) {
       setSyncStatus('error');
-      setError("Database Write Error. Check if your user has permission.");
+      setError("Database Write Error.");
     }
   };
 
@@ -233,16 +233,6 @@ const App: React.FC = () => {
       setError(err.message || "Logic engine failure."); 
     } 
     finally { setIsGenerating(false); setGenerationStep(0); }
-  };
-
-  const authorizeWithWaiver = async () => {
-    if (proposedPrograms) {
-      setPrograms(proposedPrograms);
-      if (supabase) await db.savePrograms(proposedPrograms);
-      setShowWarningModal(false);
-      setActiveTab('program');
-      setShowSuccessChecklist(true);
-    }
   };
 
   const handleFlightAdd = async (f: Flight) => {
@@ -399,20 +389,7 @@ const App: React.FC = () => {
         ))}
       </nav>
 
-      {isGenerating && (
-        <div className="fixed inset-0 z-[3000] bg-slate-950/98 flex items-center justify-center p-8 animate-in fade-in">
-           <div className="max-w-xl w-full text-center space-y-12">
-              <div className="relative mx-auto w-32 h-32">
-                <div className="absolute inset-0 bg-blue-600/20 rounded-[2.5rem] animate-ping"></div>
-                <div className="relative w-full h-full bg-blue-600/20 rounded-[2.5rem] flex items-center justify-center"><Cpu size={48} className="text-blue-500" /></div>
-              </div>
-              <h3 className="text-3xl md:text-4xl font-black text-white italic uppercase tracking-tighter">AI Roster Generation</h3>
-              <p className="text-blue-400 font-black uppercase text-[10px] tracking-[0.4em] animate-pulse">Building station plan — Handover prioritized</p>
-           </div>
-        </div>
-      )}
-
-      <main className="flex-1 max-w-[1600px] mx-auto w-full p-4 md:p-8 lg:p-12 overflow-x-hidden">
+      <main className="flex-1 max-w-[1600px] mx-auto w-full p-4 md:p-12 overflow-x-hidden">
         {error && (
           <div className="mb-8 p-6 md:p-8 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-3xl md:rounded-[3rem] flex justify-between items-center animate-in slide-in-from-top-4">
             <div className="flex items-center gap-4">
@@ -424,45 +401,45 @@ const App: React.FC = () => {
         )}
         
         {activeTab === 'dashboard' && (
-          <div className="space-y-6 md:space-y-12 animate-in fade-in duration-500">
+          <div className="space-y-8 md:space-y-12 animate-in fade-in duration-500">
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                 <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-blue-500 transition-all">
                   <Activity className="text-blue-600 mb-4 md:mb-6" />
-                  <h4 className="text-2xl md:text-4xl font-black italic text-slate-900 leading-none">{activeFlightsInRange.length}</h4>
-                  <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Flights in window</p>
+                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{activeFlightsInRange.length}</h4>
+                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Flights in window</p>
                 </div>
                 <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-indigo-500 transition-all">
                   <Users className="text-indigo-600 mb-4 md:mb-6" />
-                  <h4 className="text-2xl md:text-4xl font-black italic text-slate-900 leading-none">{staff.length}</h4>
-                  <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Personnel Registry</p>
+                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{staff.length}</h4>
+                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Personnel Registry</p>
                 </div>
                 <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:border-amber-500 transition-all sm:col-span-2 lg:col-span-1">
                   <Clock className="text-amber-600 mb-4 md:mb-6" />
-                  <h4 className="text-2xl md:text-4xl font-black italic text-slate-900 leading-none">{activeShiftsInRange.length}</h4>
-                  <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Active Duty Slots</p>
+                  <h4 className="text-3xl md:text-4xl font-black italic text-slate-900 leading-none">{activeShiftsInRange.length}</h4>
+                  <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Active Duty Slots</p>
                 </div>
              </div>
 
-             <div className="bg-white p-6 md:p-12 rounded-2xl md:rounded-[3.5rem] border border-slate-100 space-y-6 md:space-y-10">
-                <h3 className="text-lg md:text-2xl font-black uppercase italic flex items-center gap-3 md:gap-4 text-slate-950"><Zap className="text-blue-600" /> Operational Context</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                   <div className="space-y-2 md:space-y-4">
-                      <label className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Operational Window</label>
+             <div className="bg-white p-6 md:p-12 rounded-2xl md:rounded-[3.5rem] border border-slate-100 space-y-8 md:space-y-10">
+                <h3 className="text-xl md:text-2xl font-black uppercase italic flex items-center gap-4 text-slate-950"><Zap className="text-blue-600" /> Operational Context</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                   <div className="space-y-3 md:space-y-4">
+                      <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Operational Window</label>
                       <div className="flex flex-col sm:flex-row gap-2">
-                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 p-3 md:p-6 bg-slate-50 border border-slate-200 rounded-xl md:rounded-[2rem] font-black text-slate-950 text-xs md:text-sm" />
-                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 p-3 md:p-6 bg-slate-50 border border-slate-200 rounded-xl md:rounded-[2rem] font-black text-slate-950 text-xs md:text-sm" />
+                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="flex-1 p-4 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-slate-950 text-sm" />
+                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="flex-1 p-4 md:p-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-slate-950 text-sm" />
                       </div>
                    </div>
-                   <div className="space-y-2 md:space-y-4">
-                      <label className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Min Rest Hours</label>
-                      <div className="px-4 py-3 md:px-6 md:py-6 bg-slate-50 border border-slate-200 rounded-xl md:rounded-[2rem] flex items-center gap-4">
+                   <div className="space-y-3 md:space-y-4">
+                      <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Min Rest Hours</label>
+                      <div className="px-6 py-4 md:py-6 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center gap-4">
                         <input type="range" min="8" max="18" value={minRestHours} onChange={e => setMinRestHours(parseInt(e.target.value))} className="flex-1 accent-blue-600" />
-                        <span className="font-black text-blue-600 w-8 text-center text-xs md:text-sm">{minRestHours}h</span>
+                        <span className="font-black text-blue-600 w-8 text-center">{minRestHours}h</span>
                       </div>
                    </div>
                 </div>
-                <button onClick={() => setShowConfirmDialog(true)} disabled={isGenerating} className="w-full py-5 md:py-8 bg-slate-950 text-white rounded-xl md:rounded-[3rem] font-black uppercase italic tracking-[0.1em] md:tracking-[0.4em] hover:bg-blue-600 transition-all flex items-center justify-center gap-4 md:gap-6 shadow-2xl active:scale-95 text-[10px] md:text-base">
-                  <Sparkles size={16} className="md:w-5 md:h-5" /> INITIATE COMMAND SEQUENCE
+                <button onClick={() => setShowConfirmDialog(true)} disabled={isGenerating} className="w-full py-6 md:py-8 bg-slate-950 text-white rounded-3xl md:rounded-[3rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] hover:bg-blue-600 transition-all flex items-center justify-center gap-4 md:gap-6 shadow-2xl active:scale-95 text-xs md:text-base">
+                  <Sparkles size={20} /> INITIATE COMMAND SEQUENCE
                 </button>
              </div>
           </div>
@@ -475,9 +452,9 @@ const App: React.FC = () => {
       </main>
 
       {isScannerOpen && (
-        <div className="fixed inset-0 z-[1500] flex items-center justify-center p-2 md:p-4 bg-slate-950/95 animate-in fade-in">
-           <div className="bg-white rounded-2xl md:rounded-[4.5rem] w-full max-w-5xl h-[95vh] md:h-[85vh] overflow-hidden relative shadow-2xl">
-              <button onClick={() => setIsScannerOpen(false)} className="absolute top-3 right-3 md:top-10 md:right-10 p-2 md:p-4 bg-slate-100 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-all z-20"><X size={18} className="md:w-5 md:h-5" /></button>
+        <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/95 animate-in fade-in">
+           <div className="bg-white rounded-3xl md:rounded-[4.5rem] w-full max-w-5xl h-[90vh] md:h-[85vh] overflow-hidden relative shadow-2xl">
+              <button onClick={() => setIsScannerOpen(false)} className="absolute top-4 right-4 md:top-10 md:right-10 p-3 md:p-4 bg-slate-100 rounded-2xl hover:bg-rose-50 hover:text-rose-500 transition-all z-20"><X size={20} /></button>
               <div className="h-full overflow-auto no-scrollbar"><ProgramScanner onDataExtracted={d => { setPendingVerification(d); setIsScannerOpen(false); }} startDate={startDate} /></div>
            </div>
         </div>
@@ -485,12 +462,12 @@ const App: React.FC = () => {
 
       {showConfirmDialog && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-4 md:p-6 animate-in fade-in">
-           <div className="bg-white rounded-2xl md:rounded-[4rem] p-6 md:p-12 text-center max-w-lg w-full shadow-2xl">
-              <div className="w-16 h-16 md:w-24 md:h-24 bg-blue-50 rounded-xl md:rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 md:mb-8"><Target size={30} className="text-blue-600 md:w-10 md:h-10" /></div>
-              <h3 className="text-xl md:text-3xl font-black italic uppercase tracking-tighter text-slate-900 leading-tight">Engage Logic Engine?</h3>
-              <div className="flex gap-3 md:gap-4 mt-8 md:mt-10">
-                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-4 md:py-5 text-slate-400 font-black uppercase text-[8px] md:text-[10px] tracking-widest italic">Cancel</button>
-                <button onClick={confirmGenerateProgram} className="flex-[2] py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-[2rem] font-black uppercase italic tracking-[0.1em] md:tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all text-[9px] md:text-xs">ENGAGE ENGINE</button>
+           <div className="bg-white rounded-3xl md:rounded-[4rem] p-8 md:p-12 text-center max-w-lg w-full shadow-2xl">
+              <div className="w-20 h-20 md:w-24 md:h-24 bg-blue-50 rounded-[2rem] md:rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 md:mb-8"><Target size={40} className="text-blue-600" /></div>
+              <h3 className="text-2xl md:text-3xl font-black italic uppercase tracking-tighter text-slate-900 leading-tight">Engage Logic Engine?</h3>
+              <div className="flex gap-4 mt-8 md:mt-10">
+                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 py-5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest italic">Cancel</button>
+                <button onClick={confirmGenerateProgram} className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl md:rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all text-[10px] md:text-xs">ENGAGE ENGINE</button>
               </div>
            </div>
         </div>

@@ -309,7 +309,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
            <h4 className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 md:mb-8 flex items-center gap-3"><Cpu size={14} className="text-blue-500 md:w-4 md:h-4" /> Operational Shadow Auditor</h4>
            {shadowAudit.length === 0 && sortedPrograms.length > 0 ? (
              <div className="flex items-center gap-4 md:gap-6 p-6 md:p-10 bg-emerald-50 rounded-2xl md:rounded-[2.5rem] border border-emerald-100">
-               {/* Fixed: Merged duplicate className attributes on CheckCircle2 component */}
                <CheckCircle2 className="text-emerald-500 md:w-10 md:h-10" size={30} />
                <p className="text-sm md:text-lg font-black text-emerald-900 uppercase italic">Station Health 100%</p>
              </div>
