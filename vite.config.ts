@@ -1,3 +1,4 @@
+
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import process from 'node:process';
@@ -21,14 +22,12 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
       minify: 'terser',
-      terserOptions: {
-        compress: {
-          drop_console: false,
-          drop_debugger: true
-        }
-      },
+      // Force new filenames every build to prevent Vercel caching old JS
       rollupOptions: {
         output: {
+          entryFileNames: `assets/[name].[hash]-${Date.now()}.js`,
+          chunkFileNames: `assets/[name].[hash]-${Date.now()}.js`,
+          assetFileNames: `assets/[name].[hash]-${Date.now()}.[ext]`,
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
             'vendor-utils': ['xlsx', 'jspdf', 'jspdf-autotable', 'lucide-react']

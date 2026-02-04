@@ -1,5 +1,5 @@
 
-export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Duty';
+export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
@@ -15,6 +15,8 @@ export interface Flight {
   date: string; // Mandatory date string (YYYY-MM-DD)
   day: number; // Offset for roster logic
   type: 'Arrival' | 'Departure' | 'Turnaround';
+  priority: 'High' | 'Standard' | 'Low';
+  aircraftType?: string;
 }
 
 export interface Staff {
@@ -35,6 +37,21 @@ export interface Staff {
   workToDate?: string;
 }
 
+export interface IncomingDuty {
+  id: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD of when the shift ended
+  shiftEndTime: string; // HH:mm
+}
+
+export interface LeaveRequest {
+  id: string;
+  staffId: string;
+  startDate: string;
+  endDate: string;
+  type: LeaveType;
+}
+
 export interface ShiftConfig {
   id: string;
   day: number; // 0-6
@@ -48,6 +65,7 @@ export interface ShiftConfig {
   targetPower?: number; 
   roleCounts?: Partial<Record<Skill, number>>; 
   flightIds?: string[]; 
+  description?: string;
 }
 
 export interface Assignment {
@@ -75,6 +93,8 @@ export interface ProgramData {
   staff: Staff[];
   shifts: ShiftConfig[];
   programs: DailyProgram[];
+  leaveRequests?: LeaveRequest[];
+  incomingDuties?: IncomingDuty[];
 }
 
 declare global {
