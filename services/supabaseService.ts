@@ -1,10 +1,17 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
 
+/**
+ * Robust environment variable retrieval for Vite/Vercel environments.
+ */
 const getEnv = (key: string): string => {
   try {
+    // 1. Check process.env (Vite 'define' or Node env)
+    // 2. Check import.meta.env (Standard Vite)
+    // 3. Check window global
     const val = (window as any).process?.env?.[key] || 
-                (window as any).process?.env?.[`VITE_${key}`] || 
+                (import.meta as any).env?.[`VITE_${key}`] || 
                 (window as any)[key] || 
                 "";
     return typeof val === 'string' ? val : "";
@@ -22,11 +29,11 @@ export const supabase = isConfigured
 
 export const auth = {
   async signUp(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Local Mode Only") };
+    if (!supabase) return { error: new Error("Cloud Uplink Not Configured") };
     return await supabase.auth.signUp({ email, password: pass });
   },
   async signIn(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Local Mode Only") };
+    if (!supabase) return { error: new Error("Cloud Uplink Not Configured") };
     return await supabase.auth.signInWithPassword({ email, password: pass });
   },
   async signOut() {
@@ -56,12 +63,16 @@ export const db = {
       const session = await auth.getSession();
       if (!session) return null;
 
+      // Parallel fetching for high performance
       const [fRes, sRes, shRes, pRes] = await Promise.all([
         supabase.from('flights').select('*'),
         supabase.from('staff').select('*'),
         supabase.from('shifts').select('*'),
         supabase.from('programs').select('*')
       ]);
+
+      if (fRes.error) console.error("Flights fetch error:", fRes.error);
+      if (sRes.error) console.error("Staff fetch error:", sRes.error);
 
       return {
         flights: (fRes.data || []).map(f => ({
@@ -73,7 +84,8 @@ export const db = {
           std: f.std,
           date: f.flight_date,
           type: f.flight_type || 'Turnaround',
-          day: f.day || 0
+          day: f.day || 0,
+          priority: 'Standard'
         })),
         staff: (sRes.data || []).map(s => ({
           id: s.id,
@@ -105,49 +117,79 @@ export const db = {
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
-          date_string: p.date_string,
+          dateString: p.date_string,
           assignments: p.assignments || [],
-          off_duty: p.off_duty || []
+          offDuty: p.off_duty || []
         }))
       };
-    } catch { return null; }
+    } catch (e) { 
+      console.error("Critical database fetch failure:", e);
+      return null; 
+    }
   },
 
   async upsertFlight(f: Flight) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('flights').upsert({
-      id: f.id, user_id: session.user.id, flight_number: f.flightNumber, origin: f.from,
-      destination: f.to, sta: f.sta || null, std: f.std || null, flight_date: f.date,
-      flight_type: f.type, day: f.day
+    const { error } = await supabase.from('flights').upsert({
+      id: f.id, 
+      user_id: session.user.id, 
+      flight_number: f.flightNumber, 
+      origin: f.from,
+      destination: f.to, 
+      sta: f.sta || null, 
+      std: f.std || null, 
+      flight_date: f.date,
+      flight_type: f.type, 
+      day: f.day
     });
+    if (error) console.error("Flight upsert error:", error);
   },
 
   async upsertStaff(s: Staff) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('staff').upsert({
-      id: s.id, user_id: session.user.id, name: s.name, initials: s.initials,
-      type: s.type, work_pattern: s.workPattern, is_ramp: s.isRamp,
-      is_shift_leader: s.isShiftLeader, is_operations: s.isOps,
-      is_load_control: s.isLoadControl, is_lost_found: s.isLostFound,
-      power_rate: s.powerRate, max_shifts_per_week: s.maxShiftsPerWeek,
-      work_from_date: s.workFromDate, work_to_date: s.workToDate
+    const { error } = await supabase.from('staff').upsert({
+      id: s.id, 
+      user_id: session.user.id, 
+      name: s.name, 
+      initials: s.initials,
+      type: s.type, 
+      work_pattern: s.workPattern, 
+      is_ramp: s.isRamp,
+      is_shift_leader: s.isShiftLeader, 
+      is_operations: s.isOps,
+      is_load_control: s.isLoadControl, 
+      is_lost_found: s.isLostFound,
+      power_rate: s.powerRate, 
+      max_shifts_per_week: s.maxShiftsPerWeek,
+      work_from_date: s.workFromDate || null, 
+      work_to_date: s.workToDate || null
     });
+    if (error) console.error("Staff upsert error:", error);
   },
 
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('shifts').upsert({
-      id: s.id, user_id: session.user.id, day: s.day, pickup_date: s.pickupDate,
-      pickup_time: s.pickupTime, end_date: s.endDate, end_time: s.endTime,
-      min_staff: s.minStaff || 1, max_staff: s.maxStaff || 10,
-      role_counts: s.roleCounts || {}, flight_ids: s.flightIds || []
+    // Fix: Access correct camelCase properties from ShiftConfig interface for snake_case DB columns
+    const { error } = await supabase.from('shifts').upsert({
+      id: s.id, 
+      user_id: session.user.id, 
+      day: s.day, 
+      pickup_date: s.pickupDate,
+      pickup_time: s.pickupTime, 
+      end_date: s.endDate, 
+      end_time: s.endTime,
+      min_staff: s.minStaff || 1, 
+      max_staff: s.maxStaff || 10,
+      role_counts: s.roleCounts || {}, 
+      flight_ids: s.flightIds || []
     });
+    if (error) console.error("Shift upsert error:", error);
   },
 
   async savePrograms(programs: DailyProgram[]) {
@@ -155,14 +197,21 @@ export const db = {
     const session = await auth.getSession();
     if (!session) return;
     try {
+      // Clean old entries first to avoid duplicates
       await supabase.from('programs').delete().eq('user_id', session.user.id);
-      await supabase.from('programs').insert(
+      const { error } = await supabase.from('programs').insert(
         programs.map(p => ({
-          user_id: session.user.id, day: p.day, date_string: p.dateString,
-          assignments: p.assignments, off_duty: p.offDuty || []
+          user_id: session.user.id, 
+          day: p.day, 
+          date_string: p.dateString || '',
+          assignments: p.assignments || [], 
+          off_duty: p.offDuty || []
         }))
       );
-    } catch {}
+      if (error) console.error("Programs save error:", error);
+    } catch (e) {
+      console.error("Failed to save programs:", e);
+    }
   },
 
   async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },
