@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -90,12 +91,12 @@ const App: React.FC = () => {
   const [incomingHour, setIncomingHour] = useState('06');
   const [incomingMin, setIncomingMin] = useState('00');
   const [isClockOpen, setIsClockOpen] = useState(false);
-  const [incomingDate, setIncomingDate] = useState('');
+  const [incomingDate, setIncomingDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [incomingSearchTerm, setIncomingSearchTerm] = useState('');
   const [incomingSearchFocus, setIncomingSearchFocus] = useState(false);
 
   const [quickLeaveStaffId, setQuickLeaveStaffId] = useState('');
-  const [quickLeaveDate, setQuickLeaveDate] = useState('');
+  const [quickLeaveDate, setQuickLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
 
   const [isVisible, setIsVisible] = useState(true);
@@ -130,14 +131,17 @@ const App: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     const syncCloudData = async () => {
-      if (!supabase) return;
+      if (!supabase) {
+        if (mounted) setCloudStatus('unconfigured');
+        return;
+      }
       try {
         const cloudData = await db.fetchAll();
         if (mounted && cloudData) {
-          setFlights(cloudData.flights);
-          setStaff(cloudData.staff);
-          setShifts(cloudData.shifts);
-          setPrograms(cloudData.programs);
+          setFlights(cloudData.flights || []);
+          setStaff(cloudData.staff || []);
+          setShifts(cloudData.shifts || []);
+          setPrograms(cloudData.programs || []);
           setLeaveRequests(cloudData.leaveRequests || []);
           setIncomingDuties(cloudData.incomingDuties || []);
           setCloudStatus('connected');
@@ -261,7 +265,13 @@ const App: React.FC = () => {
       <header className={`sticky top-0 z-[100] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between transition-transform duration-500 ${isVisible ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className="flex items-center gap-4">
            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg"><Compass className="text-white" size={20} /></div>
-           <h1 className="text-base md:text-lg font-black italic text-slate-900 uppercase">SkyOPS <span className="text-blue-600 font-light">Station</span></h1>
+           <div>
+             <h1 className="text-base md:text-lg font-black italic text-slate-900 uppercase leading-none">SkyOPS <span className="text-blue-600 font-light">Station</span></h1>
+             <div className="flex items-center gap-2 mt-1.5">
+               <div className={`w-2 h-2 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : cloudStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></div>
+               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{cloudStatus === 'connected' ? 'Cloud Link Active' : cloudStatus === 'error' ? 'Link Fault' : 'Offline Mode'}</span>
+             </div>
+           </div>
         </div>
         <div className="flex items-center gap-4">
           <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
@@ -272,7 +282,7 @@ const App: React.FC = () => {
             ))}
           </nav>
           <GithubSync data={{ flights, staff, shifts, programs, leaveRequests }} />
-          {supabase && session && <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl"><LogOut size={16} /></button>}
+          {supabase && session && <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>}
         </div>
       </header>
 
@@ -300,28 +310,29 @@ const App: React.FC = () => {
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 <div className="lg:col-span-2 space-y-6 md:space-y-8">
                   {/* STAFF REST LOG */}
-                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
+                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm overflow-visible">
                       <div className="flex items-center gap-4 mb-6 md:mb-8">
                           <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-50 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-500"><Moon size={20} /></div>
                           <div>
-                               <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900">Staff Rest Log</h4>
-                               <p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Fatigue Prevention</p>
+                               <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Staff Rest Log</h4>
+                               <p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Fatigue Prevention</p>
                           </div>
                       </div>
-                      <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-6">
                           <div className="relative group">
-                              <div className={`w-full min-h-[56px] px-4 py-2 bg-white rounded-xl md:rounded-2xl border-2 flex flex-wrap items-center gap-2 ${incomingSearchFocus ? 'border-amber-400' : 'border-slate-100'}`}>
+                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block ml-1">Personnel Selection</label>
+                              <div className={`w-full min-h-[56px] px-4 py-3 bg-white rounded-xl md:rounded-2xl border-2 flex flex-wrap items-center gap-2 transition-colors ${incomingSearchFocus ? 'border-amber-400' : 'border-slate-100'}`}>
                                   <Search size={18} className="text-slate-300" />
                                   {incomingSelectedStaffIds.map(id => (
                                       <span key={id} className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-amber-100">
                                           {staff.find(st => st.id === id)?.initials}
-                                          <button onClick={() => setIncomingSelectedStaffIds(p => p.filter(x => x !== id))}><X size={12}/></button>
+                                          <button onClick={() => setIncomingSelectedStaffIds(p => p.filter(x => x !== id))} className="hover:text-rose-500"><X size={12}/></button>
                                       </span>
                                   ))}
                                   <input 
                                       type="text" 
-                                      className="flex-1 bg-transparent text-sm font-bold outline-none py-1"
-                                      placeholder="Select personnel..."
+                                      className="flex-1 bg-transparent text-sm font-bold outline-none py-1 min-w-[120px]"
+                                      placeholder="Search initials or name..."
                                       value={incomingSearchTerm}
                                       onChange={e => setIncomingSearchTerm(e.target.value)}
                                       onFocus={() => setIncomingSearchFocus(true)}
@@ -329,59 +340,95 @@ const App: React.FC = () => {
                                   />
                               </div>
                               {incomingSearchFocus && (
-                                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-[180px] overflow-y-auto p-2 z-[200]">
+                                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-[180px] overflow-y-auto p-2 z-[200] animate-in slide-in-from-top-2">
                                       {filteredStaff.map(s => (
-                                          <button key={s.id} onMouseDown={(e) => { e.preventDefault(); setIncomingSelectedStaffIds(p => p.includes(s.id) ? p.filter(x => x !== s.id) : [...p, s.id]); }} className="w-full text-left p-2.5 rounded-lg text-[10px] font-black uppercase hover:bg-slate-50">
-                                              {s.initials} - {s.name}
+                                          <button key={s.id} onMouseDown={(e) => { e.preventDefault(); setIncomingSelectedStaffIds(p => p.includes(s.id) ? p.filter(x => x !== s.id) : [...p, s.id]); }} className={`w-full text-left p-2.5 rounded-lg text-[10px] font-black uppercase transition-colors ${incomingSelectedStaffIds.includes(s.id) ? 'bg-amber-50 text-amber-700' : 'hover:bg-slate-50 text-slate-600'}`}>
+                                              {s.initials} — {s.name}
                                           </button>
                                       ))}
                                   </div>
                               )}
                           </div>
-                          <div className="flex flex-col sm:flex-row gap-3">
-                               <input type="date" className="h-[56px] w-full sm:flex-1 px-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
-                               <button onClick={() => addIncomingDuties()} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] w-full sm:px-10 bg-slate-950 text-white rounded-xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2">
-                                 <Lock size={16}/> Lock Log
-                               </button>
+                          <div className="flex flex-col sm:flex-row gap-4">
+                               <div className="flex-1 space-y-2">
+                                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Release Date</label>
+                                  <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm outline-none focus:border-amber-400 transition-colors" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
+                               </div>
+                               <div className="flex-[0.5] space-y-2">
+                                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Release Time</label>
+                                  <div className="flex gap-2">
+                                      <select className="h-[56px] w-full bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm px-2 outline-none appearance-none text-center" value={incomingHour} onChange={e => setIncomingHour(e.target.value)}>
+                                          {Array.from({length: 24}).map((_, i) => <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}</option>)}
+                                      </select>
+                                      <select className="h-[56px] w-full bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm px-2 outline-none appearance-none text-center" value={incomingMin} onChange={e => setIncomingMin(e.target.value)}>
+                                          {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
+                                      </select>
+                                  </div>
+                               </div>
+                               <div className="flex items-end">
+                                 <button onClick={() => addIncomingDuties()} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] w-full sm:px-10 bg-slate-950 text-white rounded-xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg active:scale-95">
+                                   <Lock size={16}/> Lock Log
+                                 </button>
+                               </div>
                           </div>
                       </div>
                   </div>
 
                   {/* OFF-DUTY REGISTRY */}
-                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
+                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm overflow-visible">
                      <div className="flex items-center gap-4 mb-6 md:mb-8">
                         <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-50 rounded-xl md:rounded-2xl flex items-center justify-center text-indigo-500"><Briefcase size={20} /></div>
                         <div>
-                           <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900">Off-Duty Registry</h4>
-                           <p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Manual Absence Registry</p>
+                           <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Off-Duty Registry</h4>
+                           <p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Manual Absence Registry</p>
                         </div>
                      </div>
-                     <form onSubmit={handleQuickLeaveSubmit} className="flex flex-col gap-3 mb-8 p-3 bg-slate-50 rounded-2xl">
-                        <select className="w-full px-4 py-4 bg-white border border-slate-100 rounded-xl font-black text-xs uppercase outline-none" value={quickLeaveStaffId} onChange={e => setQuickLeaveStaffId(e.target.value)} required>
-                           <option value="">Select Staff...</option>
-                           {staff.map(s => (<option key={s.id} value={s.id}>{s.initials} - {s.name}</option>))}
-                        </select>
-                        <input type="date" className="w-full px-4 py-4 bg-white border border-slate-100 rounded-xl font-bold text-xs outline-none" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)} required />
-                        <select className="w-full px-4 py-4 bg-white border border-slate-100 rounded-xl font-black text-xs uppercase outline-none" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
-                           <option value="Day off">Day off</option>
-                           <option value="Annual leave">Annual leave</option>
-                           <option value="Lieu leave">Lieu leave</option>
-                           <option value="Sick leave">Sick leave</option>
-                        </select>
-                        <button type="submit" className="w-full py-4 bg-slate-950 text-white rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">
-                          <Plus size={16} /> ADD LOG
-                        </button>
+                     <form onSubmit={handleQuickLeaveSubmit} className="flex flex-col gap-5 mb-8 p-5 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          <div className="flex-1 space-y-1.5">
+                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Select Staff</label>
+                             <select className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-xs uppercase outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveStaffId} onChange={e => setQuickLeaveStaffId(e.target.value)} required>
+                                <option value="">Select Personnel...</option>
+                                {staff.sort((a,b) => a.initials.localeCompare(b.initials)).map(s => (<option key={s.id} value={s.id}>{s.initials} — {s.name}</option>))}
+                             </select>
+                          </div>
+                          <div className="flex-1 space-y-1.5">
+                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Off-Duty Date</label>
+                             <input type="date" className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-bold text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)} required />
+                          </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          <div className="flex-1 space-y-1.5">
+                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Absence Reason</label>
+                             <select className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-xs uppercase outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
+                                <option value="Day off">Day off</option>
+                                <option value="Annual leave">Annual leave</option>
+                                <option value="Lieu leave">Lieu leave</option>
+                                <option value="Sick leave">Sick leave</option>
+                             </select>
+                          </div>
+                          <div className="flex items-end">
+                            <button type="submit" disabled={!quickLeaveStaffId} className="w-full sm:w-48 py-4 bg-slate-950 text-white rounded-xl font-black uppercase text-[10px] tracking-[0.2em] flex items-center justify-center gap-2 hover:bg-indigo-600 transition-all shadow-lg active:scale-95 disabled:opacity-50">
+                              <Plus size={16} /> ADD LOG
+                            </button>
+                          </div>
+                        </div>
                      </form>
-                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {activeLeaveRequests.map(req => (
-                          <div key={req.id} className="p-3 border border-slate-100 rounded-xl flex items-center justify-between bg-white group shadow-sm">
+                          <div key={req.id} className="p-3 border border-slate-100 rounded-xl flex items-center justify-between bg-white group shadow-sm transition-all hover:border-indigo-100">
                              <div>
                                 <p className="text-[9px] font-black uppercase text-slate-900">{staff.find(st => st.id === req.staffId)?.initials}</p>
-                                <p className="text-[7px] font-bold text-slate-400">{req.startDate} — {req.type}</p>
+                                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter">{req.startDate} — {req.type}</p>
                              </div>
-                             <button onClick={() => handleLeaveDelete(req.id)} className="text-slate-300 hover:text-rose-500 p-2"><Trash2 size={14}/></button>
+                             <button onClick={() => handleLeaveDelete(req.id)} className="text-slate-300 hover:text-rose-500 p-2 transition-colors"><Trash2 size={14}/></button>
                           </div>
                         ))}
+                        {activeLeaveRequests.length === 0 && (
+                          <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+                             <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">Absence Registry Clear</p>
+                          </div>
+                        )}
                      </div>
                   </div>
                 </div>
@@ -390,22 +437,22 @@ const App: React.FC = () => {
                 <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-8 md:gap-10">
                    <div className="flex items-center gap-4">
                       <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 rounded-xl md:rounded-2xl flex items-center justify-center text-blue-500 shadow-xl"><Terminal size={20} /></div>
-                      <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900">Command</h4>
+                      <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Command Control</h4>
                    </div>
-                   <div className="space-y-6">
-                     <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-widest mb-3 block">Period Duration</label>
-                        <input type="range" min="1" max="31" value={programDuration} onChange={(e) => setProgramDuration(parseInt(e.target.value))} className="w-full accent-blue-600 cursor-pointer" />
-                        <p className="text-center font-black mt-2 text-blue-600 text-sm italic">{programDuration} DAYS</p>
+                   <div className="space-y-8">
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] mb-4 block">Period Duration</label>
+                        <input type="range" min="1" max="31" value={programDuration} onChange={(e) => setProgramDuration(parseInt(e.target.value))} className="w-full accent-blue-600 cursor-pointer h-1.5" />
+                        <p className="text-center font-black mt-3 text-blue-600 text-sm italic tracking-widest">{programDuration} DAYS</p>
                      </div>
-                     <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-widest mb-3 block">Rest Threshold</label>
-                        <input type="range" min="8" max="24" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value))} className="w-full accent-blue-600 cursor-pointer" />
-                        <p className="text-center font-black mt-2 text-blue-600 text-sm italic">{minRestHours}H</p>
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] mb-4 block">Rest Threshold</label>
+                        <input type="range" min="8" max="24" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value))} className="w-full accent-blue-600 cursor-pointer h-1.5" />
+                        <p className="text-center font-black mt-3 text-blue-600 text-sm italic tracking-widest">{minRestHours}H</p>
                      </div>
                    </div>
-                   <button onClick={() => setShowConfirmDialog(true)} className="w-full py-6 md:py-8 bg-slate-950 text-white rounded-2xl md:rounded-[2rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center gap-3">
-                     <Zap size={20}/> Build AI Program
+                   <button onClick={() => setShowConfirmDialog(true)} className="w-full py-7 md:py-10 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center gap-3">
+                     <Zap size={22}/> Build AI Program
                    </button>
                 </div>
              </div>
@@ -417,9 +464,9 @@ const App: React.FC = () => {
         {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} />}
       </main>
 
-      <nav className={`xl:hidden fixed bottom-0 left-0 right-0 z-[150] bg-white border-t border-slate-200 px-4 py-3 flex justify-around items-center transition-transform duration-500 ${isVisible ? 'translate-y-0' : 'translate-y-full'}`}>
+      <nav className={`xl:hidden fixed bottom-0 left-0 right-0 z-[150] bg-white border-t border-slate-200 px-4 py-3 flex justify-around items-center transition-transform duration-500 pb-safe ${isVisible ? 'translate-y-0' : 'translate-y-full'}`}>
         {navigationTabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`}>
+          <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 transition-colors ${activeTab === tab.id ? 'text-blue-600' : 'text-slate-400'}`}>
             <tab.icon size={20} />
             <span className="text-[7px] font-black uppercase tracking-widest">{tab.label}</span>
           </button>
@@ -428,21 +475,21 @@ const App: React.FC = () => {
 
       {isScannerOpen && (
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-           <div className="bg-white rounded-2xl md:rounded-[3rem] w-full max-w-5xl h-[90vh] relative shadow-2xl">
-              <button onClick={() => setIsScannerOpen(false)} className="absolute top-4 right-4 p-3 bg-slate-100 rounded-xl"><X size={20} /></button>
-              <div className="h-full overflow-auto"><ProgramScanner onDataExtracted={data => { if(data.flights) setFlights(p => [...p, ...data.flights]); if(data.staff) setStaff(p => [...p, ...data.staff]); if(data.shifts) setShifts(p => [...p, ...data.shifts]); setIsScannerOpen(false); }} startDate={startDate} initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} /></div>
+           <div className="bg-white rounded-2xl md:rounded-[3rem] w-full max-w-5xl h-[90vh] relative shadow-2xl overflow-hidden flex flex-col">
+              <button onClick={() => setIsScannerOpen(false)} className="absolute top-4 right-4 p-3 bg-slate-100 rounded-xl z-10 hover:bg-rose-50 hover:text-rose-500 transition-colors"><X size={20} /></button>
+              <div className="flex-1 overflow-auto"><ProgramScanner onDataExtracted={data => { if(data.flights) setFlights(p => [...p, ...data.flights]); if(data.staff) setStaff(p => [...p, ...data.staff]); if(data.shifts) setShifts(p => [...p, ...data.shifts]); setIsScannerOpen(false); }} startDate={startDate} initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} /></div>
            </div>
         </div>
       )}
 
       {showConfirmDialog && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-6 animate-in fade-in">
-           <div className="bg-white rounded-2xl md:rounded-[3.5rem] p-8 md:p-12 text-center max-w-lg w-full">
+           <div className="bg-white rounded-2xl md:rounded-[3.5rem] p-8 md:p-12 text-center max-w-lg w-full shadow-2xl border border-white/10">
               <h3 className="text-2xl md:text-3xl font-black italic uppercase text-slate-900 mb-4">Build AI Program?</h3>
-              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8">AI will synchronize coverage and rest mandates.</p>
+              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8 tracking-widest">AI will synchronize coverage and rest mandates.</p>
               <div className="flex gap-4">
-                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 font-black uppercase text-[10px] text-slate-400">Abort</button>
-                <button onClick={confirmGenerateProgram} className="flex-[2] py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all">Build AI Program</button>
+                <button onClick={() => setShowConfirmDialog(false)} className="flex-1 font-black uppercase text-[10px] text-slate-400 hover:text-rose-500 transition-colors">Abort</button>
+                <button onClick={confirmGenerateProgram} className="flex-[2] py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all shadow-xl active:scale-95">Build AI Program</button>
               </div>
            </div>
         </div>
