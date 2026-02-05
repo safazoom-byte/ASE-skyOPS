@@ -2,13 +2,14 @@ import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty } from '../types';
 
 const getEnv = (key: string): string => {
-  try {
-    const val = (window as any).process?.env?.[key] || 
-                (import.meta as any).env?.[`VITE_${key}`] || 
-                (window as any)[key] || 
-                "";
-    return typeof val === 'string' ? val : "";
-  } catch { return ""; }
+  // Vite uses import.meta.env.VITE_... for client-side variables
+  const viteKey = `VITE_${key}`;
+  const val = (import.meta as any).env?.[viteKey] || 
+              (import.meta as any).env?.[key] ||
+              (window as any).process?.env?.[key] || 
+              (window as any)[key] || 
+              "";
+  return typeof val === 'string' ? val : "";
 };
 
 const SUPABASE_URL = getEnv('SUPABASE_URL');
