@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { Flight } from '../types';
 import { Trash2, Eraser, CalendarX, PlaneTakeoff, Clock, MapPin, Edit3, CalendarDays, Sparkles } from 'lucide-react';
@@ -35,7 +34,8 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
     const target = new Date(dateStr);
     target.setHours(0,0,0,0);
     const diffTime = target.getTime() - start.getTime();
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    // Clamp to 0 to prevent negative indices
+    return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
   };
 
   const getDayLabel = (dateStr: string) => {

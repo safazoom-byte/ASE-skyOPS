@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { ShiftConfig, Flight, Skill, Staff, LeaveRequest } from '../types';
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
@@ -71,7 +70,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     start.setHours(0,0,0,0);
     target.setHours(0,0,0,0);
     const diffTime = target.getTime() - start.getTime();
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    // Clamp to 0 to prevent negative indices
+    return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
   };
 
   const availableFlights = useMemo(() => {
@@ -426,7 +426,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
         <div className="xl:col-span-3 space-y-8 md:space-y-10">
           
-          {/* Duty Log Box - Explicitly Placed AFTER Leave Requests (which is removed from here now) */}
+          {/* Duty Log Box */}
           <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 relative overflow-hidden">
              <div className="absolute top-0 right-0 p-8 opacity-5">
                 <Activity size={120} className="text-blue-500" />
