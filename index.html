@@ -36,11 +36,6 @@
     <script>
       window.process = window.process || {};
       window.process.env = window.process.env || {};
-      // Attempt to signal Vercel toolbar to hide if it's interfering
-      window.addEventListener('load', () => {
-        const toolbar = document.querySelector('vercel-live-feedback');
-        if (toolbar) toolbar.style.display = 'none';
-      });
     </script>
 <script type="importmap">
 {
@@ -61,7 +56,7 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-slate-50">
+  <body class="bg-slate-50 overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
