@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Staff, Skill, StaffCategory } from '../types';
 import { AVAILABLE_SKILLS } from '../constants';
@@ -9,15 +8,14 @@ import {
   Trash2, 
   FileSpreadsheet,
   User,
-  Fingerprint,
   Plus,
   Eraser,
   ShieldCheck,
   Sparkles,
-  Zap,
-  CalendarDays,
+  Briefcase,
   Shield,
-  Briefcase
+  CalendarRange,
+  Zap
 } from 'lucide-react';
 
 interface Props {
@@ -26,8 +24,6 @@ interface Props {
   onDelete: (id: string) => void;
   onClearAll?: () => void;
   defaultMaxShifts: number;
-  programStartDate?: string;
-  programEndDate?: string;
   onOpenScanner?: () => void;
 }
 
@@ -78,6 +74,13 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     const initials = (newStaff.initials || generateInitials(newStaff.name)).toUpperCase();
     const id = Math.random().toString(36).substring(2, 11);
     const isRoster = newStaff.type === 'Roster';
+    
+    // Validate dates if Roster
+    if (isRoster && (!newStaff.workFromDate || !newStaff.workToDate)) {
+      alert("Please specify Contract Start and End dates for Roster staff.");
+      return;
+    }
+
     const staffData: Staff = {
       id,
       name: newStaff.name,
@@ -136,8 +139,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Load Control': 'isLoadControl',
       'Lost and Found': 'isLostFound',
       'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps',
-      'Duty': 'isOps'
+      'Operations': 'isOps'
     };
     const field = skillMap[skill];
     if (!field) return;
@@ -156,8 +158,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Load Control': 'isLoadControl',
       'Lost and Found': 'isLostFound',
       'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps',
-      'Duty': ''
+      'Operations': 'isOps'
     };
     const field = skillMap[skill];
     return !!member[field];
@@ -214,78 +215,84 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
         </div>
       </div>
 
-      <div className="bg-white p-6 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100">
-        <h4 className="text-lg md:text-2xl font-black italic uppercase mb-8 flex items-center gap-4 text-slate-900">
-          <Plus className="text-blue-600" size={24} /> Register New Personnel
-        </h4>
-        <form onSubmit={handleNewStaffSubmit} className="space-y-8 md:space-y-10">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
-            <div className="space-y-2">
-              <label className="block text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" name="name" className="w-full pl-12 md:pl-14 pr-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm outline-none transition-all" value={newStaff.name} onChange={(e) => handleInputChange(e, false)} required />
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white p-6 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100">
+          <h4 className="text-lg md:text-2xl font-black italic uppercase mb-8 flex items-center gap-4 text-slate-900">
+            <Plus className="text-blue-600" size={24} /> Register New Personnel
+          </h4>
+          <form onSubmit={handleNewStaffSubmit} className="space-y-8 md:space-y-10">
+            <div className="grid grid-cols-1 gap-4 md:gap-8">
+              <div className="space-y-2">
+                <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                  <input type="text" name="name" className="w-full pl-12 md:pl-14 pr-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm text-slate-900 outline-none transition-all" value={newStaff.name} onChange={(e) => handleInputChange(e, false)} required />
+                </div>
               </div>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Initials</label>
-              <div className="relative">
-                <Fingerprint className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input type="text" name="initials" className="w-full pl-12 md:pl-14 pr-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-xs md:text-sm uppercase outline-none transition-all" value={newStaff.initials} onChange={(e) => handleInputChange(e, false)} />
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Initials</label>
+                  <input type="text" name="initials" className="w-full px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-xs md:text-sm uppercase outline-none text-slate-900" value={newStaff.initials} onChange={(e) => handleInputChange(e, false)} placeholder="Auto-gen" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Category</label>
+                  <select name="type" className="w-full px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm text-slate-900 outline-none appearance-none" value={newStaff.type} onChange={(e) => handleInputChange(e, false)}>
+                    <option value="Local">Local (Permanent 5/2)</option>
+                    <option value="Roster">Roster (Contract-Based)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 flex justify-between">
+                    <span>Power Rate</span>
+                    <span className="text-blue-600">{newStaff.powerRate}%</span>
+                  </label>
+                  <div className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center">
+                    <input 
+                      type="range" 
+                      name="powerRate" 
+                      min="50" 
+                      max="100" 
+                      className="w-full accent-blue-600 cursor-pointer h-1.5" 
+                      value={newStaff.powerRate} 
+                      onChange={(e) => handleInputChange(e, false)} 
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
-              <select name="type" className="w-full px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm outline-none appearance-none" value={newStaff.type} onChange={(e) => handleInputChange(e, false)}>
-                <option value="Local">Local (Permanent 5/2)</option>
-                <option value="Roster">Roster (Contract-Based)</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
-                <span>Power Rate</span>
-                <span className="text-blue-600 font-black">{newStaff.powerRate}%</span>
-              </label>
-              <div className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center">
-                <input type="range" name="powerRate" min="50" max="100" step="5" className="w-full accent-blue-600 h-1" value={newStaff.powerRate} onChange={(e) => handleInputChange(e, false)} />
-              </div>
-            </div>
-          </div>
-          
-          {newStaff.type === 'Roster' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-6 md:p-10 bg-indigo-50/30 rounded-3xl md:rounded-[3rem] border border-indigo-100 animate-in slide-in-from-top-4">
-              <div>
-                <label className="block text-[8px] md:text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <CalendarDays size={14} className="text-indigo-600" /> Contract Start
-                </label>
-                <input type="date" name="workFromDate" className="w-full p-4 border rounded-2xl bg-white font-bold text-xs" value={newStaff.workFromDate} onChange={(e) => handleInputChange(e, false)} />
-              </div>
-              <div>
-                <label className="block text-[8px] md:text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <CalendarDays size={14} className="text-rose-600" /> Contract End
-                </label>
-                <input type="date" name="workToDate" className="w-full p-4 border rounded-2xl bg-white font-bold text-xs" value={newStaff.workToDate} onChange={(e) => handleInputChange(e, false)} />
-              </div>
-            </div>
-          )}
 
-          <div className="space-y-4 pt-6 border-t border-slate-50">
-            <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase flex items-center gap-2"> Discipline Matrix</p>
-            <div className="flex flex-wrap gap-2 md:gap-3">
-              {AVAILABLE_SKILLS.map(skill => {
-                const active = isSkillActive(newStaff, skill);
-                return (
-                  <button key={skill} type="button" onClick={() => toggleSkill(skill, false)} className={`px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-[8px] md:text-[10px] font-black uppercase transition-all border-2 ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-white border-slate-100 text-slate-400'}`}>
-                    {skill}
-                  </button>
-                );
-              })}
+              {newStaff.type === 'Roster' && (
+                <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 p-4 bg-amber-50 rounded-3xl border border-amber-100">
+                   <div className="space-y-2">
+                      <label className="block text-[8px] md:text-[10px] font-black text-amber-600 uppercase tracking-widest ml-1 flex items-center gap-2"><CalendarRange size={12}/> Contract Start</label>
+                      <input type="date" name="workFromDate" className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none" value={newStaff.workFromDate} onChange={(e) => handleInputChange(e, false)} required />
+                   </div>
+                   <div className="space-y-2">
+                      <label className="block text-[8px] md:text-[10px] font-black text-amber-600 uppercase tracking-widest ml-1 flex items-center gap-2"><CalendarRange size={12}/> Contract End</label>
+                      <input type="date" name="workToDate" className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none" value={newStaff.workToDate} onChange={(e) => handleInputChange(e, false)} required />
+                   </div>
+                </div>
+              )}
+
+              <div className="space-y-4 pt-6 border-t border-slate-50">
+                <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex items-center gap-2"> Discipline Matrix</p>
+                <div className="flex flex-wrap gap-2 md:gap-3">
+                  {AVAILABLE_SKILLS.map(skill => {
+                    const active = isSkillActive(newStaff, skill);
+                    return (
+                      <button key={skill} type="button" onClick={() => toggleSkill(skill, false)} className={`px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-[8px] md:text-[10px] font-black uppercase transition-all border-2 ${active ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-white border-slate-100 text-slate-500'}`}>
+                        {skill}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <button type="submit" className="w-full py-5 md:py-6 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.3em] shadow-2xl hover:bg-blue-600 text-[10px] md:text-xs transition-all active:scale-95">
+                Commit To Station Registry
+              </button>
             </div>
-          </div>
-          <button type="submit" className="w-full py-5 md:py-6 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.3em] shadow-2xl hover:bg-blue-600 text-[10px] md:text-xs transition-all active:scale-95">
-            Commit To Station Registry
-          </button>
-        </form>
+          </form>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-8">
@@ -330,7 +337,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                     {isRoster && (
                       <div className="p-3 md:p-4 bg-slate-50 rounded-xl md:rounded-2xl border border-slate-100 space-y-2">
                         <div className="flex justify-between items-center text-[7px] md:text-[8px] font-black uppercase">
-                          <span className="text-slate-400">WINDOW</span>
+                          <span className="text-slate-600">WINDOW</span>
                         </div>
                         <div className="flex justify-between items-center text-[9px] md:text-[10px] font-black italic">
                           <span>{formatStaffDate(member.workFromDate)}</span>
@@ -341,7 +348,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                     )}
 
                     <div className="space-y-2 md:space-y-3">
-                      <p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Shield size={10} className="text-indigo-400" /> Qualifications</p>
+                      <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Shield size={10} className="text-indigo-400" /> Qualifications</p>
                       <div className="flex flex-wrap gap-1 md:gap-1.5">
                         {AVAILABLE_SKILLS.filter(s => isSkillActive(member, s)).map(s => (
                           <span key={s} className="px-2 md:px-3 py-1 md:py-1.5 bg-slate-900 text-white rounded-lg text-[7px] md:text-[8px] font-black uppercase tracking-tight">
@@ -369,24 +376,24 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
       {editingStaff && (
         <div className="fixed inset-0 z-[1600] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-          <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-w-xl w-full p-8 md:p-12 overflow-y-auto max-h-[95vh] no-scrollbar animate-in zoom-in-95">
+          <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-xl w-full p-8 md:p-12 overflow-y-auto max-h-[95vh] no-scrollbar animate-in zoom-in-95">
             <h4 className="text-xl md:text-2xl font-black uppercase italic mb-8 md:mb-10 flex items-center gap-4">
               <Edit2 className="text-indigo-600" /> Refine Profile
             </h4>
             <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingStaff); setEditingStaff(null); }} className="space-y-6 md:space-y-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                 <div>
-                  <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 block">Full Name</label>
-                  <input type="text" name="name" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold text-xs" value={editingStaff.name} onChange={(e) => handleInputChange(e, true)} required />
+                  <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">Full Name</label>
+                  <input type="text" name="name" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold text-xs text-slate-900" value={editingStaff.name} onChange={(e) => handleInputChange(e, true)} required />
                 </div>
                 <div>
-                  <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 block">Initials</label>
-                  <input type="text" name="initials" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-black uppercase text-xs" value={editingStaff.initials} onChange={(e) => handleInputChange(e, true)} />
+                  <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">Initials</label>
+                  <input type="text" name="initials" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-black uppercase text-xs text-slate-900" value={editingStaff.initials} onChange={(e) => handleInputChange(e, true)} />
                 </div>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
-                <select name="type" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold appearance-none text-xs" value={editingStaff.type} onChange={(e) => handleInputChange(e, true)}>
+                <select name="type" className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold appearance-none text-xs text-slate-900" value={editingStaff.type} onChange={(e) => handleInputChange(e, true)}>
                   <option value="Local">Local (Permanent)</option>
                   <option value="Roster">Roster (Contract)</option>
                 </select>
@@ -398,23 +405,23 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
               {editingStaff.type === 'Roster' && (
                 <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-4">
                   <div>
-                    <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 block">From</label>
-                    <input type="date" name="workFromDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs" value={editingStaff.workFromDate || ''} onChange={(e) => handleInputChange(e, true)} />
+                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">From</label>
+                    <input type="date" name="workFromDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900" value={editingStaff.workFromDate || ''} onChange={(e) => handleInputChange(e, true)} />
                   </div>
                   <div>
-                    <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 block">To</label>
-                    <input type="date" name="workToDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs" value={editingStaff.workToDate || ''} onChange={(e) => handleInputChange(e, true)} />
+                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">To</label>
+                    <input type="date" name="workToDate" className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900" value={editingStaff.workToDate || ''} onChange={(e) => handleInputChange(e, true)} />
                   </div>
                 </div>
               )}
 
               <div className="space-y-3">
-                <p className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase"> Discipline Access</p>
+                <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase"> Discipline Access</p>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_SKILLS.map(skill => {
                     const active = isSkillActive(editingStaff, skill);
                     return (
-                      <button key={skill} type="button" onClick={() => toggleSkill(skill, true)} className={`px-4 py-2.5 rounded-xl text-[8px] md:text-[9px] font-black uppercase transition-all border ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
+                      <button key={skill} type="button" onClick={() => toggleSkill(skill, true)} className={`px-4 py-2.5 rounded-xl text-[8px] md:text-[9px] font-black uppercase transition-all border ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-500'}`}>
                         {skill}
                       </button>
                     );
@@ -432,7 +439,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
       {showWipeConfirm && (
         <div className="fixed inset-0 z-[1700] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-           <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-w-sm w-full p-8 md:p-12 text-center">
+           <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-sm w-full p-8 md:p-12 text-center">
               <ShieldCheck size={48} className="mx-auto text-rose-500 mb-6" />
               <h4 className="text-xl md:text-2xl font-black uppercase italic mb-3">Registry Purge</h4>
               <p className="text-[10px] md:text-xs text-slate-500 mb-8">Permanently erase all personnel data?</p>

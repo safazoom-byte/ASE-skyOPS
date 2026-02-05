@@ -1,7 +1,6 @@
 
-/* ... existing imports ... */
 import React, { useState, useRef, useEffect } from 'react';
-import { identifyMapping, extractDataFromContent, ExtractionMedia } from '../services/geminiService';
+import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
 import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
 import * as XLSX from 'xlsx';
 import { 
@@ -24,8 +23,6 @@ import {
   ShieldCheck,
   Settings
 } from 'lucide-react';
-
-/* ... existing constants and interfaces ... */
 
 interface Props {
   onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => void;
@@ -71,7 +68,6 @@ const HEADER_ALIASES: Record<string, string[]> = {
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
-  /* ... existing state and logic ... */
   const [isScanning, setIsScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
   const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] } | null>(null);
@@ -79,12 +75,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
   const [importMode, setImportMode] = useState<'upload' | 'paste'>(initialTarget ? 'paste' : 'upload');
   const [pasteTarget, setPasteTarget] = useState<PasteTarget>(initialTarget || 'all');
   const [pastedText, setPastedText] = useState('');
-  
-  const [pendingMapping, setPendingMapping] = useState<{ 
-    rows: any[][], 
-    target: PasteTarget, 
-    map: Record<string, number> 
-  } | null>(null);
+  const [pendingMapping, setPendingMapping] = useState<{ rows: any[][], target: PasteTarget, map: Record<string, number> } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,7 +189,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           std: map.std !== -1 ? parseImportTime(row[map.std]) : '',
           date: parseImportDate(row[map.date]),
           type: 'Turnaround',
-          day: 0
+          day: 0,
+          priority: 'Standard'
         });
       }
 
@@ -260,7 +252,6 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     setIsScanning(false);
   };
 
-  /* ... rest of existing component logic ... */
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -333,45 +324,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     }
   };
 
-  const updateMapping = (field: string, index: number) => {
-    if (!pendingMapping) return;
-    setPendingMapping({
-      ...pendingMapping,
-      map: { ...pendingMapping.map, [field]: index }
-    });
-  };
-
-  const renderMappingGroup = (title: string, icon: React.ReactNode, fieldKeys: string[]) => {
-    if (!pendingMapping) return null;
-    return (
-      <div className="space-y-6">
-        <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-3">
-          {icon} {title}
-        </h5>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {fieldKeys.map((field) => (
-             <div key={field} className="p-6 rounded-[2rem] bg-slate-50 border border-slate-100 space-y-3">
-                <label className="text-[9px] font-black uppercase text-slate-400 block">{field.replace('role_', 'Required ').replace('is', 'Skill: ')}</label>
-                <select 
-                  className="w-full p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold outline-none"
-                  value={pendingMapping.map[field] ?? -1}
-                  onChange={(e) => updateMapping(field, parseInt(e.target.value))}
-                >
-                   <option value={-1}>[Ignore Field]</option>
-                   {pendingMapping.rows[0]?.map((h: any, i: number) => (
-                     <option key={i} value={i}>{h || `Column ${i+1}`}</option>
-                   ))}
-                </select>
-             </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
-      {/* ... existing header and content logic ... */}
       <div className="p-8 lg:p-12 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
          <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/20"><Layers size={24} /></div>
@@ -432,116 +386,30 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           </div>
         )}
 
-        {pendingMapping && (
-          <div className="bg-white p-12 rounded-[4rem] shadow-xl border border-slate-100 animate-in slide-in-from-bottom-10 max-w-6xl mx-auto space-y-12">
-             <div className="flex items-center gap-6 mb-4">
-                <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-white"><Table size={24}/></div>
-                <div>
-                   <h3 className="text-2xl font-black uppercase italic tracking-tighter text-slate-950">Map Source Columns</h3>
-                   <p className="text-[10px] font-black text-slate-400 uppercase">Manual verification required for ambiguous headers.</p>
-                </div>
-             </div>
-             <div className="space-y-12 max-h-[60vh] overflow-y-auto pr-6 no-scrollbar pb-10">
-                {(pendingMapping.target === 'all' || pendingMapping.target === 'flights') && renderMappingGroup('Flight Parameters', <Plane size={14} />, ['flightNumber', 'from', 'to', 'sta', 'std', 'date'])}
-                {(pendingMapping.target === 'all' || pendingMapping.target === 'staff') && (
-                  <>
-                    {renderMappingGroup('Staff Registry', <Users size={14} />, ['name', 'initials', 'type', 'powerRate'])}
-                    {renderMappingGroup('Discipline Matrix', <ShieldCheck size={14} />, ['isRamp', 'isLoadControl', 'isOps', 'isShiftLeader', 'isLostFound'])}
-                  </>
-                )}
-                {(pendingMapping.target === 'all' || pendingMapping.target === 'shifts') && (
-                  <>
-                    {renderMappingGroup('Shift Timing', <Clock size={14} />, ['pickupDate', 'pickupTime', 'endDate', 'endTime'])}
-                    {renderMappingGroup('Capacity & Logistics', <Settings size={14} />, ['minStaff', 'maxStaff'])}
-                    {renderMappingGroup('Specialist Requirements', <Zap size={14} />, ['role_shiftLeader', 'role_loadControl', 'role_ramp', 'role_ops', 'role_lostFound'])}
-                  </>
-                )}
-             </div>
-             <button onClick={() => processLocalRows(pendingMapping.rows, pendingMapping.map)} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-emerald-600 transition-all">GENERATE REGISTRY FROM MAP <ArrowRight size={20}/></button>
-          </div>
-        )}
-
         {extractedData && (
-          <div className="space-y-10 animate-in fade-in duration-700">
-             <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm">
-                <div className="flex items-center justify-between mb-12">
-                   <div className="flex items-center gap-8">
-                      <div className="w-20 h-20 bg-emerald-600 rounded-[2.5rem] flex items-center justify-center text-white shadow-xl shadow-emerald-600/20"><CheckCircle2 size={40} /></div>
-                      <div>
-                        <h3 className="text-3xl font-black uppercase italic tracking-tighter">Data Synchronized</h3>
-                        <p className="text-slate-400 text-[10px] font-black uppercase mt-1 italic">Verified locally — Mapping successful</p>
-                      </div>
+          <div className="space-y-10 animate-in zoom-in-95 duration-500">
+             <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
+                <div className="flex justify-between items-center mb-10">
+                   <h4 className="text-xl font-black italic uppercase text-slate-950 flex items-center gap-4"><CheckCircle2 className="text-emerald-500" /> Registry Review</h4>
+                   <button onClick={finalizeImport} className="px-10 py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic text-[10px] tracking-widest hover:bg-blue-600 transition-all shadow-xl shadow-blue-600/10">Authorize Import</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
+                      <Plane size={24} className="mx-auto text-blue-500 mb-3" />
+                      <h5 className="text-2xl font-black italic text-slate-900">{extractedData.flights.length}</h5>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Flights</p>
                    </div>
-                   <div className="flex gap-4">
-                      <div className="bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100 text-center"><span className="block text-[8px] font-black text-slate-400 uppercase mb-1">Flights</span><span className="text-xl font-black italic">{extractedData.flights.length}</span></div>
-                      <div className="bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100 text-center"><span className="block text-[8px] font-black text-slate-400 uppercase mb-1">Staff</span><span className="text-xl font-black italic">{extractedData.staff.length}</span></div>
-                      <div className="bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100 text-center"><span className="block text-[8px] font-black text-slate-400 uppercase mb-1">Shifts</span><span className="text-xl font-black italic">{extractedData.shifts.length}</span></div>
+                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
+                      <Users size={24} className="mx-auto text-indigo-500 mb-3" />
+                      <h5 className="text-2xl font-black italic text-slate-900">{extractedData.staff.length}</h5>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Staff</p>
+                   </div>
+                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
+                      <Clock size={24} className="mx-auto text-amber-500 mb-3" />
+                      <h5 className="text-2xl font-black italic text-slate-900">{extractedData.shifts.length}</h5>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Shifts</p>
                    </div>
                 </div>
-                <div className="max-h-[500px] overflow-y-auto rounded-[2rem] border border-slate-50 bg-slate-50/30 p-2 no-scrollbar mb-10">
-                  <table className="w-full text-left">
-                    <thead className="sticky top-0 bg-slate-100 text-[8px] font-black uppercase tracking-widest text-slate-400 z-30">
-                      <tr>
-                        <th className="px-6 py-4">ENTITY</th>
-                        <th className="px-6 py-4">IDENTIFIER</th>
-                        <th className="px-6 py-4">DETAILS</th>
-                        <th className="px-6 py-4">QUALIFICATIONS / ROLES</th>
-                        <th className="px-6 py-4 text-right">ACTION</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {extractedData.flights.map((f, i) => (
-                        <tr key={`f-${i}`} className="text-[10px] font-black italic text-slate-900 hover:bg-blue-50/50">
-                          <td className="px-6 py-4 text-blue-600 uppercase flex items-center gap-2"><Plane size={12}/> FLT</td>
-                          <td className="px-6 py-4">{f.flightNumber}</td>
-                          <td className="px-6 py-4 text-slate-400 uppercase">{f.date} | {f.sta || f.std} | {f.from}→{f.to}</td>
-                          <td className="px-6 py-4 text-emerald-500">PARSED</td>
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => setExtractedData(prev => prev ? {...prev, flights: prev.flights.filter((_, idx) => idx !== i)} : null)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={14}/></button>
-                          </td>
-                        </tr>
-                      ))}
-                      {extractedData.staff.map((s, i) => (
-                        <tr key={`s-${i}`} className="text-[10px] font-black italic text-slate-900 hover:bg-indigo-50/50">
-                          <td className="px-6 py-4 text-indigo-600 uppercase flex items-center gap-2"><Users size={12}/> STAFF</td>
-                          <td className="px-6 py-4">{s.name} ({s.initials})</td>
-                          <td className="px-6 py-4 text-slate-400 uppercase">{s.type} | PR: {s.powerRate}%</td>
-                          <td className="px-6 py-4">
-                            <div className="flex gap-1">
-                              {s.isShiftLeader && <span className="bg-slate-200 px-1 rounded text-[7px]">SL</span>}
-                              {s.isRamp && <span className="bg-slate-200 px-1 rounded text-[7px]">RMP</span>}
-                              {s.isLoadControl && <span className="bg-slate-200 px-1 rounded text-[7px]">LC</span>}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => setExtractedData(prev => prev ? {...prev, staff: prev.staff.filter((_, idx) => idx !== i)} : null)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={14}/></button>
-                          </td>
-                        </tr>
-                      ))}
-                      {extractedData.shifts.map((sh, i) => (
-                        <tr key={`sh-${i}`} className="text-[10px] font-black italic text-slate-900 hover:bg-amber-50/50">
-                          <td className="px-6 py-4 text-amber-600 uppercase flex items-center gap-2"><Clock size={12}/> SHIFT</td>
-                          <td className="px-6 py-4">{sh.pickupTime} — {sh.endTime}</td>
-                          <td className="px-6 py-4 text-slate-400 uppercase">{sh.pickupDate} | HC: {sh.minStaff}-{sh.maxStaff}</td>
-                          <td className="px-6 py-4">
-                            <div className="flex gap-1">
-                              {/* Fix: cast count to number or ensure it is numeric to fix TypeScript error in line 528 context (mapping over entries) */}
-                              {Object.entries(sh.roleCounts || {}).map(([role, count]) => (Number(count) || 0) > 0 && (
-                                <span key={role} className="bg-amber-100 text-amber-700 px-1 rounded text-[7px]">{role}: {count}</span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => setExtractedData(prev => prev ? {...prev, shifts: prev.shifts.filter((_, idx) => idx !== i)} : null)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={14}/></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <button onClick={finalizeImport} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase italic tracking-[0.3em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-6">
-                   AUTHORIZE DATA COMMIT <Sparkles />
-                </button>
              </div>
           </div>
         )}

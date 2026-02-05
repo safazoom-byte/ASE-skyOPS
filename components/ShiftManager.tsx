@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo } from 'react';
-import { ShiftConfig, Flight, Skill } from '../types';
+import { ShiftConfig, Flight, Skill, Staff, LeaveRequest } from '../types';
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
 import * as XLSX from 'xlsx';
 import { 
@@ -25,12 +26,21 @@ import {
   Activity,
   Layers,
   Zap,
-  Layout
+  Layout,
+  Lock,
+  ChevronRight,
+  ChevronLeft,
+  MoveHorizontal,
+  CalendarX,
+  Coffee,
+  AlertTriangle
 } from 'lucide-react';
 
 interface Props {
   shifts: ShiftConfig[];
   flights: Flight[];
+  staff: Staff[];
+  leaveRequests: LeaveRequest[];
   startDate?: string;
   onAdd: (s: ShiftConfig) => void;
   onUpdate: (s: ShiftConfig) => void;
@@ -38,7 +48,7 @@ interface Props {
   onOpenScanner?: () => void;
 }
 
-export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], startDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
+export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff = [], leaveRequests = [], startDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
     pickupDate: startDate || new Date().toISOString().split('T')[0],
@@ -66,7 +76,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
   const availableFlights = useMemo(() => {
     if (!formData.pickupDate) return [];
-    // Show flights within a 1-day window of the shift date to handle overnight rotations
     const targetDate = new Date(formData.pickupDate);
     return flights.filter(f => {
       const flightDate = new Date(f.date);
@@ -75,18 +84,23 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
     });
   }, [flights, formData.pickupDate]);
 
+  const engagedFlightIds = useMemo(() => {
+    const engaged = new Set<string>();
+    shifts.forEach(s => {
+      if (s.id !== editingId) {
+        s.flightIds?.forEach(fid => engaged.add(fid));
+      }
+    });
+    return engaged;
+  }, [shifts, editingId]);
+
   const toggleFlightEngagement = (flightId: string) => {
+    if (engagedFlightIds.has(flightId)) return;
     const current = formData.flightIds || [];
     const next = current.includes(flightId) 
       ? current.filter(id => id !== flightId) 
       : [...current, flightId];
     setFormData(prev => ({ ...prev, flightIds: next }));
-  };
-
-  const getDayLabel = (dateStr: string) => {
-    if (!dateStr) return 'No Date';
-    const date = new Date(dateStr);
-    return isNaN(date.getTime()) ? 'Invalid Date' : DAYS_OF_WEEK_FULL[date.getDay()];
   };
 
   const formatTimeInput = (value: string) => {
@@ -130,6 +144,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
   };
 
   const getFlightById = (id: string) => flights.find(f => f.id === id);
+  const getStaffById = (id: string) => staff.find(s => s.id === id);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,47 +245,63 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
         </div>
       </div>
 
-      {/* 24H COVERAGE RIBBON */}
       <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
         <div className="flex items-center justify-between mb-8">
            <h4 className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3">
              <Layers size={16} className="text-blue-600" /> Station Coverage Ribbon
            </h4>
-           <div className="flex gap-4">
-              {['AM', 'PM', 'Night'].map(phase => (
-                <div key={phase} className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${phase === 'AM' ? 'bg-blue-500' : phase === 'PM' ? 'bg-amber-500' : 'bg-indigo-400'}`}></div>
-                  <span className="text-[7px] font-black uppercase text-slate-400">{phase}</span>
-                </div>
-              ))}
+           <div className="flex items-center gap-4">
+              <div className="hidden sm:flex gap-4">
+                {['AM', 'PM', 'Night'].map(phase => (
+                  <div key={phase} className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${phase === 'AM' ? 'bg-blue-500' : phase === 'PM' ? 'bg-amber-500' : 'bg-indigo-400'}`}></div>
+                    <span className="text-[7px] font-black uppercase text-slate-400">{phase}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="sm:hidden flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-full animate-pulse">
+                <MoveHorizontal size={10} className="text-blue-500" />
+                <span className="text-[6px] font-black uppercase tracking-widest text-slate-400">Swipe</span>
+              </div>
            </div>
         </div>
-        <div className="relative h-20 md:h-28 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 p-3 overflow-hidden">
-           {/* Hour Grids */}
-           <div className="absolute inset-0 flex justify-between px-6 pointer-events-none opacity-10">
-              {Array.from({length: 25}).map((_, i) => (
-                <div key={i} className="h-full border-l border-slate-950 flex flex-col justify-end pb-1">
-                  {i % 4 === 0 && <span className="text-[6px] font-black ml-1">{i}:00</span>}
-                </div>
-              ))}
-           </div>
-           {/* Shift Rows in Ribbon */}
-           <div className="relative h-full flex flex-col justify-center gap-2 overflow-y-auto no-scrollbar">
-              {timelineShifts.map((s) => {
-                const phase = getPhaseStyle(s.pickupTime);
-                const health = getShiftHealth(s);
-                return (
+        
+        <div className="relative overflow-x-auto no-scrollbar pb-2">
+           <div className="relative h-28 md:h-32 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 p-4 min-w-[900px] md:min-w-full overflow-hidden">
+              <div className="absolute inset-0 flex pointer-events-none px-6">
+                {Array.from({length: 25}).map((_, i) => (
                   <div 
-                    key={s.id} 
-                    className={`h-4 md:h-6 rounded-full border-2 border-white shadow-md flex items-center px-3 transition-all hover:scale-[1.02] cursor-pointer ${phase.bg} ${health === 'critical' ? 'ring-2 ring-rose-500/30' : ''}`}
-                    style={{ marginLeft: `${s.startPercent}%`, width: `${s.width}%` }}
-                    onClick={() => startEdit(s)}
+                    key={i} 
+                    className={`h-full border-l border-slate-200/50 flex flex-col justify-end pb-2`}
+                    style={{ position: 'absolute', left: `${(i/24)*100}%` }}
                   >
-                     <span className={`text-[7px] font-black uppercase tracking-tighter truncate ${phase.color}`}>{s.pickupTime} - {s.endTime}</span>
+                    {i % 3 === 0 && <span className="text-[7px] font-black text-slate-300 ml-1 translate-y-2">{i}:00</span>}
                   </div>
-                );
-              })}
-              {timelineShifts.length === 0 && <div className="text-center w-full text-[10px] font-black text-slate-300 uppercase italic">Awaiting Registry Input</div>}
+                ))}
+              </div>
+
+              <div className="relative h-full flex flex-col justify-center gap-2 pt-2">
+                  {timelineShifts.map((s) => {
+                    const phase = getPhaseStyle(s.pickupTime);
+                    const health = getShiftHealth(s);
+                    return (
+                      <div 
+                        key={s.id} 
+                        className={`h-6 md:h-7 rounded-full border-2 border-white shadow-md flex items-center px-4 transition-all hover:scale-[1.01] cursor-pointer ${phase.bg} ${health === 'critical' ? 'ring-2 ring-rose-500/30' : ''}`}
+                        style={{ marginLeft: `${s.startPercent}%`, width: `${s.width}%` }}
+                        onClick={() => startEdit(s)}
+                      >
+                         <span className={`text-[8px] font-black uppercase tracking-tighter truncate ${phase.color}`}>{s.pickupTime} - {s.endTime}</span>
+                      </div>
+                    );
+                  })}
+                  {timelineShifts.length === 0 && (
+                    <div className="flex flex-col items-center justify-center h-full gap-2">
+                       <Zap size={14} className="text-slate-200" />
+                       <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] italic">Awaiting Flight Registry Commit</span>
+                    </div>
+                  )}
+              </div>
            </div>
         </div>
       </div>
@@ -285,50 +316,66 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
             
             <form onSubmit={handleSubmit} className="space-y-6 md:space-y-8">
               <div className="space-y-4">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Clock size={12} className="text-blue-500" /> Timing Profile</label>
+                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 flex items-center gap-2"><Clock size={12} className="text-blue-500" /> Timing Profile</label>
                 <div className="grid grid-cols-2 gap-2">
                    <div className="space-y-1">
-                     <span className="text-[7px] font-black text-slate-300 uppercase ml-1">On-Duty Date</span>
-                     <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none" value={formData.pickupDate} onChange={e => setFormData({...formData, pickupDate: e.target.value})} />
+                     <span className="text-[7px] font-black text-slate-600 uppercase ml-1">On-Duty Date</span>
+                     <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs text-slate-900 outline-none" value={formData.pickupDate} onChange={e => setFormData({...formData, pickupDate: e.target.value})} />
                    </div>
                    <div className="space-y-1">
-                     <span className="text-[7px] font-black text-slate-300 uppercase ml-1">On-Duty Time</span>
-                     <input type="text" maxLength={5} placeholder="06:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-sm outline-none" value={formData.pickupTime} onChange={e => setFormData({...formData, pickupTime: formatTimeInput(e.target.value)})} />
+                     <span className="text-[7px] font-black text-slate-600 uppercase ml-1">On-Duty Time</span>
+                     <input type="text" maxLength={5} placeholder="06:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-sm text-slate-900 outline-none" value={formData.pickupTime} onChange={e => setFormData({...formData, pickupTime: formatTimeInput(e.target.value)})} />
                    </div>
                    <div className="space-y-1">
-                     <span className="text-[7px] font-black text-slate-300 uppercase ml-1">Release Date</span>
-                     <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none" value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} />
+                     <span className="text-[7px] font-black text-slate-600 uppercase ml-1">Release Date</span>
+                     <input type="date" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs text-slate-900 outline-none" value={formData.endDate} onChange={e => setFormData({...formData, endDate: e.target.value})} />
                    </div>
                    <div className="space-y-1">
-                     <span className="text-[7px] font-black text-slate-300 uppercase ml-1">Release Time</span>
-                     <input type="text" maxLength={5} placeholder="14:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-sm outline-none" value={formData.endTime} onChange={e => setFormData({...formData, endTime: formatTimeInput(e.target.value)})} />
+                     <span className="text-[7px] font-black text-slate-600 uppercase ml-1">Release Time</span>
+                     <input type="text" maxLength={5} placeholder="14:00" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-sm text-slate-900 outline-none" value={formData.endTime} onChange={e => setFormData({...formData, endTime: formatTimeInput(e.target.value)})} />
                    </div>
                 </div>
               </div>
 
-              {/* RESTORED LINKED TRAFFIC GRID */}
               <div className="space-y-4 pt-4 border-t border-slate-50">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Plane size={12} className="text-blue-500" /> Linked Traffic</label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto no-scrollbar p-1">
+                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 flex items-center gap-2"><Plane size={12} className="text-blue-500" /> Linked Traffic</label>
+                <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto no-scrollbar p-1">
                   {availableFlights.length === 0 ? (
-                    <p className="col-span-2 text-[8px] font-black text-slate-300 uppercase italic py-4 text-center">No matching flights in range</p>
+                    <p className="col-span-full text-[8px] font-black text-slate-300 uppercase italic py-4 text-center">No matching flights in range</p>
                   ) : (
                     availableFlights.map(f => {
                       const isSelected = (formData.flightIds || []).includes(f.id);
+                      const isEngaged = engagedFlightIds.has(f.id);
                       return (
                         <button
                           key={f.id}
                           type="button"
+                          disabled={isEngaged}
                           onClick={() => toggleFlightEngagement(f.id)}
-                          className={`p-3 rounded-xl border text-left transition-all ${
+                          className={`p-4 rounded-2xl border text-left transition-all space-y-2 relative ${
                             isSelected 
-                              ? 'bg-blue-600 border-blue-600 text-white shadow-lg' 
-                              : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'
+                              ? 'bg-blue-600 border-blue-600 text-white shadow-lg z-10' 
+                              : isEngaged
+                                ? 'bg-slate-50 border-slate-100 text-slate-300 opacity-40 cursor-not-allowed grayscale pointer-events-none'
+                                : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'
                           }`}
                         >
-                          <div className="text-[10px] font-black leading-none mb-1">{f.flightNumber}</div>
-                          <div className={`text-[7px] font-bold uppercase opacity-60 ${isSelected ? 'text-white' : 'text-slate-400'}`}>
-                            {f.sta || f.std || '--:--'}
+                          <div className="flex justify-between items-start">
+                            <div className="text-[11px] font-black leading-none flex items-center gap-2">
+                              {f.flightNumber}
+                              {isEngaged && <Lock size={10} className="text-slate-400" />}
+                            </div>
+                            <div className={`text-[8px] font-black flex items-center gap-1 ${isSelected ? 'text-white/80' : 'text-slate-400'}`}>
+                              <MapPin size={8} /> {f.from} <ArrowRight size={8} /> {f.to}
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center pt-1 border-t border-current border-opacity-10">
+                            <div className={`text-[10px] font-black italic ${isSelected ? 'text-white' : isEngaged ? 'text-slate-300' : 'text-slate-900'}`}>
+                              {f.sta || f.std || '--:--'}
+                            </div>
+                            <div className={`text-[7px] font-bold uppercase flex items-center gap-1 ${isSelected ? 'text-white/70' : 'text-slate-400'}`}>
+                              <Calendar size={8} /> {f.date}
+                            </div>
                           </div>
                         </button>
                       );
@@ -339,17 +386,17 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
 
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-50">
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Min Staff</label>
-                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center text-sm" value={formData.minStaff} onChange={e => setFormData({ ...formData, minStaff: parseInt(e.target.value) || 0 })} />
+                    <label className="text-[8px] font-black text-slate-600 uppercase mb-2 block">Min Staff</label>
+                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center text-sm text-slate-900" value={formData.minStaff} onChange={e => setFormData({ ...formData, minStaff: parseInt(e.target.value) || 0 })} />
                   </div>
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="text-[8px] font-black text-slate-400 uppercase mb-2 block">Max Staff</label>
-                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center text-sm" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} />
+                    <label className="text-[8px] font-black text-slate-600 uppercase mb-2 block">Max Staff</label>
+                    <input type="number" className="w-full bg-white border border-slate-200 p-2 rounded-xl font-black text-center text-sm text-slate-900" value={formData.maxStaff} onChange={e => setFormData({ ...formData, maxStaff: parseInt(e.target.value) || 0 })} />
                   </div>
               </div>
 
               <div className="space-y-4 pt-4 border-t border-slate-50">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><ShieldCheck size={12} className="text-indigo-500" /> Specialist Logic</label>
+                <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1 flex items-center gap-2"><ShieldCheck size={12} className="text-indigo-500" /> Specialist Logic</label>
                 <div className="space-y-2">
                    {AVAILABLE_SKILLS.map(skill => (
                      <div key={skill} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
@@ -378,10 +425,29 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
         </div>
 
         <div className="xl:col-span-3 space-y-8 md:space-y-10">
-          <div className="bg-white p-4 md:p-10 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100">
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          
+          {/* Duty Log Box - Explicitly Placed AFTER Leave Requests (which is removed from here now) */}
+          <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-8 opacity-5">
+                <Activity size={120} className="text-blue-500" />
+             </div>
+
+             <h4 className="text-xl font-black italic uppercase text-slate-900 tracking-tighter mb-8 px-2 flex items-center gap-4 relative z-10">
+               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm border border-blue-100">
+                 <Activity size={24} />
+               </div>
+               <div>
+                 <span className="block leading-none">Duty Log</span>
+                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Pre-weekly Program</span>
+               </div>
+             </h4>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
                 {shifts.length === 0 ? (
-                  <div className="col-span-full py-32 text-center text-slate-300 font-black uppercase italic text-xl">Registry Empty</div>
+                  <div className="col-span-full py-32 text-center flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-[3rem]">
+                    <AlertTriangle size={32} className="text-slate-200" />
+                    <span className="text-slate-300 font-black uppercase italic text-xl">Registry Empty</span>
+                  </div>
                 ) : (
                   [...shifts].sort((a,b) => (a.pickupDate || '').localeCompare(b.pickupDate || '') || (a.pickupTime || '').localeCompare(b.pickupTime || '')).map((s) => {
                     const health = getShiftHealth(s);
@@ -397,19 +463,18 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                           'border-slate-100 hover:border-blue-100'
                         }`}
                       >
-                         {/* Health Stripe */}
                          <div className={`absolute top-0 left-0 bottom-0 w-2 ${
                             health === 'critical' ? 'bg-rose-500' : 
                             health === 'warning' ? 'bg-amber-500' : 
                             'bg-emerald-500'
                          }`} />
 
-                         <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all flex gap-2">
+                         <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all flex gap-2 z-20">
                            <button onClick={() => startEdit(s)} className="p-3 bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-blue-600 shadow-sm"><Edit2 size={16}/></button>
                            <button onClick={() => { if(confirm('Purge slot?')) onDelete(s.id); }} className="p-3 bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-rose-500 shadow-sm"><Trash2 size={16}/></button>
                          </div>
 
-                         <div className="space-y-8 pl-2">
+                         <div className="space-y-8 pl-2 relative z-10">
                             <div className="flex justify-between items-start">
                                <div>
                                   <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">D{s.day + 1} | {s.pickupDate}</p>
@@ -421,19 +486,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                                </div>
                                <div className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase italic ${phase.bg} ${phase.color}`}>
                                  {phase.label}
-                               </div>
-                            </div>
-
-                            <div className="space-y-4">
-                               <div className="flex justify-between items-end">
-                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                     <Activity size={14} className={health === 'healthy' ? 'text-emerald-500' : health === 'warning' ? 'text-amber-500' : 'text-rose-500'} />
-                                     Staffing Goal
-                                  </p>
-                                  <span className="text-[10px] font-black italic text-slate-900">{s.minStaff} — {s.maxStaff} HC</span>
-                               </div>
-                               <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className={`h-full transition-all duration-1000 ${health === 'healthy' ? 'bg-emerald-500' : health === 'warning' ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${(s.minStaff / s.maxStaff) * 100}%` }}></div>
                                </div>
                             </div>
 
@@ -461,7 +513,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], start
                                     <Plane size={12} className="text-blue-500" /> {f!.flightNumber}
                                  </div>
                                ))}
-                               {engagedFlights.length === 0 && <span className="text-[9px] font-black text-slate-200 uppercase italic">Base Operations</span>}
                             </div>
                          </div>
                       </div>

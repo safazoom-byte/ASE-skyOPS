@@ -63,10 +63,11 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
       type,
       date: dateValue,
       day: getDayOffset(dateValue), 
-      flightNumber: newFlight.flightNumber!.toUpperCase(),
+      flightNumber: (newFlight.flightNumber || "").toUpperCase(),
       from: (newFlight.from || "").toUpperCase(),
       to: (newFlight.to || "").toUpperCase(),
       id: Math.random().toString(36).substr(2, 9),
+      priority: 'Standard'
     };
     onAdd(flightData);
     setNewFlight({ flightNumber: '', from: '', to: '', sta: '', std: '', date: dateValue, type: 'Turnaround' });
@@ -118,13 +119,6 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
             <Sparkles size={16} className="group-hover:animate-pulse" />
             <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest italic">AI Smart Sync</span>
           </button>
-          <button 
-            onClick={() => { if(confirm('Wipe all flight data?')) flights.forEach(f => onDelete(f.id)) }} 
-            className="flex-1 px-5 py-4 lg:px-8 lg:py-5 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/20 rounded-xl lg:rounded-2xl flex items-center justify-center gap-3 transition-all"
-          >
-            <Eraser size={18} />
-            <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest">Clear All</span>
-          </button>
         </div>
       </div>
 
@@ -135,20 +129,20 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
         </h4>
         <form onSubmit={handleAddNew} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-8">
           <div className="space-y-1 md:space-y-2">
-            <label className="block text-[7px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date</label>
+            <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Date</label>
             <input 
               type="date" 
-              className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-bold text-xs outline-none" 
+              className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-bold text-xs text-slate-900 outline-none" 
               value={newFlight.date} 
               onChange={e => setNewFlight({ ...newFlight, date: e.target.value })} 
               required 
             />
           </div>
           <div className="space-y-1 md:space-y-2">
-            <label className="block text-[7px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Flight No</label>
+            <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Flight No</label>
             <input 
               type="text" 
-              className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-xs uppercase outline-none" 
+              className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-xs text-slate-900 uppercase outline-none" 
               placeholder="SM 123" 
               value={newFlight.flightNumber} 
               onChange={e => setNewFlight({ ...newFlight, flightNumber: e.target.value })} 
@@ -156,17 +150,17 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
             />
           </div>
           <div className="space-y-1 md:space-y-2">
-            <label className="block text-[7px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-center">STA / STD</label>
+            <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center">STA / STD</label>
             <div className="flex gap-2">
-              <input type="text" maxLength={5} placeholder="STA" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs outline-none" value={newFlight.sta} onChange={e => setNewFlight({ ...newFlight, sta: formatTimeInput(e.target.value) })} />
-              <input type="text" maxLength={5} placeholder="STD" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs outline-none" value={newFlight.std} onChange={e => setNewFlight({ ...newFlight, std: formatTimeInput(e.target.value) })} />
+              <input type="text" maxLength={5} placeholder="STA" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none" value={newFlight.sta} onChange={e => setNewFlight({ ...newFlight, sta: formatTimeInput(e.target.value) })} />
+              <input type="text" maxLength={5} placeholder="STD" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none" value={newFlight.std} onChange={e => setNewFlight({ ...newFlight, std: formatTimeInput(e.target.value) })} />
             </div>
           </div>
           <div className="space-y-1 md:space-y-2">
-            <label className="block text-[7px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-center">Sector</label>
+            <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center">Sector</label>
             <div className="flex gap-2">
-              <input type="text" maxLength={4} placeholder="FRM" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs uppercase outline-none" value={newFlight.from} onChange={e => setNewFlight({ ...newFlight, from: e.target.value })} required />
-              <input type="text" maxLength={4} placeholder="TO" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs uppercase outline-none" value={newFlight.to} onChange={e => setNewFlight({ ...newFlight, to: e.target.value })} required />
+              <input type="text" maxLength={4} placeholder="FRM" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 uppercase outline-none" value={newFlight.from} onChange={e => setNewFlight({ ...newFlight, from: e.target.value })} required />
+              <input type="text" maxLength={4} placeholder="TO" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 uppercase outline-none" value={newFlight.to} onChange={e => setNewFlight({ ...newFlight, to: e.target.value })} required />
             </div>
           </div>
           <div className="flex items-end">
@@ -264,22 +258,12 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
              <form onSubmit={handleInlineSave} className="space-y-4 md:space-y-6">
                 <div className="space-y-3 md:space-y-4">
                   <div>
-                    <label className="block text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Date</label>
-                    <input type="date" className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-bold text-xs outline-none" value={inlineFormData.date} onChange={e => setInlineFormData({...inlineFormData, date: e.target.value})} />
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">Date</label>
+                    <input type="date" className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900 outline-none" value={inlineFormData.date} onChange={e => setInlineFormData({...inlineFormData, date: e.target.value})} />
                   </div>
                   <div>
-                    <label className="block text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Flight No</label>
-                    <input type="text" className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs outline-none" value={inlineFormData.flightNumber} onChange={e => setInlineFormData({...inlineFormData, flightNumber: e.target.value?.toUpperCase()})} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 ml-1 text-center">STA</label>
-                      <input type="text" maxLength={5} className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black text-center text-xs outline-none" placeholder="HH:mm" value={inlineFormData.sta} onChange={e => setInlineFormData({...inlineFormData, sta: formatTimeInput(e.target.value)})} />
-                    </div>
-                    <div>
-                      <label className="block text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-2 ml-1 text-center">STD</label>
-                      <input type="text" maxLength={5} className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black text-center text-xs outline-none" placeholder="HH:mm" value={inlineFormData.std} onChange={e => setInlineFormData({...inlineFormData, std: formatTimeInput(e.target.value)})} />
-                    </div>
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">Flight No</label>
+                    <input type="text" className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none" value={inlineFormData.flightNumber} onChange={e => setInlineFormData({...inlineFormData, flightNumber: e.target.value?.toUpperCase()})} />
                   </div>
                 </div>
                 <div className="flex gap-4 pt-4">
