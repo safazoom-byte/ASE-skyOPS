@@ -1,19 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty } from '../types';
 
-const getEnv = (key: string): string => {
-  // Vite uses import.meta.env.VITE_... for client-side variables
-  const viteKey = `VITE_${key}`;
-  const val = (import.meta as any).env?.[viteKey] || 
-              (import.meta as any).env?.[key] ||
-              (window as any).process?.env?.[key] || 
-              (window as any)[key] || 
-              "";
-  return typeof val === 'string' ? val : "";
-};
-
-const SUPABASE_URL = getEnv('SUPABASE_URL');
-const SUPABASE_ANON_KEY = getEnv('SUPABASE_ANON_KEY');
+/**
+ * NOTE FOR VERCEL DEPLOYMENT:
+ * Vite's 'define' plugin requires literal strings (e.g., process.env.KEY) 
+ * for static replacement at build time. Dynamic lookups like process.env[key] 
+ * will not work on client-side builds.
+ */
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 
 const isConfigured = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 5;
 
