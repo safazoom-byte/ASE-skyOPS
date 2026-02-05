@@ -1,67 +1,33 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill } from "../types";
+import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
 export interface ExtractionMedia {
   data: string;
   mimeType: string;
 }
 
-export interface ShortageWarning {
-  staffName: string;
-  flightNumber: string;
-  actualRest: number;
-  targetRest: number;
-  reason: string;
-}
-
-export interface ResourceRecommendation {
-  idealStaffCount: number;
-  currentStaffCount: number;
-  skillGaps: string[];
-  hireAdvice: string;
-  healthScore: number;
-}
-
 export interface BuildResult {
   programs: DailyProgram[];
-  shortageReport: ShortageWarning[];
-  recommendations?: ResourceRecommendation;
   validationLog?: string[];
   isCompliant: boolean;
-  hasBlockers: boolean; // Structural failures
+  stationHealth: number; 
+  alerts?: { type: 'danger' | 'warning', message: string }[];
 }
-
-export interface ConstraintViolation {
-  type: '5/2_VIOLATION' | 'MIN_STAFF_SHORTAGE' | 'ZERO_LEAKAGE_FAILURE' | 'SKILL_GAP' | 'DATA_MALFORMED' | 'UNASSIGNED_ROLE';
-  message: string;
-  severity: 'BLOCKER' | 'WARNING';
-}
-
-export const sanitizeRole = (role: string): Skill => {
-  const r = role.toLowerCase().trim();
-  if (r.includes('found') || r.includes('lost') || r === 'lf' || r === 'l&f' || r === 'lost and found' || r === 'lost&found') return 'Lost and Found';
-  if (r.includes('leader') || r === 'sl' || r === 'shiftleader') return 'Shift Leader';
-  if (r.includes('ops') || r.includes('operations') || r === 'op' || r === 'operation') return 'Operations';
-  if (r.includes('ramp') || r === 'rmp') return 'Ramp';
-  if (r.includes('load') || r === 'lc' || r === 'loadcontrol') return 'Load Control';
-  return 'Duty'; 
-};
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   let cleanText = text.replace(/```json\n?|```/g, "").trim();
-  
   try {
     return JSON.parse(cleanText);
   } catch (e) {
+    // Basic recovery for JSON fragmentation if AI output is truncated
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
     );
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
-    
-    const stack: string[] = [];
+    let stack: string[] = [];
     let lastValidIdx = 0;
     for (let i = 0; i < candidate.length; i++) {
       const char = candidate[i];
@@ -76,182 +42,171 @@ const safeParseJson = (text: string | undefined): any => {
         }
       }
     }
-    
     if (lastValidIdx > 0) {
-      try { return JSON.parse(candidate.slice(0, lastValidIdx)); } catch (e2) {}
+      try {
+        return JSON.parse(candidate.slice(0, lastValidIdx));
+      } catch (e2) {
+        console.error("JSON fragmentation recovery failed", e2);
+      }
     }
     return null;
   }
 };
 
-const auditRoster = (result: any, data: ProgramData, numDays: number): ConstraintViolation[] => {
-  const violations: ConstraintViolation[] = [];
-  const programs = result?.programs;
-  
-  if (!programs || !Array.isArray(programs) || programs.length === 0) {
-    return [{ type: 'DATA_MALFORMED', message: 'CRITICAL: Engine failed to construct the assignment grid.', severity: 'BLOCKER' }];
-  }
-
-  const safeStaff = data.staff || [];
-  const staffWorkCounts = new Map<string, number>();
-  safeStaff.forEach(s => staffWorkCounts.set(s.id, 0));
-
-  programs.forEach(prog => {
-    const assignments = prog.assignments || [];
-    const gaps = assignments.filter(a => !a.staffId || a.staffId === 'GAP');
-    if (gaps.length > 0) {
-      violations.push({
-        type: 'UNASSIGNED_ROLE',
-        message: `Day ${prog.day + 1}: ${gaps.length} unassigned positions (marked as GAP).`,
-        severity: 'WARNING'
-      });
-    }
-
-    assignments.forEach(a => {
-      if (a.staffId && a.staffId !== 'GAP' && staffWorkCounts.has(a.staffId)) {
-        staffWorkCounts.set(a.staffId, (staffWorkCounts.get(a.staffId) || 0) + 1);
+const ROSTER_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    programs: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          day: { type: Type.INTEGER },
+          dateString: { type: Type.STRING },
+          assignments: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                staffId: { type: Type.STRING, description: "Must use actual staff ID or 'GAP' if no qualified personnel available." },
+                flightId: { type: Type.STRING },
+                role: { type: Type.STRING },
+                shiftId: { type: Type.STRING }
+              },
+              required: ["id", "staffId", "role", "shiftId"]
+            }
+          }
+        },
+        required: ["day", "dateString", "assignments"]
       }
-    });
-
-    if (data.shifts) {
-      data.shifts.filter(s => s.pickupDate === prog.dateString).forEach(sh => {
-        const staffOnThisShift = assignments.filter(a => a.shiftId === sh.id && a.staffId && a.staffId !== 'GAP');
-        if (staffOnThisShift.length < sh.minStaff) {
-          violations.push({ 
-            type: 'MIN_STAFF_SHORTAGE', 
-            message: `Day ${prog.day + 1}: Shift ${sh.pickupTime} understaffed (${staffOnThisShift.length}/${sh.minStaff})`,
-            severity: 'WARNING'
-          });
+    },
+    stationHealth: { type: Type.NUMBER, description: "Operational readiness percentage 0-100" },
+    alerts: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          type: { type: Type.STRING, enum: ["danger", "warning"] },
+          message: { type: Type.STRING }
         }
-      });
+      }
     }
-  });
-
-  staffWorkCounts.forEach((count, id) => {
-    const s = safeStaff.find(st => st.id === id);
-    const max = s?.maxShiftsPerWeek || 5;
-    if (count > max) {
-      violations.push({ 
-        type: '5/2_VIOLATION', 
-        message: `Agent ${s?.initials || id}: Overworked (${count}/${max} days). Coverage prioritized.`,
-        severity: 'WARNING'
-      });
-    }
-  });
-
-  return violations;
+  },
+  required: ["programs", "stationHealth"]
 };
 
-export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string, customRules?: string }): Promise<BuildResult> => {
+export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Calculate lock times for incoming duties based on specific dates
+  const rosterStart = new Date(config.startDate);
+  rosterStart.setHours(0,0,0,0);
+
+  const fatigueLocks = (data.incomingDuties || []).map(duty => {
+     const [h, m] = duty.shiftEndTime.split(':').map(Number);
+     const dutyEndDate = new Date(duty.date);
+     dutyEndDate.setHours(h, m, 0, 0);
+
+     // Add Minimum Rest
+     const safeToWorkDate = new Date(dutyEndDate);
+     safeToWorkDate.setHours(safeToWorkDate.getHours() + config.minRestHours);
+
+     const diffMs = safeToWorkDate.getTime() - rosterStart.getTime();
+     const diffDays = diffMs / (1000 * 60 * 60 * 24);
+     
+     if (diffDays < 0) return null; // Rest ended before program start
+
+     const lockedDayIndex = Math.floor(diffDays);
+     const lockedTimeH = safeToWorkDate.getHours();
+     const lockedTimeM = safeToWorkDate.getMinutes();
+     const timeStr = `${String(lockedTimeH).padStart(2, '0')}:${String(lockedTimeM).padStart(2, '0')}`;
+
+     return {
+       staffId: duty.staffId,
+       lockedUntilDay: lockedDayIndex,
+       lockedUntilTime: timeStr,
+       note: `Resting until Day ${lockedDayIndex + 1} at ${timeStr}`
+     };
+  }).filter(Boolean);
+
   const prompt = `
-    COMMAND: Generate Operations Roster.
-    STATION: Aviation Ground Handling
+    AVIATION GROUND HANDLING INTELLIGENCE SYSTEM
+    TASK: Generate an Optimized Weekly Staff Program.
     
-    GOAL: 100% COVERAGE FOR ALL SLOTS AND LINKED FLIGHTS.
+    WINDOW: Starting ${config.startDate} for ${config.numDays} days.
+    MANDATORY REST: ${config.minRestHours} hours between duty cycles.
     
-    DATASETS:
-    - Staff: ${JSON.stringify(data.staff.map(s => ({
-        id: s.id, 
-        initials: s.initials, 
-        skills: [s.isShiftLeader?'Shift Leader':'', s.isLoadControl?'Load Control':'', s.isRamp?'Ramp':'', s.isOps?'Operations':'', s.isLostFound?'Lost and Found':''].filter(Boolean),
-        max: s.maxShiftsPerWeek
-      })))}
-    - Flights: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, sta: f.sta, std: f.std, date: f.date })))}
-    - Shifts: ${JSON.stringify(data.shifts)}
+    HIERARCHY OF OPERATIONS:
+    1. SAFETY FIRST: No staff can work two overlapping shifts. 12h rest is legally required.
+    2. COMPANY COVER PRIORITY: Flights marked as 'Company Cover' or high priority MUST have experienced staff (Power Rate > 85) assigned.
+    3. COVERAGE ASSURANCE: Every flight linked to a shift MUST have staff assigned. Prioritize filling slots over ideal patterns.
+    4. LEAVE REQUESTS: DO NOT assign staff on days where they have a Leave Request in the provided LEAVE_LOG.
+    5. FATIGUE MANAGEMENT:
+       - Adhere strictly to FATIGUE LOCKS. Staff cannot work before their lock time.
+       - FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
+    6. SPECIALIST MATCHING: 
+       - 'Ramp' role requires isRamp: true.
+       - 'Shift Leader' role requires isShiftLeader: true.
+       - 'Load Control' requires isLoadControl: true.
+    7. WORK PATTERNS:
+       - 'Local' Staff: Prefer 5 days ON, 2 days OFF.
+       - 'Roster' Staff: Available only within workFromDate and workToDate.
+    8. GAP REPORTING: If absolutely no qualified staff fits the window, assign 'GAP'.
     
-    INSTRUCTIONS:
-    1. For each Shift in the DATA, you must create assignments to fulfill the 'minStaff' requirement.
-    2. If a Shift has 'flightIds', prioritize assigning staff roles (Shift Leader, Load Control, etc.) specific to those flights.
-    3. Use "GAP" if no staff member is available. NEVER leave a shift or linked flight uncovered.
-    4. Adhere to ${config.minRestHours}h minimum rest between duties.
-    5. USER CONTEXT: ${constraintsLog}
+    INPUT DATA:
+    STAFF REGISTRY: ${JSON.stringify(data.staff.map(s => ({ 
+      id: s.id, 
+      name: s.name, 
+      type: s.type,
+      workPattern: s.workPattern,
+      availableFrom: s.workFromDate,
+      availableTo: s.workToDate,
+      skills: { SL: s.isShiftLeader, LC: s.isLoadControl, RM: s.isRamp, OP: s.isOps, LF: s.isLostFound }, 
+      power: s.powerRate 
+    })))}
     
-    OUTPUT FORMAT: JSON ONLY
-    {
-      "programs": [
-        {
-          "day": number,
-          "dateString": "YYYY-MM-DD",
-          "assignments": [
-             { "id": "uuid", "staffId": "staff_id_or_GAP", "flightId": "linked_flight_id", "role": "Skill", "shiftId": "shift_id" }
-          ],
-          "offDuty": []
-        }
-      ],
-      "recommendations": { "healthScore": number, "hireAdvice": "string" }
-    }
+    LEAVE_LOG: ${JSON.stringify(data.leaveRequests)}
+    
+    DUTY SLOTS (SHIFTS): ${JSON.stringify(data.shifts)}
+    FLIGHT LOG: ${JSON.stringify(data.flights)}
+    
+    RETURN: JSON matching schema. Calculate stationHealth based on coverage percentage.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        systemInstruction: "You are SkyOPS AI, a precision aviation rostering engine. You prioritize flight coverage and operational safety above all. You always return valid JSON."
+        responseSchema: ROSTER_SCHEMA,
+        thinkingConfig: { thinkingBudget: 32768 }
       }
     });
 
     const parsed = safeParseJson(response.text);
-    const violations = auditRoster(parsed, data, config.numDays);
+    if (!parsed || !parsed.programs) {
+      throw new Error("Operational logic failure. AI engine could not resolve constraints.");
+    }
 
     return {
-      programs: parsed?.programs || [],
-      shortageReport: [],
-      recommendations: parsed?.recommendations,
-      validationLog: violations.map(v => v.message),
-      isCompliant: violations.length === 0,
-      hasBlockers: violations.some(v => v.severity === 'BLOCKER')
+      programs: parsed.programs,
+      stationHealth: parsed.stationHealth || 0,
+      alerts: parsed.alerts || [],
+      isCompliant: true,
+      validationLog: []
     };
-  } catch (err) {
-    console.error("AI Generation Error:", err);
-    throw new Error("Logic Engine Fault: Check data density or registry alignment.");
+  } catch (err: any) {
+    console.error("Operational Fault:", err);
+    throw new Error(err.message || "Engine failure during roster calculation.");
   }
-};
-
-export const refineAIProgram = async (previous: BuildResult, data: ProgramData, pass: number, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const prompt = `
-    REFINEMENT PASS ${pass}: 
-    Current Violations: ${previous.validationLog?.join('; ') || 'None'}.
-    
-    TASK: 
-    1. Resolve "GAP" assignments by checking if any staff member is free on that day without violating the ${config.minRestHours}h rest rule.
-    2. Ensure every assignment has a valid 'shiftId' and, if applicable, a 'flightId' from the provided data.
-    
-    INPUT ROSTER: ${JSON.stringify(previous.programs)}
-    
-    Return the FULL UPDATED JSON object with the same structure.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: { 
-      responseMimeType: 'application/json',
-      systemInstruction: "You are SkyOPS Optimizer. You fix scheduling gaps and rest hour violations."
-    }
-  });
-
-  const parsed = safeParseJson(response.text);
-  const violations = auditRoster(parsed, data, config.numDays);
-
-  return {
-    programs: parsed?.programs || [],
-    shortageReport: [],
-    recommendations: parsed?.recommendations,
-    validationLog: violations.map(v => v.message),
-    isCompliant: violations.length === 0,
-    hasBlockers: violations.some(v => v.severity === 'BLOCKER')
-  };
 };
 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Extract station handling data (${options.targetType}) into JSON. Use ${options.startDate} as base date if needed.` }];
+  const parts: any[] = [{ text: `Extract station data (${options.targetType}) into JSON. Keys: flightNumber, from, to, sta, std, date, name, initials, pickupTime, endTime.` }];
+  
   if (options.textData) parts.push({ text: options.textData });
   if (options.media) {
     options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
@@ -260,23 +215,9 @@ export const extractDataFromContent = async (options: { textData?: string, media
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { 
-      responseMimeType: 'application/json',
-      systemInstruction: "Extract flight numbers, times, staff names, and initials. Return standard JSON."
-    }
-  });
-
-  return safeParseJson(response.text);
-};
-
-export const identifyMapping = async (rows: any[][], target: string): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = ` Map columns: ${target}. Rows: ${JSON.stringify(rows.slice(0, 5))}. Return JSON columnMap.`;
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
     config: { responseMimeType: 'application/json' }
   });
+  
   return safeParseJson(response.text);
 };
 
@@ -284,18 +225,20 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [
     { text: `INSTRUCTION: ${instruction}` },
-    { text: `CURRENT DATA: ${JSON.stringify(data)}` }
+    { text: `CONTEXT: ${JSON.stringify(data.programs)}` }
   ];
   if (media.length > 0) {
     media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
+  
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: { parts },
     config: { 
-      responseMimeType: "application/json",
-      systemInstruction: "Expert station scheduler. Modify roster accurately. Ensure compliance. Return JSON programs and explanation."
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 16000 }
     }
   });
+  
   return safeParseJson(response.text);
 };
