@@ -14,33 +14,16 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
         }
       ]
     },
     {
-      "source": "/index.html",
-      "headers": [
-        {
-          "key": "Clear-Site-Data",
-          "value": "\"cache\", \"executionContexts\""
-        },
-        {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate, max-age=0"
-        }
-      ]
-    },
-    {
-      "source": "/sw.js",
+      "source": "/assets/(.*)",
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate, proxy-revalidate, max-age=0"
-        },
-        {
-          "key": "Service-Worker-Allowed",
-          "value": "/"
+          "value": "public, max-age=31536000, immutable"
         }
       ]
     }
