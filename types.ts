@@ -3,7 +3,7 @@ export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' 
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
-export type LeaveType = 'DAY OFF' | 'ROSTER LEAVE' | 'ANNUAL LEAVE' | 'SICK LEAVE' | 'LIEU LEAVE' | 'NIL';
+export type LeaveType = 'Day off' | 'Annual leave' | 'Lieu leave' | 'Sick leave' | 'Roster leave' | 'NIL';
 
 export interface Flight {
   id: string;
