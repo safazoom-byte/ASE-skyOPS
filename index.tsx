@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -26,7 +25,8 @@ import {
   CheckCircle2,
   ChevronDown,
   Wifi,
-  WifiOff
+  WifiOff,
+  CloudOff
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
@@ -268,8 +268,18 @@ const App: React.FC = () => {
            <div>
              <h1 className="text-base md:text-lg font-black italic text-slate-900 uppercase leading-none">SkyOPS <span className="text-blue-600 font-light">Station</span></h1>
              <div className="flex items-center gap-2 mt-1.5">
-               <div className={`w-2 h-2 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : cloudStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></div>
-               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{cloudStatus === 'connected' ? 'Cloud Link Active' : cloudStatus === 'error' ? 'Link Fault' : 'Offline Mode'}</span>
+               <div className={`w-2 h-2 rounded-full ${
+                  cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 
+                  cloudStatus === 'error' ? 'bg-rose-500' : 
+                  cloudStatus === 'unconfigured' ? 'bg-slate-300' :
+                  'bg-amber-500'
+                }`}></div>
+               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">
+                 {cloudStatus === 'connected' ? 'Cloud Link Active' : 
+                  cloudStatus === 'error' ? 'Link Fault' : 
+                  cloudStatus === 'unconfigured' ? 'Cloud Disabled' :
+                  'Offline Mode'}
+               </span>
              </div>
            </div>
         </div>
@@ -346,6 +356,7 @@ const App: React.FC = () => {
                                               {s.initials} — {s.name}
                                           </button>
                                       ))}
+                                      {filteredStaff.length === 0 && <p className="text-[10px] text-slate-400 p-3 italic">No matching personnel</p>}
                                   </div>
                               )}
                           </div>

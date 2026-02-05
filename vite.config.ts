@@ -6,6 +6,7 @@ import process from 'node:process';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
+  // Robust collection of variables from Vercel/Local env
   const apiKey = env.API_KEY || env.VITE_API_KEY || '';
   const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL || '';
   const supabaseAnonKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
@@ -27,6 +28,7 @@ export default defineConfig(({ mode }) => {
         output: {
           entryFileNames: `assets/[name].[hash]-${Date.now()}.js`,
           chunkFileNames: `assets/[name].[hash]-${Date.now()}.js`,
+          // Fix: removed typo 'Mont' and ensured proper placeholder string for assets
           assetFileNames: `assets/[name].[hash]-${Date.now()}.[ext]`,
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
