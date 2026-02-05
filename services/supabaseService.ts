@@ -1,15 +1,8 @@
-
 import { createClient } from '@supabase/supabase-js';
-import { Flight, Staff, ShiftConfig, DailyProgram } from '../types';
+import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty } from '../types';
 
-/**
- * Robust environment variable retrieval for Vite/Vercel environments.
- */
 const getEnv = (key: string): string => {
   try {
-    // 1. Check process.env (Vite 'define' or Node env)
-    // 2. Check import.meta.env (Standard Vite)
-    // 3. Check window global
     const val = (window as any).process?.env?.[key] || 
                 (import.meta as any).env?.[`VITE_${key}`] || 
                 (window as any)[key] || 
@@ -63,16 +56,14 @@ export const db = {
       const session = await auth.getSession();
       if (!session) return null;
 
-      // Parallel fetching for high performance
-      const [fRes, sRes, shRes, pRes] = await Promise.all([
+      const [fRes, sRes, shRes, pRes, lRes, iRes] = await Promise.all([
         supabase.from('flights').select('*'),
         supabase.from('staff').select('*'),
         supabase.from('shifts').select('*'),
-        supabase.from('programs').select('*')
+        supabase.from('programs').select('*'),
+        supabase.from('leave_requests').select('*'),
+        supabase.from('incoming_duties').select('*')
       ]);
-
-      if (fRes.error) console.error("Flights fetch error:", fRes.error);
-      if (sRes.error) console.error("Staff fetch error:", sRes.error);
 
       return {
         flights: (fRes.data || []).map(f => ({
@@ -120,10 +111,23 @@ export const db = {
           dateString: p.date_string,
           assignments: p.assignments || [],
           offDuty: p.off_duty || []
+        })),
+        leaveRequests: (lRes.data || []).map(l => ({
+          id: l.id,
+          staffId: l.staff_id,
+          startDate: l.start_date,
+          endDate: l.end_date,
+          type: l.leave_type
+        })),
+        incomingDuties: (iRes.data || []).map(i => ({
+          id: i.id,
+          staffId: i.staff_id,
+          date: i.date,
+          shiftEndTime: i.shift_end_time
         }))
       };
     } catch (e) { 
-      console.error("Critical database fetch failure:", e);
+      console.error("Database fetch failure:", e);
       return null; 
     }
   },
@@ -132,7 +136,7 @@ export const db = {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    const { error } = await supabase.from('flights').upsert({
+    await supabase.from('flights').upsert({
       id: f.id, 
       user_id: session.user.id, 
       flight_number: f.flightNumber, 
@@ -144,14 +148,13 @@ export const db = {
       flight_type: f.type, 
       day: f.day
     });
-    if (error) console.error("Flight upsert error:", error);
   },
 
   async upsertStaff(s: Staff) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    const { error } = await supabase.from('staff').upsert({
+    await supabase.from('staff').upsert({
       id: s.id, 
       user_id: session.user.id, 
       name: s.name, 
@@ -168,15 +171,13 @@ export const db = {
       work_from_date: s.workFromDate || null, 
       work_to_date: s.workToDate || null
     });
-    if (error) console.error("Staff upsert error:", error);
   },
 
   async upsertShift(s: ShiftConfig) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    // Fix: Access correct camelCase properties from ShiftConfig interface for snake_case DB columns
-    const { error } = await supabase.from('shifts').upsert({
+    await supabase.from('shifts').upsert({
       id: s.id, 
       user_id: session.user.id, 
       day: s.day, 
@@ -189,32 +190,54 @@ export const db = {
       role_counts: s.roleCounts || {}, 
       flight_ids: s.flightIds || []
     });
-    if (error) console.error("Shift upsert error:", error);
+  },
+
+  async upsertLeave(l: LeaveRequest) {
+    if (!supabase) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('leave_requests').upsert({
+      id: l.id,
+      user_id: session.user.id,
+      staff_id: l.staffId,
+      start_date: l.startDate,
+      end_date: l.endDate,
+      leave_type: l.type
+    });
+  },
+
+  async upsertIncomingDuty(d: IncomingDuty) {
+    if (!supabase) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('incoming_duties').upsert({
+      id: d.id,
+      user_id: session.user.id,
+      staff_id: d.staffId,
+      date: d.date,
+      shift_end_time: d.shiftEndTime
+    });
   },
 
   async savePrograms(programs: DailyProgram[]) {
     if (!supabase) return;
     const session = await auth.getSession();
     if (!session) return;
-    try {
-      // Clean old entries first to avoid duplicates
-      await supabase.from('programs').delete().eq('user_id', session.user.id);
-      const { error } = await supabase.from('programs').insert(
-        programs.map(p => ({
-          user_id: session.user.id, 
-          day: p.day, 
-          date_string: p.dateString || '',
-          assignments: p.assignments || [], 
-          off_duty: p.offDuty || []
-        }))
-      );
-      if (error) console.error("Programs save error:", error);
-    } catch (e) {
-      console.error("Failed to save programs:", e);
-    }
+    await supabase.from('programs').delete().eq('user_id', session.user.id);
+    await supabase.from('programs').insert(
+      programs.map(p => ({
+        user_id: session.user.id, 
+        day: p.day, 
+        date_string: p.dateString || '',
+        assignments: p.assignments || [], 
+        off_duty: p.offDuty || []
+      }))
+    );
   },
 
   async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },
   async deleteStaff(id: string) { if (supabase) await supabase.from('staff').delete().eq('id', id); },
-  async deleteShift(id: string) { if (supabase) await supabase.from('shifts').delete().eq('id', id); }
+  async deleteShift(id: string) { if (supabase) await supabase.from('shifts').delete().eq('id', id); },
+  async deleteLeave(id: string) { if (supabase) await supabase.from('leave_requests').delete().eq('id', id); },
+  async deleteIncomingDuty(id: string) { if (supabase) await supabase.from('incoming_duties').delete().eq('id', id); }
 };

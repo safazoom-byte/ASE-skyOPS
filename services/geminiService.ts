@@ -70,7 +70,7 @@ const ROSTER_SCHEMA = {
                 id: { type: Type.STRING },
                 staffId: { type: Type.STRING, description: "Must use actual staff ID or 'GAP' if no qualified personnel available." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Must use exact abbreviations: (SL), (Duty), (RMP), (LF), (LC), (OPS)" },
+                role: { type: Type.STRING, description: "Exact abbreviations: (SL), (Duty), (RMP), (LF), (LC), (OPS)" },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -97,7 +97,6 @@ const ROSTER_SCHEMA = {
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   const rosterStart = new Date(config.startDate);
   rosterStart.setHours(0,0,0,0);
 
@@ -105,63 +104,40 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
      const [h, m] = duty.shiftEndTime.split(':').map(Number);
      const dutyEndDate = new Date(duty.date);
      dutyEndDate.setHours(h, m, 0, 0);
-
      const safeToWorkDate = new Date(dutyEndDate);
      safeToWorkDate.setHours(safeToWorkDate.getHours() + config.minRestHours);
-
      const diffMs = safeToWorkDate.getTime() - rosterStart.getTime();
      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-     
      if (diffDays < 0) return null;
-
      const lockedDayIndex = Math.floor(diffDays);
-     const lockedTimeH = safeToWorkDate.getHours();
-     const lockedTimeM = safeToWorkDate.getMinutes();
-     const timeStr = `${String(lockedTimeH).padStart(2, '0')}:${String(lockedTimeM).padStart(2, '0')}`;
-
-     return {
-       staffId: duty.staffId,
-       lockedUntilDay: lockedDayIndex,
-       lockedUntilTime: timeStr,
-       note: `Resting until Day ${lockedDayIndex + 1} at ${timeStr}`
-     };
+     const timeStr = `${String(safeToWorkDate.getHours()).padStart(2, '0')}:${String(safeToWorkDate.getMinutes()).padStart(2, '0')}`;
+     return { staffId: duty.staffId, lockedUntilDay: lockedDayIndex, lockedUntilTime: timeStr };
   }).filter(Boolean);
 
   const prompt = `
     AVIATION GROUND HANDLING INTELLIGENCE SYSTEM - SkyOPS Station Program
     TASK: Generate an Optimized Weekly Staff Program.
-    
     WINDOW: Starting ${config.startDate} for ${config.numDays} days.
-    MANDATORY REST: ${config.minRestHours} hours.
     
-    ROLE ABBREVIATIONS (CRITICAL):
-    - Shift Leader -> use "(SL)" or "(Duty)" (if Power Rate > 95)
-    - Ramp -> use "(RMP)"
-    - Load Control -> use "(LC)"
-    - Lost and Found -> use "(LF)"
-    - Operations -> use "(OPS)"
+    CONSTRAINTS:
+    - 12h rest minimum.
+    - Check LEAVE_LOG for dates: "Day off", "Annual leave", "Lieu leave", "Sick leave".
+    - Check STAFF contract dates: If Day is outside workFromDate/workToDate, they are UNAVAILABLE (Roster leave).
     
-    RULES:
-    1. SAFETY: No overlapping shifts. Enforce 12h rest minimum.
-    2. ASSIGNMENT: Assign staff based on initials format (e.g. AH-HMB).
-    3. LEAVE: Check LEAVE_LOG and FATIGUE_LOCKS.
-    4. COVERAGE: Fill all slots in the SHIFTS registry.
+    ROLE CODES:
+    - Shift Leader -> "(SL)" or "(Duty)"
+    - Ramp -> "(RMP)"
+    - Load Control -> "(LC)"
+    - Lost and Found -> "(LF)"
+    - Operations -> "(OPS)"
     
     FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
-    
-    STAFF REGISTRY: ${JSON.stringify(data.staff.map(s => ({ 
-      id: s.id, 
-      name: s.name, 
-      initials: s.initials,
-      skills: { SL: s.isShiftLeader, LC: s.isLoadControl, RM: s.isRamp, OP: s.isOps, LF: s.isLostFound }, 
-      power: s.powerRate 
-    })))}
-    
-    LEAVE_LOG: ${JSON.stringify(data.leaveRequests)}
+    STAFF: ${JSON.stringify(data.staff)}
+    LEAVE: ${JSON.stringify(data.leaveRequests)}
     SHIFTS: ${JSON.stringify(data.shifts)}
     FLIGHTS: ${JSON.stringify(data.flights)}
     
-    RETURN: JSON following schema. Ensure roles are formatted EXACTLY as (SL), (Duty), (RMP), (LF), (LC), (OPS).
+    RETURN: JSON following schema. Ensure roles are formatted EXACTLY as instructed.
   `;
 
   try {
@@ -174,61 +150,39 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         thinkingConfig: { thinkingBudget: 32768 }
       }
     });
-
     const parsed = safeParseJson(response.text);
-    if (!parsed || !parsed.programs) {
-      throw new Error("Operational logic failure. Engine could not resolve constraints.");
-    }
-
     return {
-      programs: parsed.programs,
+      programs: parsed.programs || [],
       stationHealth: parsed.stationHealth || 0,
       alerts: parsed.alerts || [],
-      isCompliant: true,
-      validationLog: []
+      isCompliant: true
     };
   } catch (err: any) {
-    console.error("Operational Fault:", err);
-    throw new Error(err.message || "Engine failure during roster calculation.");
+    throw new Error(err.message || "Engine failure during program calculation.");
   }
 };
 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Extract station data (${options.targetType}) into JSON. Keys: flightNumber, from, to, sta, std, date, name, initials, pickupTime, endTime.` }];
-  
+  const parts: any[] = [{ text: `Extract station data (${options.targetType}) into JSON.` }];
   if (options.textData) parts.push({ text: options.textData });
-  if (options.media) {
-    options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  }
-
+  if (options.media) options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { responseMimeType: 'application/json' }
   });
-  
   return safeParseJson(response.text);
 };
 
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [
-    { text: `INSTRUCTION: ${instruction}` },
-    { text: `CONTEXT: ${JSON.stringify(data.programs)}` }
-  ];
-  if (media.length > 0) {
-    media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  }
-  
+  const parts: any[] = [{ text: `INSTRUCTION: ${instruction}` }, { text: `CONTEXT: ${JSON.stringify(data.programs)}` }];
+  if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: { parts },
-    config: { 
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 16000 }
-    }
+    config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 16000 } }
   });
-  
   return safeParseJson(response.text);
 };
