@@ -26,7 +26,9 @@ import {
   ChevronDown,
   Wifi,
   WifiOff,
-  CloudOff
+  CloudOff,
+  Calendar as CalendarIcon,
+  ChevronRight
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
@@ -90,7 +92,6 @@ const App: React.FC = () => {
   const [incomingSelectedStaffIds, setIncomingSelectedStaffIds] = useState<string[]>([]);
   const [incomingHour, setIncomingHour] = useState('06');
   const [incomingMin, setIncomingMin] = useState('00');
-  const [isClockOpen, setIsClockOpen] = useState(false);
   const [incomingDate, setIncomingDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [incomingSearchTerm, setIncomingSearchTerm] = useState('');
   const [incomingSearchFocus, setIncomingSearchFocus] = useState(false);
@@ -116,9 +117,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const start = new Date(startDate);
-    const end = new Date(start);
-    end.setDate(start.getDate() + programDuration);
-    setEndDate(end.toISOString().split('T')[0]);
+    if (!isNaN(start.getTime())) {
+      const end = new Date(start);
+      end.setDate(start.getDate() + programDuration);
+      setEndDate(end.toISOString().split('T')[0]);
+    }
   }, [startDate, programDuration]);
 
   useEffect(() => {
@@ -184,7 +187,11 @@ const App: React.FC = () => {
   const confirmGenerateProgram = async () => {
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
     const activeFlights = flights.filter(f => f.date >= startDate && f.date <= endDate);
-    if (activeShifts.length === 0) { setError(`Registry Empty: No Shifts available.`); setShowConfirmDialog(false); return; }
+    if (activeShifts.length === 0) { 
+      setError(`No valid duty shifts registered between ${startDate} and ${endDate}. Please add shifts first.`); 
+      setShowConfirmDialog(false); 
+      return; 
+    }
     setShowConfirmDialog(false); setIsGenerating(true); setError(null);
     try {
       const result = await generateAIProgram({ flights: activeFlights, staff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, "", { numDays: programDuration, minRestHours, startDate });
@@ -193,8 +200,11 @@ const App: React.FC = () => {
       setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs);
       setActiveTab('program'); 
-    } catch (err: any) { setError(err.message); } 
-    finally { setIsGenerating(false); }
+    } catch (err: any) { 
+      setError(err.message); 
+    } finally { 
+      setIsGenerating(false); 
+    }
   };
 
   const handleQuickLeaveSubmit = async (e: React.FormEvent) => {
@@ -299,7 +309,6 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
         {activeTab === 'dashboard' && (
           <div className="space-y-6 md:space-y-8">
-             {/* STAT CARDS */}
              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
                  {[
                    { label: 'Air Traffic', val: flights.length, icon: Plane, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -444,13 +453,30 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* COMMAND CARD */}
                 <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-8 md:gap-10">
                    <div className="flex items-center gap-4">
                       <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 rounded-xl md:rounded-2xl flex items-center justify-center text-blue-500 shadow-xl"><Terminal size={20} /></div>
                       <h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Command Control</h4>
                    </div>
-                   <div className="space-y-8">
+                   <div className="space-y-6 md:space-y-8">
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
+                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] block">Program Commencement</label>
+                        <div className="relative group">
+                          <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500 group-focus-within:text-blue-600 transition-colors" size={20} />
+                          <input 
+                            type="date" 
+                            className="w-full pl-12 pr-4 py-4 bg-white border-2 border-slate-100 rounded-xl font-black text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm" 
+                            value={startDate} 
+                            onChange={(e) => setStartDate(e.target.value)} 
+                          />
+                        </div>
+                        <div className="flex items-center justify-between px-2 pt-1">
+                           <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Target Period:</span>
+                           <span className="text-[8px] font-black text-blue-600 uppercase italic flex items-center gap-2">
+                             {startDate} <ChevronRight size={10} /> {endDate}
+                           </span>
+                        </div>
+                     </div>
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                         <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] mb-4 block">Period Duration</label>
                         <input type="range" min="1" max="31" value={programDuration} onChange={(e) => setProgramDuration(parseInt(e.target.value))} className="w-full accent-blue-600 cursor-pointer h-1.5" />
@@ -465,6 +491,7 @@ const App: React.FC = () => {
                    <button onClick={() => setShowConfirmDialog(true)} className="w-full py-7 md:py-10 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center gap-3">
                      <Zap size={22}/> Build AI Program
                    </button>
+                   {error && <p className="text-[10px] text-rose-500 font-bold uppercase italic text-center animate-pulse">{error}</p>}
                 </div>
              </div>
           </div>
