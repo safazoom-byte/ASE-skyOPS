@@ -126,27 +126,24 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }).filter(Boolean);
 
   const prompt = `
-    AVIATION GROUND HANDLING COMMAND CENTER - ROSTER ENGINE
+    FLIGHT HANDLING OPERATIONS COMMAND - ROSTER GENERATOR
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
     ABSOLUTE PRIORITIES (MANDATORY):
-    1. **MINIMUM STAFFING (PRIORITY #1)**: Every single shift MUST have at least 'minStaff' number of agents. It is an operational failure to leave a shift under-staffed. You MUST assign available staff to reach 'minStaff' before considering any other patterns.
-    2. **LOCAL STAFF 5/2 PATTERN**: All staff categorized as 'Local' MUST work exactly 5 days and have 2 days off in any 7-day period. This is strictly required.
-    3. **SPECIALIST SLOTS**: Assign 'Shift Leader' and 'Ramp' qualified personnel to their required slots first.
-    4. **SMART DISTRIBUTION**: Distribute staff workload fairly. Avoid giving one person all the shifts and others none.
-    5. **FATIGUE SAFETY**: Maintain ${config.minRestHours}h rest between shifts. 
-
-    If a conflict occurs, you MUST prioritize MIN STAFF coverage over rest/patterns, but try to satisfy all. If coverage is still impossible, use 'GAP' in staffId and flag it.
+    1. **MIN STAFF COVERAGE (100% REQUIRED)**: You MUST meet the 'minStaff' count for every shift. If staff are available and rested, assign them. Do not leave a shift under-staffed to give someone a day off.
+    2. **ROSTER LEAVE DEFINITION**: Any 'Roster' staff whose current date is BEFORE their 'workFromDate' or AFTER their 'workToDate' is on 'Roster leave'. They cannot work.
+    3. **5/2 PATTERN**: 'Local' staff should ideally have 2 days off, but this is secondary to shift coverage.
+    4. **REST**: Maintain ${config.minRestHours}h rest after any duty.
 
     INPUT CONTEXT:
-    - PERSONNEL: ${JSON.stringify(data.staff)}
-    - UNAVAILABILITY/LEAVE: ${JSON.stringify(data.leaveRequests)}
-    - OPERATIONAL SLOTS: ${JSON.stringify(data.shifts)}
+    - STAFF REGISTRY: ${JSON.stringify(data.staff)}
+    - LEAVE REQUESTS: ${JSON.stringify(data.leaveRequests)}
+    - FLIGHT SHIFTS: ${JSON.stringify(data.shifts)}
     - FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
 
-    OUTPUT:
-    - Return a DailyProgram for each day in the requested ${config.numDays} day period.
-    - Local staff not working MUST be in 'offDuty' with type 'Day off'.
+    OUTPUT REQUIREMENTS:
+    - Use 'offDuty' with type 'Roster leave' for staff outside their contract window.
+    - Use 'offDuty' with type 'Day off' for local staff not working.
   `;
 
   try {
