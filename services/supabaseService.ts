@@ -76,7 +76,7 @@ export const db = {
           workPattern: s.work_pattern,
           isRamp: !!s.is_ramp,
           isShiftLeader: !!s.is_shift_leader,
-          isOperations: !!s.is_operations,
+          isOps: !!s.is_operations,
           isLoadControl: !!s.is_load_control,
           isLostFound: !!s.is_lost_found,
           powerRate: s.power_rate || 75,
@@ -93,8 +93,8 @@ export const db = {
           endTime: s.end_time,
           minStaff: s.min_staff || 1,
           maxStaff: s.max_staff || 10,
-          roleCounts: s.role_counts || {},
-          flightIds: s.flight_ids || []
+          role_counts: s.role_counts || {},
+          flight_ids: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
@@ -209,10 +209,6 @@ export const db = {
     });
   },
 
-  /**
-   * SAVES PROGRAMS CUMULATIVELY:
-   * Only deletes existing records for the dates being saved to avoid wiping history.
-   */
   async savePrograms(programs: DailyProgram[]) {
     if (!supabase || programs.length === 0) return;
     const session = await auth.getSession();
@@ -220,7 +216,6 @@ export const db = {
 
     const datesToOverwrite = programs.map(p => p.dateString).filter(Boolean);
     
-    // Clean up only the specific dates we are about to insert
     if (datesToOverwrite.length > 0) {
       await supabase.from('programs')
         .delete()
@@ -228,7 +223,6 @@ export const db = {
         .in('date_string', datesToOverwrite);
     }
 
-    // Insert the new/updated programs
     await supabase.from('programs').insert(
       programs.map(p => ({
         user_id: session.user.id, 

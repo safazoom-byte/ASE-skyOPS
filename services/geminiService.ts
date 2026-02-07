@@ -27,25 +27,14 @@ const safeParseJson = (text: string | undefined): any => {
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
     let stack: string[] = [];
-    let lastValidIdx = 0;
     for (let i = 0; i < candidate.length; i++) {
       const char = candidate[i];
       if (char === '{' || char === '[') stack.push(char);
       else if (char === '}' || char === ']') {
         const last = stack.pop();
         if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
-          if (stack.length === 0) {
-            lastValidIdx = i + 1;
-            break; 
-          }
+          if (stack.length === 0) return JSON.parse(candidate.slice(0, i + 1));
         }
-      }
-    }
-    if (lastValidIdx > 0) {
-      try {
-        return JSON.parse(candidate.slice(0, lastValidIdx));
-      } catch (e2) {
-        console.error("JSON fragmentation recovery failed", e2);
       }
     }
     return null;
@@ -70,7 +59,7 @@ const ROSTER_SCHEMA = {
                 id: { type: Type.STRING },
                 staffId: { type: Type.STRING },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING },
+                role: { type: Type.STRING, description: "One of: sl, ops, rmp, lc, lf, or 'General'" },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -129,22 +118,30 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    STRICT OPERATIONAL COMMANDS:
-    1. **MIN STAFF COVERAGE IS TOP PRIORITY**: You MUST meet the 'minStaff' count for every shift. If staff members are available and rested, they MUST be assigned. Do NOT leave a shift under-staffed to preserve a staff member's day off. 
-    2. **GAP PROHIBITION**: Do not use "GAP" or leave a shift under-staffed if there is a rested staff member who is not on leave.
-    3. **ROSTER LEAVE DEFINITION**: A staff member with type 'Roster' is on 'Roster leave' if the current date is BEFORE their 'workFromDate' or AFTER their 'workToDate'. They are NOT available to work.
-    4. **LOCAL STAFF PATTERN**: Local staff should have 2 days off in this 7-day period, but ONLY after shift 'minStaff' targets are met.
-    5. **REST**: Ensure exactly ${config.minRestHours}h rest after any duty finish.
+    STRICT STAFFING LAWS:
+    1. **5/2 WORK PATTERN**: "Local" staff MUST work exactly 5 shifts and have exactly 2 days off in this 7-day period. Do not assign 7 shifts.
+    2. **MULTI-ROLE CAPABILITY**: 
+       - 1 person can cover BOTH 'sl' (Shift Leader) and 'lc' (Load Control) if requested.
+       - 1 person can cover BOTH 'ops' (Operations) and 'lc' (Load Control) if requested.
+       - For all other roles (rmp, lf), assign exactly 1 unique person per requested slot.
+    3. **ROLE FILLING STRATEGY**: 
+       - First, assign staff to fulfill the requested specialist roles (sl, ops, rmp, lc, lf).
+       - Second, fill the remaining headcount required to meet the 'minStaff' count using available personnel with the role 'General'.
+    4. **MINIMUM STAFFING**: Every shift MUST meet the 'minStaff' unique headcount.
+    5. **REST**: Maintain exactly ${config.minRestHours}h rest after any duty finish.
 
-    INPUT CONTEXT:
-    - STAFF REGISTRY: ${JSON.stringify(data.staff)}
-    - LEAVE REQUESTS: ${JSON.stringify(data.leaveRequests)}
-    - SHIFT CONFIGS: ${JSON.stringify(data.shifts)}
-    - FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
+    ABBREVIATIONS:
+    - Shift Leader -> sl
+    - Operations -> ops
+    - Ramp -> rmp
+    - Load Control -> lc
+    - Lost and Found -> lf
 
-    OUTPUT FORMAT:
-    - If a 'Roster' agent is outside their contract dates, list them in 'offDuty' as 'Roster leave'.
-    - If a 'Local' agent is not working, list them in 'offDuty' as 'Day off'.
+    INPUT DATA:
+    - STAFF: ${JSON.stringify(data.staff)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - SHIFTS: ${JSON.stringify(data.shifts)}
+    - FATIGUE: ${JSON.stringify(fatigueLocks)}
   `;
 
   try {
