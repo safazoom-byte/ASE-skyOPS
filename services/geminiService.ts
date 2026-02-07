@@ -60,7 +60,7 @@ const ROSTER_SCHEMA = {
       items: {
         type: Type.OBJECT,
         properties: {
-          day: { type: Type.INTEGER, description: "Must be 0 or greater. 0 is the start date." },
+          day: { type: Type.INTEGER },
           dateString: { type: Type.STRING },
           assignments: {
             type: Type.ARRAY,
@@ -68,9 +68,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Actual staff ID or 'GAP' for missing coverage." },
+                staffId: { type: Type.STRING },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Skill role name." },
+                role: { type: Type.STRING },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -82,7 +82,7 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 staffId: { type: Type.STRING },
-                type: { type: Type.STRING, enum: ["Day off", "Annual leave", "Lieu leave", "Sick leave", "Roster leave"] }
+                type: { type: Type.STRING }
               },
               required: ["staffId", "type"]
             }
@@ -91,13 +91,13 @@ const ROSTER_SCHEMA = {
         required: ["day", "dateString", "assignments"]
       }
     },
-    stationHealth: { type: Type.NUMBER, description: "Operational health percentage (0-100)" },
+    stationHealth: { type: Type.NUMBER },
     alerts: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
-          type: { type: Type.STRING, enum: ["danger", "warning"] },
+          type: { type: Type.STRING },
           message: { type: Type.STRING }
         }
       }
@@ -126,33 +126,27 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }).filter(Boolean);
 
   const prompt = `
-    AVIATION GROUND HANDLING INTELLIGENCE SYSTEM - SkyOPS Station Program
-    TASK: Generate an Optimized Multi-Day Staff Program.
-    WINDOW: Start: ${config.startDate}, Duration: ${config.numDays} days.
-    
-    STRICT OPERATIONAL CONSTRAINTS:
-    1. LOCAL STAFF 5/2 PATTERN (CRITICAL): Every 'Local' staff member MUST have EXACTLY 5 working shifts and 2 "Day off" records within any 7-day period. 
-       - Off days DO NOT need to be sequential. 
-       - You MUST track a "counter" for each local staff member to ensure exactly 5 shifts and 2 off days.
-       - Every unassigned day for a local staff member MUST be included in the "offDuty" array as type "Day off".
-    2. ROLE MATCHING (STRICTEST ROLE): Check each shift's "roleCounts" (e.g., Shift Leader: 1, Ramp: 2). You MUST assign personnel who possess the corresponding skill (isShiftLeader, isRamp, etc.) in their profile. Never assign a person to a role they aren't qualified for.
-    3. MANDATORY STAFFING: The "minStaff" value in ShiftConfig is a HARD REQUIREMENT. Never assign fewer personnel than this. Use 'GAP' if no qualified personnel are available.
-    4. MAX STAFFING: Target "maxStaff" if qualified personnel are available and have remaining shift capacity (max 5 per 7 days).
-    5. ZERO NEGATIVE INDICES: Day 0 is the program start date.
-    6. MANDATORY REST: Ensure at least ${config.minRestHours}h between any two shifts.
-    7. FATIGUE MANAGEMENT: Obey FATIGUE LOCKS.
-    8. LEAVE CATEGORIES: 
-       - Map specific leaves (Annual, Lieu, Sick) from LEAVE_LOG to "offDuty".
-       - Roster staff outside contract dates must be in "offDuty" as "Roster leave".
+    AVIATION GROUND HANDLING COMMAND CENTER - ROSTER ENGINE
+    PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    INPUT REGISTRIES:
-    STAFF: ${JSON.stringify(data.staff)}
-    LEAVE_LOG: ${JSON.stringify(data.leaveRequests)}
-    SHIFTS: ${JSON.stringify(data.shifts)}
-    FLIGHTS: ${JSON.stringify(data.flights)}
-    FATIGUE: ${JSON.stringify(fatigueLocks)}
-    
-    OUTPUT: Return JSON matching schema. Propose a sequence that satisfies ALL role requirements while maintaining the 5/2 pattern for all 100% of the local staff.
+    ABSOLUTE PRIORITIES (MANDATORY):
+    1. **MINIMUM STAFFING (PRIORITY #1)**: Every single shift MUST have at least 'minStaff' number of agents. It is an operational failure to leave a shift under-staffed. You MUST assign available staff to reach 'minStaff' before considering any other patterns.
+    2. **LOCAL STAFF 5/2 PATTERN**: All staff categorized as 'Local' MUST work exactly 5 days and have 2 days off in any 7-day period. This is strictly required.
+    3. **SPECIALIST SLOTS**: Assign 'Shift Leader' and 'Ramp' qualified personnel to their required slots first.
+    4. **SMART DISTRIBUTION**: Distribute staff workload fairly. Avoid giving one person all the shifts and others none.
+    5. **FATIGUE SAFETY**: Maintain ${config.minRestHours}h rest between shifts. 
+
+    If a conflict occurs, you MUST prioritize MIN STAFF coverage over rest/patterns, but try to satisfy all. If coverage is still impossible, use 'GAP' in staffId and flag it.
+
+    INPUT CONTEXT:
+    - PERSONNEL: ${JSON.stringify(data.staff)}
+    - UNAVAILABILITY/LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - OPERATIONAL SLOTS: ${JSON.stringify(data.shifts)}
+    - FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
+
+    OUTPUT:
+    - Return a DailyProgram for each day in the requested ${config.numDays} day period.
+    - Local staff not working MUST be in 'offDuty' with type 'Day off'.
   `;
 
   try {
@@ -173,7 +167,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       isCompliant: true
     };
   } catch (err: any) {
-    throw new Error(err.message || "Engine failure during program calculation.");
+    throw new Error(err.message || "AI Engine failure.");
   }
 };
 

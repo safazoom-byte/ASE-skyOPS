@@ -1,12 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty } from '../types';
 
-/**
- * NOTE FOR VERCEL DEPLOYMENT:
- * Vite's 'define' plugin requires literal strings (e.g., process.env.KEY) 
- * for static replacement at build time. Dynamic lookups like process.env[key] 
- * will not work on client-side builds.
- */
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 
@@ -82,7 +76,7 @@ export const db = {
           workPattern: s.work_pattern,
           isRamp: !!s.is_ramp,
           isShiftLeader: !!s.is_shift_leader,
-          isOps: !!s.is_operations,
+          isOperations: !!s.is_operations,
           isLoadControl: !!s.is_load_control,
           isLostFound: !!s.is_lost_found,
           powerRate: s.power_rate || 75,
@@ -215,11 +209,26 @@ export const db = {
     });
   },
 
+  /**
+   * SAVES PROGRAMS CUMULATIVELY:
+   * Only deletes existing records for the dates being saved to avoid wiping history.
+   */
   async savePrograms(programs: DailyProgram[]) {
-    if (!supabase) return;
+    if (!supabase || programs.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('programs').delete().eq('user_id', session.user.id);
+
+    const datesToOverwrite = programs.map(p => p.dateString).filter(Boolean);
+    
+    // Clean up only the specific dates we are about to insert
+    if (datesToOverwrite.length > 0) {
+      await supabase.from('programs')
+        .delete()
+        .eq('user_id', session.user.id)
+        .in('date_string', datesToOverwrite);
+    }
+
+    // Insert the new/updated programs
     await supabase.from('programs').insert(
       programs.map(p => ({
         user_id: session.user.id, 
