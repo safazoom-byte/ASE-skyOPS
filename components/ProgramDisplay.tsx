@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest } from '../types';
+import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -17,7 +17,9 @@ import {
   AlertCircle,
   Coffee,
   Printer,
-  ChevronRight
+  ChevronRight,
+  UserX,
+  Moon
 } from 'lucide-react';
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
   staff: Staff[];
   shifts: ShiftConfig[];
   leaveRequests?: LeaveRequest[];
+  incomingDuties?: IncomingDuty[];
   startDate?: string;
   endDate?: string;
   onUpdatePrograms?: (updatedPrograms: DailyProgram[]) => void;
@@ -33,7 +36,7 @@ interface Props {
   alerts?: { type: 'danger' | 'warning', message: string }[];
 }
 
-export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], startDate, endDate, stationHealth = 100, alerts = [] }) => {
+export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, stationHealth = 100, alerts = [] }) => {
   const [viewMode, setViewMode] = useState<'detailed' | 'matrix'>('detailed');
   
   const sortedPrograms = useMemo(() => {
@@ -62,68 +65,110 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return d.toISOString().split('T')[0];
   }
 
-  // Automatic calculation for "Roster leave" (staff outside their contract dates)
-  // vs Manual Leave (Day off, Annual, etc.)
-  const getLeaveForDay = (dateStr: string, type: LeaveType) => {
-    // 1. Calculate Roster leave automatically
-    if (type === 'Roster leave') {
-      return staff.filter(s => {
-        if (!s.workFromDate || !s.workToDate) return false;
-        const isOutOfDate = dateStr < s.workFromDate || dateStr > s.workToDate;
-        return isOutOfDate;
-      }).map(s => s.initials).filter(Boolean).join(', ') || 'NONE';
-    }
-
-    // 2. Handle manual leaves from Registry
-    const matched = leaveRequests.filter(req => 
-      req.type === type && dateStr >= req.startDate && dateStr <= req.endDate
-    ).map(req => getStaffById(req.staffId)?.initials).filter(Boolean);
+  const getFullRegistryForDay = (program: DailyProgram) => {
+    const dateStr = getDayISODate(program.day);
+    const assignedStaffIds = new Set((program.assignments || []).map(a => a.staffId));
     
-    return matched.length > 0 ? matched.join(', ') : 'NONE';
+    const registry: Record<string, string[]> = {
+      'Day off': [],
+      'Annual leave': [],
+      'Lieu leave': [],
+      'Sick leave': [],
+      'Roster leave': [],
+      'MANDATORY REST': [],
+      'NIL': []
+    };
+
+    staff.forEach(s => {
+      if (assignedStaffIds.has(s.id)) return;
+
+      // 1. Check Rest Locks (Fatigue)
+      const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
+      if (restLock) {
+        registry['MANDATORY REST'].push(`${s.initials} (until ${restLock.shiftEndTime})`);
+        return;
+      }
+
+      // 2. Check leave requests
+      const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
+      if (leave) {
+        registry[leave.type].push(s.initials);
+        return;
+      }
+
+      // 3. Check roster contract dates
+      if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
+        registry['Roster leave'].push(s.initials);
+        return;
+      }
+
+      const aiOff = (program.offDuty || []).find(od => od.staffId === s.id);
+      if (aiOff) {
+        registry[aiOff.type].push(s.initials);
+        return;
+      }
+
+      if (s.type === 'Local') {
+        registry['Day off'].push(s.initials);
+        return;
+      }
+
+      registry['NIL'].push(s.initials);
+    });
+
+    return registry;
   };
 
   const matrixData = useMemo(() => {
-    const matrix: Record<string, Record<number, { shift: string; role: string; flight?: string; isGap?: boolean; leaveType?: string }>> = {};
-    staff.forEach(s => { matrix[s.id] = {}; });
-    matrix['GAP'] = {};
+    const matrix: Record<string, Record<number, any>> = {};
+    
+    sortedPrograms.forEach(program => {
+      const dateStr = getDayISODate(program.day);
+      
+      program.assignments.forEach(a => {
+        if (!matrix[a.staffId]) matrix[a.staffId] = {};
+        const sh = getShiftById(a.shiftId);
+        matrix[a.staffId][program.day] = {
+          shift: sh ? `${sh.pickupTime}-${sh.endTime}` : 'DUTY',
+          role: a.role
+        };
+      });
 
-    sortedPrograms.forEach(prog => {
-      const dayIdx = prog.day;
-      const dateStr = getDayISODate(dayIdx);
-
+      const assignedIds = new Set(program.assignments.map(a => a.staffId));
       staff.forEach(s => {
-        // Check manual leave
-        const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
-        if (leave) {
-          matrix[s.id][dayIdx] = { shift: 'LEAVE', role: leave.type, leaveType: leave.type };
+        if (assignedIds.has(s.id)) return;
+        if (!matrix[s.id]) matrix[s.id] = {};
+        
+        const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
+        if (restLock) {
+          matrix[s.id][program.day] = { leaveType: `Rest (until ${restLock.shiftEndTime})` };
           return;
         }
 
-        // Check automatic Roster leave
-        if (s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
-           matrix[s.id][dayIdx] = { shift: 'OUT', role: 'Roster leave', leaveType: 'Roster leave' };
-           return;
+        const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
+        if (leave) {
+          matrix[s.id][program.day] = { leaveType: leave.type };
+          return;
         }
-      });
 
-      (prog.assignments || []).forEach(a => {
-        const staffId = a.staffId || 'GAP';
-        if (!matrix[staffId]) matrix[staffId] = {};
-        if (staffId !== 'GAP' && matrix[staffId][dayIdx]?.shift === 'LEAVE') return;
-        if (staffId !== 'GAP' && matrix[staffId][dayIdx]?.shift === 'OUT') return;
+        if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
+          matrix[s.id][program.day] = { leaveType: 'Roster leave' };
+          return;
+        }
 
-        const sh = getShiftById(a.shiftId);
-        const fl = getFlightById(a.flightId);
-        matrix[staffId][dayIdx] = {
-          shift: sh ? `${sh.pickupTime}-${sh.endTime}` : 'Duty',
-          role: a.role,
-          flight: fl?.flightNumber,
-          isGap: staffId === 'GAP'
-        };
+        const aiOff = (program.offDuty || []).find(od => od.staffId === s.id);
+        if (aiOff) {
+          matrix[s.id][program.day] = { leaveType: aiOff.type };
+          return;
+        }
+
+        if (s.type === 'Local') {
+          matrix[s.id][program.day] = { leaveType: 'Day off' };
+        }
       });
     });
     return matrix;
-  }, [sortedPrograms, staff, shifts, flights, leaveRequests, startDate]);
+  }, [sortedPrograms, staff, leaveRequests, incomingDuties, shifts, startDate]);
 
   const exportPDF = () => {
     if (totalAssignments === 0) return;
@@ -132,25 +177,26 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
     sortedPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
-      
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(22).text(`SkyOPS Station Handling Program`, 14, 20);
       doc.setFontSize(11).setTextColor(100, 100, 100).text(`${startDate} — ${endDate}`, 14, 28);
-      
       doc.setFontSize(16).setTextColor(0, 0, 0).text(getDayLabel(program.day), 14, 42);
 
-      const tableData = program.assignments.map((a, i) => {
-        const sh = getShiftById(a.shiftId);
+      const shiftsMap: Record<string, Assignment[]> = {};
+      program.assignments.forEach(a => {
+        if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
+        shiftsMap[a.shiftId || ''].push(a);
+      });
+
+      const tableData = Object.entries(shiftsMap).map(([shiftId, group], i) => {
+        const sh = getShiftById(shiftId);
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION';
-        const st = getStaffById(a.staffId);
-        return [
-          (i + 1).toString(),
-          sh?.pickupTime || '--:--',
-          sh?.endTime || '--:--',
-          fls,
-          `${sh?.minStaff || '0'} / ${sh?.maxStaff || '0'}`,
-          `${st?.initials || 'GAP'} ${a.role}`
-        ];
+        const personnelStr = group.map(a => {
+          const st = getStaffById(a.staffId);
+          return `${st?.initials || 'GAP'} (${a.role})`;
+        }).join(' | ');
+
+        return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${group.length} / ${sh?.maxStaff || '0'}`, personnelStr];
       });
 
       autoTable(doc, {
@@ -159,20 +205,22 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         body: tableData,
         theme: 'grid',
         headStyles: { fillColor: headerColor, textColor: 255, fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 9, cellPadding: 4 },
+        bodyStyles: { fontSize: 8, cellPadding: 4 },
+        columnStyles: { 5: { cellWidth: 100 } }
       });
 
       const currentY = (doc as any).lastAutoTable.finalY + 15;
       doc.setFontSize(14).text('ABSENCE AND LEAVES REGISTRY', 14, currentY);
 
-      const dateStr = getDayISODate(program.day);
+      const registry = getFullRegistryForDay(program);
       const absenceData = [
-        ['Day off', getLeaveForDay(dateStr, 'Day off')],
-        ['Annual leave', getLeaveForDay(dateStr, 'Annual leave')],
-        ['Lieu leave', getLeaveForDay(dateStr, 'Lieu leave')],
-        ['Sick leave', getLeaveForDay(dateStr, 'Sick leave')],
-        ['Roster leave (Out of Date)', getLeaveForDay(dateStr, 'Roster leave')],
-        ['AVAILABLE (NIL)', getLeaveForDay(dateStr, 'NIL')]
+        ['MANDATORY REST', registry['MANDATORY REST'].join(', ') || 'NONE'],
+        ['DAYS OFF', registry['Day off'].join(', ') || 'NONE'],
+        ['ROSTER LEAVE', registry['Roster leave'].join(', ') || 'NONE'],
+        ['ANNUAL LEAVE', registry['Annual leave'].join(', ') || 'NONE'],
+        ['SICK LEAVE', registry['Sick leave'].join(', ') || 'NONE'],
+        ['LIEU LEAVE', registry['Lieu leave'].join(', ') || 'NONE'],
+        ['AVAILABLE (NIL)', registry['NIL'].join(', ') || 'NONE']
       ];
 
       autoTable(doc, {
@@ -248,9 +296,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                         <td key={p.day} className="p-2 border-r border-slate-50 text-center">
                           {entry ? (
                             entry.leaveType ? (
-                              <div className="p-3 rounded-2xl bg-slate-50 text-[7px] font-black uppercase">{entry.leaveType}</div>
+                              <div className={`p-3 rounded-2xl text-[7px] font-black uppercase italic ${entry.leaveType.includes('Rest') ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-400'}`}>
+                                {entry.leaveType}
+                              </div>
                             ) : (
-                              <div className="p-3 rounded-2xl bg-slate-950 text-white text-[9px] font-black uppercase">
+                              <div className="p-3 rounded-2xl bg-slate-950 text-white text-[9px] font-black uppercase shadow-sm">
                                 {entry.shift} | {entry.role}
                               </div>
                             )
@@ -267,7 +317,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       ) : (
         <div className="space-y-16">
           {sortedPrograms.map(program => {
-            const dateStr = getDayISODate(program.day);
+            const registry = getFullRegistryForDay(program);
+            const shiftsMap: Record<string, Assignment[]> = {};
+            program.assignments.forEach(a => {
+              if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
+              shiftsMap[a.shiftId || ''].push(a);
+            });
+
             return (
               <div key={program.day} className="bg-white rounded-[4rem] border border-slate-200 shadow-xl overflow-hidden">
                 <div className="p-10 md:p-14">
@@ -280,23 +336,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           <th className="p-5 text-[10px] font-black uppercase">RELEASE</th>
                           <th className="p-5 text-[10px] font-black uppercase">FLIGHTS</th>
                           <th className="p-5 text-[10px] font-black uppercase">HC/MAX</th>
-                          <th className="p-5 text-[10px] font-black uppercase">PERSONNEL</th>
+                          <th className="p-5 text-[10px] font-black uppercase">PERSONNEL & ASSIGNED ROLES</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.values(program.assignments.reduce((acc: any, curr) => {
-                          if (!acc[curr.shiftId]) acc[curr.shiftId] = [];
-                          acc[curr.shiftId].push(curr);
-                          return acc;
-                        }, {})).map((group: any, idx) => {
-                          const sh = getShiftById(group[0].shiftId);
+                        {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
+                          const sh = getShiftById(shiftId);
                           return (
-                            <tr key={idx} className="border-b border-slate-100">
+                            <tr key={idx} className="border-b border-slate-100 group">
                               <td className="p-6 text-sm font-black italic">{sh?.pickupTime || '--:--'}</td>
                               <td className="p-6 text-sm font-black italic">{sh?.endTime || '--:--'}</td>
                               <td className="p-6 text-xs font-bold uppercase">{sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION'}</td>
                               <td className="p-6 text-xs font-black">{group.length} / {sh?.maxStaff || '0'}</td>
-                              <td className="p-6 text-[10px] font-bold uppercase">{group.map((a: any) => `${getStaffById(a.staffId)?.initials || 'GAP'} ${a.role}`).join(' | ')}</td>
+                              <td className="p-6 text-[10px] font-bold uppercase">
+                                <div className="flex flex-wrap gap-2">
+                                  {group.map((a: any, ai: number) => {
+                                      const st = getStaffById(a.staffId);
+                                      return (
+                                        <span key={ai} className={`px-2 py-1 rounded-lg ${!st ? 'bg-rose-100 text-rose-600 border border-rose-200 font-black' : 'bg-slate-50 text-slate-700'}`}>
+                                          {st?.initials || 'GAP'} ({a.role})
+                                        </span>
+                                      );
+                                  })}
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -305,7 +368,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                   </div>
 
                   <div className="mt-16 space-y-6">
-                    <h4 className="text-xl font-black italic uppercase text-slate-900">Absence and Leaves Registry</h4>
+                    <h4 className="text-xl font-black italic uppercase text-slate-900">Absence and Rest Registry</h4>
                     <div className="overflow-hidden rounded-3xl border border-slate-200">
                       <table className="w-full text-left border-collapse">
                         <thead>
@@ -316,16 +379,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {[
-                            { label: 'Day off', type: 'Day off' as LeaveType },
-                            { label: 'Annual leave', type: 'Annual leave' as LeaveType },
-                            { label: 'Lieu leave', type: 'Lieu leave' as LeaveType },
-                            { label: 'Sick leave', type: 'Sick leave' as LeaveType },
-                            { label: 'Roster leave (Out of Date)', type: 'Roster leave' as LeaveType },
-                            { label: 'AVAILABLE (NIL)', type: 'NIL' as LeaveType },
+                            { label: 'MANDATORY REST', type: 'MANDATORY REST', color: 'text-amber-600 bg-amber-50/30' },
+                            { label: 'DAYS OFF', type: 'Day off' },
+                            { label: 'ROSTER LEAVE', type: 'Roster leave' },
+                            { label: 'ANNUAL LEAVE', type: 'Annual leave' },
+                            { label: 'SICK LEAVE', type: 'Sick leave' },
+                            { label: 'AVAILABLE (NIL)', type: 'NIL' },
                           ].map((cat, i) => (
                             <tr key={i}>
-                              <td className="p-5 text-[10px] font-black text-slate-900 uppercase bg-slate-50/30">{cat.label}</td>
-                              <td className="p-5 text-[11px] font-bold text-slate-700">{getLeaveForDay(dateStr, cat.type)}</td>
+                              <td className={`p-5 text-[10px] font-black uppercase ${cat.color || 'text-slate-900 bg-slate-50/30'}`}>{cat.label}</td>
+                              <td className={`p-5 text-[11px] font-bold ${cat.color ? 'text-amber-700' : 'text-slate-700'}`}>{registry[cat.type]?.join(', ') || 'NONE'}</td>
                             </tr>
                           ))}
                         </tbody>
