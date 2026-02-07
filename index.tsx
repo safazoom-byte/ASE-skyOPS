@@ -190,7 +190,7 @@ const App: React.FC = () => {
     const activeFlights = flights.filter(f => f.date >= startDate && f.date <= endDate);
 
     if (activeShifts.length === 0) { 
-      setError(`No valid duty shifts registered between ${startDate} and ${endDate}. Please add shifts first.`); 
+      setError(`No valid duty shifts registered between ${startDate} and ${endDate}.`); 
       setShowConfirmDialog(false); 
       return; 
     }
@@ -206,22 +206,16 @@ const App: React.FC = () => {
         { numDays: programDuration, minRestHours, startDate }
       );
 
-      // CUMULATIVE MERGE WITH DEDUPLICATION:
-      // Remove old programs for the generated dates, then add the new ones.
-      const generatedDates = new Set(result.programs.map(p => p.dateString));
-      const preservedPrograms = programs.filter(p => p.dateString && !generatedDates.has(p.dateString));
-      const finalPrograms = [...preservedPrograms, ...result.programs];
-
-      setPrograms(finalPrograms); 
+      // OVERWRITE LOGIC: Delete old local versions and replace with new ones.
+      setPrograms(result.programs); 
       setStationHealth(result.stationHealth);
       setAlerts(result.alerts || []);
       
       if (supabase) {
-        // Save only the new block to DB (savePrograms handles the delete/insert block)
+        // savePrograms handles deleting existing records for these dates in DB before insertion.
         await db.savePrograms(result.programs); 
       }
       
-      // AUTO-REDIRECT to program display after successful build
       setActiveTab('program'); 
     } catch (err: any) { 
       setError(err.message); 
@@ -318,7 +312,7 @@ const App: React.FC = () => {
              <h1 className="text-base md:text-lg font-black italic text-slate-900 uppercase leading-none">SkyOPS <span className="text-blue-600 font-light">Station</span></h1>
              <div className="flex items-center gap-2 mt-1.5">
                <div className={`w-2 h-2 rounded-full ${
-                  cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 
+                  cloudStatus === 'connected' ? 'bg-emerald-50 animate-pulse' : 
                   cloudStatus === 'error' ? 'bg-rose-500' : 
                   cloudStatus === 'unconfigured' ? 'bg-slate-300' :
                   'bg-amber-500'
@@ -500,17 +494,17 @@ const App: React.FC = () => {
                                 <p className="text-[9px] font-black uppercase text-slate-900">{staff.find(st => st.id === req.staffId)?.initials}</p>
                                 <p className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter">{req.startDate} — {req.type}</p>
                              </div>
-                             <button onClick={() => handleLeaveDelete(req.id)} className="text-slate-300 hover:text-rose-500 p-2 transition-colors"><Trash2 size={14}/></button>
-                          </div>
-                        ))}
-                        {activeLeaveRequests.length === 0 && (
-                          <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
-                             <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">Absence Registry Clear</p>
-                          </div>
-                        )}
-                     </div>
-                  </div>
-                </div>
+                                 <button onClick={() => handleLeaveDelete(req.id)} className="text-slate-300 hover:text-rose-500 p-2 transition-colors"><Trash2 size={14}/></button>
+                              </div>
+                            ))}
+                            {activeLeaveRequests.length === 0 && (
+                              <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+                                 <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">Absence Registry Clear</p>
+                              </div>
+                            )}
+                         </div>
+                      </div>
+                    </div>
 
                 <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-8 md:gap-10">
                    <div className="flex items-center gap-4">
@@ -584,7 +578,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-6 animate-in fade-in">
            <div className="bg-white rounded-2xl md:rounded-[3.5rem] p-8 md:p-12 text-center max-w-lg w-full shadow-2xl border border-white/10">
               <h3 className="text-2xl md:text-3xl font-black italic uppercase text-slate-900 mb-4">Build AI Program?</h3>
-              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8 tracking-widest">AI will prioritize MINIMUM STAFFING above all other patterns.</p>
+              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8 tracking-widest">New program will completely replace any existing data for this period.</p>
               <div className="flex gap-4">
                 <button onClick={() => setShowConfirmDialog(false)} className="flex-1 font-black uppercase text-[10px] text-slate-400 hover:text-rose-500 transition-colors">Abort</button>
                 <button onClick={confirmGenerateProgram} className="flex-[2] py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all shadow-xl active:scale-95">Build AI Program</button>
