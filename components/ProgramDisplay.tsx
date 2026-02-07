@@ -39,7 +39,6 @@ interface Props {
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, stationHealth = 100, alerts = [] }) => {
   const [viewMode, setViewMode] = useState<'detailed' | 'matrix'>('detailed');
   
-  // CRITICAL: Strict range filtering and deduplication for exactly one page per day.
   const filteredPrograms = useMemo(() => {
     if (!Array.isArray(programs)) return [];
     if (!startDate || !endDate) return programs;
@@ -59,10 +58,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       return true;
     });
   }, [programs, startDate, endDate]);
-
-  const totalAssignments = useMemo(() => {
-    return filteredPrograms.reduce((sum, p) => sum + (p.assignments?.length || 0), 0);
-  }, [filteredPrograms]);
 
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getFlightById = (id: string) => flights.find(f => f.id === id);
@@ -92,25 +87,25 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     staff.forEach(s => {
       if (assignedStaffIds.has(s.id)) return;
 
-      // 1. Mandatory Rest Lock (Post-night duty etc)
+      // 1. Fatigue/Rest Logic
       const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
       if (restLock) {
         registry['RESTING (POST-DUTY)'].push(`${s.initials} (until ${restLock.shiftEndTime})`);
         return;
       }
 
-      // 2. Specific Leave Requests
+      // 2. Official Leave Logic
       const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
       if (leave) {
         const typeKey = leave.type.toUpperCase();
         if (registry[typeKey]) registry[typeKey].push(s.initials);
-        else registry['ANNUAL LEAVE'].push(s.initials); // Fallback
+        else registry['ANNUAL LEAVE'].push(s.initials);
         return;
       }
 
       // 3. Roster Window Logic (Roster Leave)
-      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-        if (dateStr < s.workFromDate || dateStr > s.workToDate) {
+      if (s.type === 'Roster') {
+        if (s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
           registry['ROSTER LEAVE'].push(s.initials);
           return;
         }
@@ -312,9 +307,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                               <td className="p-5 text-[11px] font-bold text-slate-700">{list.join(', ')}</td>
                             </tr>
                           ))}
-                          {Object.values(registry).every(l => l.length === 0) && (
-                            <tr><td colSpan={2} className="p-5 text-center text-slate-400 italic">No activity recorded</td></tr>
-                          )}
                         </tbody>
                       </table>
                     </div>
