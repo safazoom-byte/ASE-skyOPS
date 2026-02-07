@@ -39,24 +39,23 @@ interface Props {
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, stationHealth = 100, alerts = [] }) => {
   const [viewMode, setViewMode] = useState<'detailed' | 'matrix'>('detailed');
   
-  // CRITICAL: Strict range filtering ensures ONLY the selected range is visible and printed.
+  // CRITICAL: Strict range filtering and deduplication for exactly one page per day.
   const filteredPrograms = useMemo(() => {
     if (!Array.isArray(programs)) return [];
     if (!startDate || !endDate) return programs;
     
-    // Sort and filter strictly by dateString to avoid historical data bleed
-    const results = programs
-      .filter(p => {
-        if (!p.dateString) return false;
-        return p.dateString >= startDate && p.dateString <= endDate;
-      })
-      .sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
+    const results = programs.filter(p => {
+      if (!p.dateString) return false;
+      return p.dateString >= startDate && p.dateString <= endDate;
+    });
 
-    // Deduplicate dates to prevent multi-page issues if DB has redundant keys
-    const seen = new Set();
+    results.sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
+
+    const seen = new Set<string>();
     return results.filter(p => {
-      if (seen.has(p.dateString)) return false;
-      seen.add(p.dateString);
+      const d = p.dateString!;
+      if (seen.has(d)) return false;
+      seen.add(d);
       return true;
     });
   }, [programs, startDate, endDate]);
@@ -82,42 +81,57 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const assignedStaffIds = new Set((program.assignments || []).map(a => a.staffId));
     
     const registry: Record<string, string[]> = {
-      'Day off': [],
-      'Annual leave': [],
-      'Lieu leave': [],
-      'Sick leave': [],
-      'Roster leave': [],
-      'MANDATORY REST': [],
-      'NIL': []
+      'DAYS OFF': [],
+      'ANNUAL LEAVE': [],
+      'SICK LEAVE': [],
+      'ROSTER LEAVE': [],
+      'RESTING (POST-DUTY)': [],
+      'STANDBY (RESERVE)': []
     };
 
     staff.forEach(s => {
       if (assignedStaffIds.has(s.id)) return;
 
+      // 1. Mandatory Rest Lock (Post-night duty etc)
       const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
       if (restLock) {
-        registry['MANDATORY REST'].push(`${s.initials} (until ${restLock.shiftEndTime})`);
+        registry['RESTING (POST-DUTY)'].push(`${s.initials} (until ${restLock.shiftEndTime})`);
         return;
       }
 
+      // 2. Specific Leave Requests
       const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
       if (leave) {
-        registry[leave.type].push(s.initials);
+        const typeKey = leave.type.toUpperCase();
+        if (registry[typeKey]) registry[typeKey].push(s.initials);
+        else registry['ANNUAL LEAVE'].push(s.initials); // Fallback
         return;
       }
 
+      // 3. Roster Window Logic (Roster Leave)
+      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+        if (dateStr < s.workFromDate || dateStr > s.workToDate) {
+          registry['ROSTER LEAVE'].push(s.initials);
+          return;
+        }
+      }
+
+      // 4. AI-assigned Off Duty
       const aiOff = (program.offDuty || []).find(od => od.staffId === s.id);
       if (aiOff) {
-        registry[aiOff.type].push(s.initials);
-        return;
+        const typeKey = aiOff.type.toUpperCase();
+        if (registry[typeKey]) {
+          registry[typeKey].push(s.initials);
+          return;
+        }
       }
 
+      // 5. Default categorization
       if (s.type === 'Local') {
-        registry['Day off'].push(s.initials);
-        return;
+        registry['DAYS OFF'].push(s.initials);
+      } else {
+        registry['STANDBY (RESERVE)'].push(s.initials);
       }
-
-      registry['NIL'].push(s.initials);
     });
 
     return registry;
@@ -128,14 +142,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
     const headerColor = [2, 6, 23];
 
-    // Strictly iterating through filteredPrograms ONLY (e.g. 7 days = 7 pages)
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
       
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(20).text(`SkyOPS Station Handling Program`, 14, 20);
-      doc.setFontSize(10).setTextColor(120).text(`Period: ${startDate} to ${endDate}`, 14, 27);
-      doc.setFontSize(14).setTextColor(0).text(getDayLabel(program), 14, 38);
+      doc.setFontSize(22).text(`SkyOPS Station Handling Program`, 14, 20);
+      doc.setFontSize(11).setTextColor(100, 100, 100).text(`Target Period: ${startDate} to ${endDate}`, 14, 28);
+      doc.setFontSize(16).setTextColor(0, 0, 0).text(getDayLabel(program), 14, 42);
 
       const shiftsMap: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
@@ -155,7 +168,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
 
       autoTable(doc, {
-        startY: 45,
+        startY: 48,
         head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MIN', 'PERSONNEL & ASSIGNED ROLES']],
         body: tableData,
         theme: 'grid',
@@ -165,15 +178,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
 
       const currentY = (doc as any).lastAutoTable.finalY + 15;
-      doc.setFontSize(13).text('ABSENCE AND REST REGISTRY', 14, currentY);
+      doc.setFontSize(14).text('ABSENCE AND REST REGISTRY', 14, currentY);
 
       const registry = getFullRegistryForDay(program);
       const absenceData = [
-        ['MANDATORY REST', registry['MANDATORY REST'].join(', ') || 'NONE'],
-        ['DAYS OFF', registry['Day off'].join(', ') || 'NONE'],
-        ['ANNUAL LEAVE', registry['Annual leave'].join(', ') || 'NONE'],
-        ['SICK LEAVE', registry['Sick leave'].join(', ') || 'NONE'],
-        ['AVAILABLE (NIL)', registry['NIL'].join(', ') || 'NONE']
+        ['RESTING (POST-DUTY)', registry['RESTING (POST-DUTY)'].join(', ') || 'NONE'],
+        ['DAYS OFF', registry['DAYS OFF'].join(', ') || 'NONE'],
+        ['ROSTER LEAVE', registry['ROSTER LEAVE'].join(', ') || 'NONE'],
+        ['ANNUAL LEAVE', registry['ANNUAL LEAVE'].join(', ') || 'NONE'],
+        ['STANDBY (RESERVE)', registry['STANDBY (RESERVE)'].join(', ') || 'NONE']
       ];
 
       autoTable(doc, {
@@ -187,14 +200,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    doc.save(`SkyOPS_Program_${startDate}_to_${endDate}.pdf`);
+    doc.save(`SkyOPS_Station_Program_${startDate}.pdf`);
   };
 
   if (filteredPrograms.length === 0) {
     return (
       <div className="space-y-8 max-w-4xl mx-auto py-20 text-center">
         <h2 className="text-4xl font-black italic uppercase text-slate-900 leading-none">Handling Program</h2>
-        <p className="text-slate-400 mt-4">Registry idle for range {startDate} to {endDate}.</p>
+        <p className="text-slate-400 mt-4">Registry idle or out of filter range. Generate program for {startDate} to see results.</p>
       </div>
     );
   }
@@ -293,12 +306,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {['MANDATORY REST', 'Day off', 'Annual leave', 'Sick leave', 'NIL'].map((type, i) => (
+                          {Object.entries(registry).filter(([_, list]) => list.length > 0).map(([type, list], i) => (
                             <tr key={i}>
-                              <td className="p-5 text-[10px] font-black uppercase text-slate-900 bg-slate-50/30">{type === 'Day off' ? 'DAYS OFF' : type}</td>
-                              <td className="p-5 text-[11px] font-bold text-slate-700">{registry[type]?.join(', ') || 'NONE'}</td>
+                              <td className="p-5 text-[10px] font-black uppercase text-slate-900 bg-slate-50/30">{type}</td>
+                              <td className="p-5 text-[11px] font-bold text-slate-700">{list.join(', ')}</td>
                             </tr>
                           ))}
+                          {Object.values(registry).every(l => l.length === 0) && (
+                            <tr><td colSpan={2} className="p-5 text-center text-slate-400 italic">No activity recorded</td></tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
