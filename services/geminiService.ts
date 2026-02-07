@@ -126,24 +126,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }).filter(Boolean);
 
   const prompt = `
-    FLIGHT HANDLING OPERATIONS COMMAND - ROSTER GENERATOR
+    FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    ABSOLUTE PRIORITIES (MANDATORY):
-    1. **MIN STAFF COVERAGE (100% REQUIRED)**: You MUST meet the 'minStaff' count for every shift. If staff are available and rested, assign them. Do not leave a shift under-staffed to give someone a day off.
-    2. **ROSTER LEAVE DEFINITION**: Any 'Roster' staff whose current date is BEFORE their 'workFromDate' or AFTER their 'workToDate' is on 'Roster leave'. They cannot work.
-    3. **5/2 PATTERN**: 'Local' staff should ideally have 2 days off, but this is secondary to shift coverage.
-    4. **REST**: Maintain ${config.minRestHours}h rest after any duty.
+    STRICT OPERATIONAL COMMANDS:
+    1. **MIN STAFF COVERAGE IS TOP PRIORITY**: You MUST meet the 'minStaff' count for every shift. If staff members are available and rested, they MUST be assigned. Do NOT leave a shift under-staffed to preserve a staff member's day off. 
+    2. **GAP PROHIBITION**: Do not use "GAP" or leave a shift under-staffed if there is a rested staff member who is not on leave.
+    3. **ROSTER LEAVE DEFINITION**: A staff member with type 'Roster' is on 'Roster leave' if the current date is BEFORE their 'workFromDate' or AFTER their 'workToDate'. They are NOT available to work.
+    4. **LOCAL STAFF PATTERN**: Local staff should have 2 days off in this 7-day period, but ONLY after shift 'minStaff' targets are met.
+    5. **REST**: Ensure exactly ${config.minRestHours}h rest after any duty finish.
 
     INPUT CONTEXT:
     - STAFF REGISTRY: ${JSON.stringify(data.staff)}
     - LEAVE REQUESTS: ${JSON.stringify(data.leaveRequests)}
-    - FLIGHT SHIFTS: ${JSON.stringify(data.shifts)}
+    - SHIFT CONFIGS: ${JSON.stringify(data.shifts)}
     - FATIGUE LOCKS: ${JSON.stringify(fatigueLocks)}
 
-    OUTPUT REQUIREMENTS:
-    - Use 'offDuty' with type 'Roster leave' for staff outside their contract window.
-    - Use 'offDuty' with type 'Day off' for local staff not working.
+    OUTPUT FORMAT:
+    - If a 'Roster' agent is outside their contract dates, list them in 'offDuty' as 'Roster leave'.
+    - If a 'Local' agent is not working, list them in 'offDuty' as 'Day off'.
   `;
 
   try {
