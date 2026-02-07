@@ -28,7 +28,8 @@ import {
   WifiOff,
   CloudOff,
   Calendar as CalendarIcon,
-  ChevronRight
+  ChevronRight,
+  ShieldAlert
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
@@ -227,6 +228,11 @@ const App: React.FC = () => {
     if (supabase) await db.deleteLeave(id);
   };
 
+  const handleIncomingDutyDelete = async (id: string) => {
+    setIncomingDuties(p => p.filter(d => d.id !== id));
+    if (supabase) await db.deleteIncomingDuty(id);
+  };
+
   const addIncomingDuties = async () => {
     const finalTime = `${incomingHour}:${incomingMin}`;
     if (incomingSelectedStaffIds.length === 0 || !finalTime || !incomingDate) return;
@@ -236,8 +242,16 @@ const App: React.FC = () => {
       date: incomingDate,
       shiftEndTime: finalTime
     }));
-    const filteredCurrent = incomingDuties.filter(d => !incomingSelectedStaffIds.includes(d.staffId));
-    setIncomingDuties([...filteredCurrent, ...newDuties]);
+    
+    // Merge without duplication by staffId
+    const currentDuties = [...incomingDuties];
+    newDuties.forEach(nd => {
+      const idx = currentDuties.findIndex(cd => cd.staffId === nd.staffId);
+      if (idx !== -1) currentDuties[idx] = nd;
+      else currentDuties.push(nd);
+    });
+
+    setIncomingDuties(currentDuties);
     if (supabase) for (const d of newDuties) await db.upsertIncomingDuty(d);
     setIncomingSelectedStaffIds([]); setIncomingSearchTerm('');
   };
@@ -245,6 +259,10 @@ const App: React.FC = () => {
   const activeLeaveRequests = useMemo(() => {
     return leaveRequests.filter(l => l.startDate >= startDate).sort((a,b) => a.startDate.localeCompare(b.startDate));
   }, [leaveRequests, startDate]);
+
+  const activeFatigueLocks = useMemo(() => {
+    return incomingDuties.filter(d => d.date >= startDate).sort((a, b) => a.date.localeCompare(b.date) || a.shiftEndTime.localeCompare(b.shiftEndTime));
+  }, [incomingDuties, startDate]);
 
   const filteredStaff = useMemo(() => {
     if (!incomingSearchTerm) return staff;
@@ -391,6 +409,26 @@ const App: React.FC = () => {
                                  </button>
                                </div>
                           </div>
+                      </div>
+
+                      <div className="mt-10 space-y-4">
+                         <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Activity size={12} className="text-amber-500" /> Active Fatigue Locks</h5>
+                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {activeFatigueLocks.map(lock => (
+                              <div key={lock.id} className="p-3 border border-amber-100 rounded-xl flex items-center justify-between bg-amber-50/30 group shadow-sm transition-all hover:border-amber-200">
+                                 <div>
+                                    <p className="text-[9px] font-black uppercase text-amber-900">{staff.find(st => st.id === lock.staffId)?.initials || '??'}</p>
+                                    <p className="text-[7px] font-bold text-amber-600 uppercase tracking-tighter">{lock.date} @ {lock.shiftEndTime}</p>
+                                 </div>
+                                 <button onClick={() => handleIncomingDutyDelete(lock.id)} className="text-amber-300 hover:text-rose-500 p-2 transition-colors"><Trash2 size={14}/></button>
+                              </div>
+                            ))}
+                            {activeFatigueLocks.length === 0 && (
+                              <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-100">
+                                 <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em]">Fatigue Registry Clear</p>
+                              </div>
+                            )}
+                         </div>
                       </div>
                   </div>
 
