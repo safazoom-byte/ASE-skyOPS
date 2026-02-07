@@ -68,19 +68,30 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must use actual staff ID or 'GAP' if no qualified personnel available." },
+                staffId: { type: Type.STRING, description: "Actual staff ID or 'GAP' for missing coverage." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Exact abbreviations: (SL), (Duty), (RMP), (LF), (LC), (OPS)" },
+                role: { type: Type.STRING, description: "Skill role name." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
+            }
+          },
+          offDuty: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                staffId: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ["Day off", "Annual leave", "Lieu leave", "Sick leave", "Roster leave"] }
+              },
+              required: ["staffId", "type"]
             }
           }
         },
         required: ["day", "dateString", "assignments"]
       }
     },
-    stationHealth: { type: Type.NUMBER, description: "Operational readiness percentage 0-100" },
+    stationHealth: { type: Type.NUMBER, description: "Operational health percentage (0-100)" },
     alerts: {
       type: Type.ARRAY,
       items: {
@@ -106,47 +117,42 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
      dutyEndDate.setHours(h, m, 0, 0);
      const safeToWorkDate = new Date(dutyEndDate);
      safeToWorkDate.setHours(safeToWorkDate.getHours() + config.minRestHours);
-
-     // If safeToWorkDate is before or at rosterStart, they are available.
      if (safeToWorkDate.getTime() <= rosterStart.getTime()) return null;
-
      const diffMs = safeToWorkDate.getTime() - rosterStart.getTime();
      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-     
-     // clamped lockedDayIndex to 0 to prevent "negative days" logical errors
      const lockedDayIndex = Math.max(0, Math.floor(diffDays));
      const timeStr = `${String(safeToWorkDate.getHours()).padStart(2, '0')}:${String(safeToWorkDate.getMinutes()).padStart(2, '0')}`;
-     
-     return { 
-       staffId: duty.staffId, 
-       lockedUntilDay: lockedDayIndex, 
-       lockedUntilTime: timeStr,
-       reason: `Resting until Day ${lockedDayIndex+1} at ${timeStr}`
-     };
+     return { staffId: duty.staffId, lockedUntilDay: lockedDayIndex, lockedUntilTime: timeStr };
   }).filter(Boolean);
 
   const prompt = `
     AVIATION GROUND HANDLING INTELLIGENCE SYSTEM - SkyOPS Station Program
-    TASK: Generate an Optimized Weekly Staff Program.
-    WINDOW: Starting ${config.startDate} for ${config.numDays} days.
+    TASK: Generate an Optimized Multi-Day Staff Program.
+    WINDOW: Start: ${config.startDate}, Duration: ${config.numDays} days.
     
-    IMPORTANT RULES:
-    1. NEVER use negative day indices. The start date ${config.startDate} is Day 0.
-    2. 12h rest minimum between duty periods.
-    3. Check LEAVE_LOG for dates: "Day off", "Annual leave", "Lieu leave", "Sick leave".
-    4. Check STAFF contract dates: If Day is outside workFromDate/workToDate, they are UNAVAILABLE (Roster leave).
-    5. Respect FATIGUE LOCKS provided below.
-    
-    FATIGUE LOCKS (Staff resting from previous duties):
-    ${JSON.stringify(fatigueLocks)}
-    
+    STRICT OPERATIONAL CONSTRAINTS:
+    1. LOCAL STAFF 5/2 PATTERN (CRITICAL): Every 'Local' staff member MUST have EXACTLY 5 working shifts and 2 "Day off" records within any 7-day period. 
+       - Off days DO NOT need to be sequential. 
+       - You MUST track a "counter" for each local staff member to ensure exactly 5 shifts and 2 off days.
+       - Every unassigned day for a local staff member MUST be included in the "offDuty" array as type "Day off".
+    2. ROLE MATCHING (STRICTEST ROLE): Check each shift's "roleCounts" (e.g., Shift Leader: 1, Ramp: 2). You MUST assign personnel who possess the corresponding skill (isShiftLeader, isRamp, etc.) in their profile. Never assign a person to a role they aren't qualified for.
+    3. MANDATORY STAFFING: The "minStaff" value in ShiftConfig is a HARD REQUIREMENT. Never assign fewer personnel than this. Use 'GAP' if no qualified personnel are available.
+    4. MAX STAFFING: Target "maxStaff" if qualified personnel are available and have remaining shift capacity (max 5 per 7 days).
+    5. ZERO NEGATIVE INDICES: Day 0 is the program start date.
+    6. MANDATORY REST: Ensure at least ${config.minRestHours}h between any two shifts.
+    7. FATIGUE MANAGEMENT: Obey FATIGUE LOCKS.
+    8. LEAVE CATEGORIES: 
+       - Map specific leaves (Annual, Lieu, Sick) from LEAVE_LOG to "offDuty".
+       - Roster staff outside contract dates must be in "offDuty" as "Roster leave".
+
+    INPUT REGISTRIES:
     STAFF: ${JSON.stringify(data.staff)}
-    LEAVE: ${JSON.stringify(data.leaveRequests)}
+    LEAVE_LOG: ${JSON.stringify(data.leaveRequests)}
     SHIFTS: ${JSON.stringify(data.shifts)}
     FLIGHTS: ${JSON.stringify(data.flights)}
+    FATIGUE: ${JSON.stringify(fatigueLocks)}
     
-    RETURN: JSON following schema. 
-    If a shift starts on Day X but a staff member is locked until Day X+1, do NOT assign them.
+    OUTPUT: Return JSON matching schema. Propose a sequence that satisfies ALL role requirements while maintaining the 5/2 pattern for all 100% of the local staff.
   `;
 
   try {
@@ -173,7 +179,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
 export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Extract station data (${options.targetType}) into JSON.` }];
+  const parts: any[] = [{ text: `Extract station data for ${options.targetType} into a structured JSON format.` }];
   if (options.textData) parts.push({ text: options.textData });
   if (options.media) options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
@@ -186,12 +192,19 @@ export const extractDataFromContent = async (options: { textData?: string, media
 
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `INSTRUCTION: ${instruction}` }, { text: `CONTEXT: ${JSON.stringify(data.programs)}` }];
+  const parts: any[] = [
+    { text: `CONTEXT: Current handling programs: ${JSON.stringify(data.programs)}` },
+    { text: `INSTRUCTION: ${instruction}` },
+    { text: `Available Staff: ${JSON.stringify(data.staff)}` }
+  ];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 16000 } }
+    config: { 
+      responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: 16000 }
+    }
   });
   return safeParseJson(response.text);
 };
