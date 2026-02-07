@@ -120,7 +120,7 @@ const App: React.FC = () => {
     const start = new Date(startDate);
     if (!isNaN(start.getTime())) {
       const end = new Date(start);
-      end.setDate(start.getDate() + programDuration);
+      end.setDate(start.getDate() + (programDuration - 1));
       setEndDate(end.toISOString().split('T')[0]);
     }
   }, [startDate, programDuration]);
@@ -188,18 +188,40 @@ const App: React.FC = () => {
   const confirmGenerateProgram = async () => {
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
     const activeFlights = flights.filter(f => f.date >= startDate && f.date <= endDate);
+
     if (activeShifts.length === 0) { 
       setError(`No valid duty shifts registered between ${startDate} and ${endDate}. Please add shifts first.`); 
       setShowConfirmDialog(false); 
       return; 
     }
-    setShowConfirmDialog(false); setIsGenerating(true); setError(null);
+
+    setShowConfirmDialog(false); 
+    setIsGenerating(true); 
+    setError(null);
+
     try {
-      const result = await generateAIProgram({ flights: activeFlights, staff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, "", { numDays: programDuration, minRestHours, startDate });
-      setPrograms(result.programs); 
+      const result = await generateAIProgram(
+        { flights: activeFlights, staff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, 
+        "", 
+        { numDays: programDuration, minRestHours, startDate }
+      );
+
+      // CUMULATIVE MERGE WITH DEDUPLICATION:
+      // Remove old programs for the generated dates, then add the new ones.
+      const generatedDates = new Set(result.programs.map(p => p.dateString));
+      const preservedPrograms = programs.filter(p => p.dateString && !generatedDates.has(p.dateString));
+      const finalPrograms = [...preservedPrograms, ...result.programs];
+
+      setPrograms(finalPrograms); 
       setStationHealth(result.stationHealth);
       setAlerts(result.alerts || []);
-      if (supabase) await db.savePrograms(result.programs);
+      
+      if (supabase) {
+        // Save only the new block to DB (savePrograms handles the delete/insert block)
+        await db.savePrograms(result.programs); 
+      }
+      
+      // AUTO-REDIRECT to program display after successful build
       setActiveTab('program'); 
     } catch (err: any) { 
       setError(err.message); 
@@ -243,10 +265,9 @@ const App: React.FC = () => {
       shiftEndTime: finalTime
     }));
     
-    // Merge without duplication by staffId
     const currentDuties = [...incomingDuties];
     newDuties.forEach(nd => {
-      const idx = currentDuties.findIndex(cd => cd.staffId === nd.staffId);
+      const idx = currentDuties.findIndex(cd => cd.staffId === nd.staffId && cd.date === nd.date);
       if (idx !== -1) currentDuties[idx] = nd;
       else currentDuties.push(nd);
     });
@@ -529,6 +550,7 @@ const App: React.FC = () => {
                    <button onClick={() => setShowConfirmDialog(true)} className="w-full py-7 md:py-10 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center gap-3">
                      <Zap size={22}/> Build AI Program
                    </button>
+                   {isGenerating && <div className="flex flex-col items-center gap-2"><Loader2 className="animate-spin text-blue-600"/><span className="text-[8px] font-black uppercase tracking-widest text-blue-600">Calculating coverage...</span></div>}
                    {error && <p className="text-[10px] text-rose-500 font-bold uppercase italic text-center animate-pulse">{error}</p>}
                 </div>
              </div>
@@ -537,7 +559,7 @@ const App: React.FC = () => {
         {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} onOpenScanner={() => {setScannerTarget('flights'); setIsScannerOpen(true);}} />}
         {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} onOpenScanner={() => {setScannerTarget('staff'); setIsScannerOpen(true);}} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} onOpenScanner={() => {setScannerTarget('shifts'); setIsScannerOpen(true);}} />}
-        {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} />}
+        {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} />}
       </main>
 
       <nav className={`xl:hidden fixed bottom-0 left-0 right-0 z-[150] bg-white border-t border-slate-200 px-4 py-3 flex justify-around items-center transition-transform duration-500 pb-safe ${isVisible ? 'translate-y-0' : 'translate-y-full'}`}>
@@ -562,7 +584,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/90 p-6 animate-in fade-in">
            <div className="bg-white rounded-2xl md:rounded-[3.5rem] p-8 md:p-12 text-center max-w-lg w-full shadow-2xl border border-white/10">
               <h3 className="text-2xl md:text-3xl font-black italic uppercase text-slate-900 mb-4">Build AI Program?</h3>
-              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8 tracking-widest">AI will synchronize coverage and rest mandates.</p>
+              <p className="text-[9px] md:text-[10px] font-black uppercase text-slate-400 mb-8 tracking-widest">AI will prioritize MINIMUM STAFFING above all other patterns.</p>
               <div className="flex gap-4">
                 <button onClick={() => setShowConfirmDialog(false)} className="flex-1 font-black uppercase text-[10px] text-slate-400 hover:text-rose-500 transition-colors">Abort</button>
                 <button onClick={confirmGenerateProgram} className="flex-[2] py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all shadow-xl active:scale-95">Build AI Program</button>
