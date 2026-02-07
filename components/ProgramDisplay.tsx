@@ -63,6 +63,17 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
+  const formatRoleLabel = (role: string) => {
+    const r = role.toLowerCase();
+    if (r === 'shift leader' || r === 'sl') return 'sl';
+    if (r === 'operations' || r === 'ops') return 'ops';
+    if (r === 'ramp' || r === 'rmp') return 'rmp';
+    if (r === 'load control' || r === 'lc') return 'lc';
+    if (r === 'lost and found' || r === 'lf') return 'lf';
+    if (r === 'general') return ''; 
+    return role;
+  };
+
   const getDayLabel = (program: DailyProgram) => {
     if (program.dateString) {
       const d = new Date(program.dateString);
@@ -76,25 +87,22 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const assignedStaffIds = new Set((program.assignments || []).map(a => a.staffId));
     
     const registry: Record<string, string[]> = {
-      'DAYS OFF': [],
-      'ANNUAL LEAVE': [],
-      'SICK LEAVE': [],
-      'ROSTER LEAVE': [],
       'RESTING (POST-DUTY)': [],
+      'DAYS OFF': [],
+      'ROSTER LEAVE': [],
+      'ANNUAL LEAVE': [],
       'STANDBY (RESERVE)': []
     };
 
     staff.forEach(s => {
       if (assignedStaffIds.has(s.id)) return;
 
-      // 1. Fatigue/Rest Logic
       const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
       if (restLock) {
         registry['RESTING (POST-DUTY)'].push(`${s.initials} (until ${restLock.shiftEndTime})`);
         return;
       }
 
-      // 2. Official Leave Logic
       const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
       if (leave) {
         const typeKey = leave.type.toUpperCase();
@@ -103,15 +111,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         return;
       }
 
-      // 3. Roster Window Logic (Roster Leave)
-      if (s.type === 'Roster') {
-        if (s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
+      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+        if (dateStr < s.workFromDate || dateStr > s.workToDate) {
           registry['ROSTER LEAVE'].push(s.initials);
           return;
         }
       }
 
-      // 4. AI-assigned Off Duty
       const aiOff = (program.offDuty || []).find(od => od.staffId === s.id);
       if (aiOff) {
         const typeKey = aiOff.type.toUpperCase();
@@ -121,7 +127,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         }
       }
 
-      // 5. Default categorization
       if (s.type === 'Local') {
         registry['DAYS OFF'].push(s.initials);
       } else {
@@ -154,12 +159,25 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const tableData = Object.entries(shiftsMap).map(([shiftId, group], i) => {
         const sh = getShiftById(shiftId);
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION';
-        const personnelStr = group.map(a => {
-          const st = getStaffById(a.staffId);
-          return `${st?.initials || 'GAP'} (${a.role})`;
+        
+        // Combine roles for the same staff member if they are assigned multiple roles
+        const staffAssignments: Record<string, string[]> = {};
+        group.forEach(a => {
+          if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
+          const label = formatRoleLabel(a.role);
+          if (label) staffAssignments[a.staffId].push(label);
+        });
+
+        const personnelStr = Object.entries(staffAssignments).map(([sid, roles]) => {
+          const st = getStaffById(sid);
+          const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
+          return `${st?.initials || 'GAP'}${rolesStr}`;
         }).join(' | ');
 
-        return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${group.length} / ${sh?.minStaff || '0'}`, personnelStr];
+        // Unique headcount for the HC label
+        const uniqueHeadcount = Object.keys(staffAssignments).length;
+
+        return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${uniqueHeadcount} / ${sh?.minStaff || '0'}`, personnelStr];
       });
 
       autoTable(doc, {
@@ -261,23 +279,35 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       <tbody>
                         {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
                           const sh = getShiftById(shiftId);
+                          
+                          // Group roles per staff member
+                          const staffAssignments: Record<string, string[]> = {};
+                          group.forEach(a => {
+                            if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
+                            const label = formatRoleLabel(a.role);
+                            if (label) staffAssignments[a.staffId].push(label);
+                          });
+
+                          const uniqueHeadcount = Object.keys(staffAssignments).length;
+
                           return (
                             <tr key={idx} className="border-b border-slate-100 group">
                               <td className="p-6 text-sm font-black italic">{sh?.pickupTime || '--:--'}</td>
                               <td className="p-6 text-sm font-black italic">{sh?.endTime || '--:--'}</td>
                               <td className="p-6 text-xs font-bold uppercase">{sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION'}</td>
                               <td className="p-6 text-xs font-black">
-                                <span className={group.length < (sh?.minStaff || 0) ? 'text-rose-600' : 'text-emerald-600'}>
-                                  {group.length} / {sh?.minStaff || '0'}
+                                <span className={uniqueHeadcount < (sh?.minStaff || 0) ? 'text-rose-600' : 'text-emerald-600'}>
+                                  {uniqueHeadcount} / {sh?.minStaff || '0'}
                                 </span>
                               </td>
                               <td className="p-6 text-[10px] font-bold uppercase">
                                 <div className="flex flex-wrap gap-2">
-                                  {group.map((a: any, ai: number) => {
-                                      const st = getStaffById(a.staffId);
+                                  {Object.entries(staffAssignments).map(([sid, roles], ai) => {
+                                      const st = getStaffById(sid);
+                                      const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
-                                        <span key={ai} className={`px-2 py-1 rounded-lg ${a.staffId === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-50 text-slate-700'}`}>
-                                          {st?.initials || 'GAP'} ({a.role})
+                                        <span key={ai} className={`px-2 py-1 rounded-lg ${sid === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-50 text-slate-700'}`}>
+                                          {st?.initials || 'GAP'}{rolesStr}
                                         </span>
                                       );
                                   })}
