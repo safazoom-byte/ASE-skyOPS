@@ -196,6 +196,22 @@ export const db = {
     });
   },
 
+  async upsertLeaves(leaves: LeaveRequest[]) {
+    if (!supabase || leaves.length === 0) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('leave_requests').upsert(
+      leaves.map(l => ({
+        id: l.id,
+        user_id: session.user.id,
+        staff_id: l.staffId,
+        start_date: l.startDate,
+        end_date: l.endDate,
+        leave_type: l.type
+      }))
+    );
+  },
+
   async upsertIncomingDuty(d: IncomingDuty) {
     if (!supabase) return;
     const session = await auth.getSession();
@@ -207,6 +223,21 @@ export const db = {
       date: d.date,
       shift_end_time: d.shiftEndTime
     });
+  },
+
+  async upsertIncomingDuties(duties: IncomingDuty[]) {
+    if (!supabase || duties.length === 0) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await supabase.from('incoming_duties').upsert(
+      duties.map(d => ({
+        id: d.id,
+        user_id: session.user.id,
+        staff_id: d.staffId,
+        date: d.date,
+        shift_end_time: d.shiftEndTime
+      }))
+    );
   },
 
   async savePrograms(programs: DailyProgram[]) {

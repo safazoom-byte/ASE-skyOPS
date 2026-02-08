@@ -59,7 +59,7 @@ const ROSTER_SCHEMA = {
                 id: { type: Type.STRING },
                 staffId: { type: Type.STRING },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "One of: sl, ops, rmp, lc, lf, or 'General'" },
+                role: { type: Type.STRING, description: "Must be: SL, OPS, RMP, LC, LF, or 'General'" },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -115,29 +115,31 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }).filter(Boolean);
 
   const prompt = `
-    FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER
+    FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER GENERATION
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    STRICT STAFFING LAWS:
-    1. **5/2 WORK PATTERN**: "Local" staff MUST work exactly 5 shifts and have exactly 2 days off in this 7-day period. Do not assign 7 shifts.
-    2. **MULTI-ROLE CAPABILITY**: 
-       - 1 person can cover BOTH 'sl' (Shift Leader) and 'lc' (Load Control) if requested.
-       - 1 person can cover BOTH 'ops' (Operations) and 'lc' (Load Control) if requested.
-       - For all other roles (rmp, lf), assign exactly 1 unique person per requested slot.
-    3. **ROLE FILLING STRATEGY**: 
-       - First, assign staff to fulfill the requested specialist roles (sl, ops, rmp, lc, lf).
-       - Second, fill the remaining headcount required to meet the 'minStaff' count using available personnel with the role 'General'.
-    4. **MINIMUM STAFFING**: Every shift MUST meet the 'minStaff' unique headcount.
-    5. **REST**: Maintain exactly ${config.minRestHours}h rest after any duty finish.
+    STRICT OPERATIONAL DIRECTIVES:
+    1. **MANDATORY SKILL CHECK**: 
+       Check Boolean flags for every staff profile before role assignment:
+       - ROLE 'SL': Only if 'isShiftLeader' is true.
+       - ROLE 'OPS': Only if 'isOps' is true.
+       - ROLE 'LC': Only if 'isLoadControl' is true.
+       - ROLE 'RMP': Only if 'isRamp' is true.
+       - ROLE 'LF': Only if 'isLostFound' is true.
+       - Staff lacking these flags can only be 'General' (headcount only).
 
-    ABBREVIATIONS:
-    - Shift Leader -> sl
-    - Operations -> ops
-    - Ramp -> rmp
-    - Load Control -> lc
-    - Lost and Found -> lf
+    2. **OPTIMIZED MANNING (TARGET MAX)**:
+       - Aim to reach 'maxStaff' for every shift if personnel are available, qualified, and rested.
+       - DO NOT stop at 'minStaff' if extra staff are available.
 
-    INPUT DATA:
+    3. **CAPITALIZATION**:
+       - Use ONLY capitalized abbreviations: SL, OPS, LC, RMP, LF.
+
+    4. **REST & PATTERNS**:
+       - Ensure ${config.minRestHours}h rest between shifts.
+       - "Local" staff must work exactly 5 shifts and have 2 days off per week.
+
+    INPUT CONTEXT:
     - STAFF: ${JSON.stringify(data.staff)}
     - LEAVE: ${JSON.stringify(data.leaveRequests)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
