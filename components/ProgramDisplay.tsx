@@ -64,14 +64,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: string) => {
-    const r = role.toLowerCase();
-    if (r === 'shift leader' || r === 'sl') return 'sl';
-    if (r === 'operations' || r === 'ops') return 'ops';
-    if (r === 'ramp' || r === 'rmp') return 'rmp';
-    if (r === 'load control' || r === 'lc') return 'lc';
-    if (r === 'lost and found' || r === 'lf') return 'lf';
-    if (r === 'general') return ''; 
-    return role;
+    const r = role.toUpperCase();
+    if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
+    if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
+    if (r === 'RAMP' || r === 'RMP') return 'RMP';
+    if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
+    if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
+    if (r === 'GENERAL') return ''; 
+    return r;
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -158,9 +158,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       const tableData = Object.entries(shiftsMap).map(([shiftId, group], i) => {
         const sh = getShiftById(shiftId);
-        const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION';
+        const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
         
-        // Combine roles for the same staff member if they are assigned multiple roles
         const staffAssignments: Record<string, string[]> = {};
         group.forEach(a => {
           if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
@@ -174,15 +173,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           return `${st?.initials || 'GAP'}${rolesStr}`;
         }).join(' | ');
 
-        // Unique headcount for the HC label
         const uniqueHeadcount = Object.keys(staffAssignments).length;
 
-        return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${uniqueHeadcount} / ${sh?.minStaff || '0'}`, personnelStr];
+        return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${uniqueHeadcount} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
       });
 
       autoTable(doc, {
         startY: 48,
-        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MIN', 'PERSONNEL & ASSIGNED ROLES']],
+        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
         body: tableData,
         theme: 'grid',
         headStyles: { fillColor: headerColor, textColor: 255, fontStyle: 'bold', fontSize: 10 },
@@ -244,7 +242,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                <LayoutGrid size={14}/> Matrix
              </button>
           </div>
-          <button onClick={exportPDF} className="p-4 bg-slate-950 text-white rounded-2xl flex items-center gap-2">
+          <button onClick={exportPDF} className="p-4 bg-slate-950 text-white rounded-2xl flex items-center gap-2 shadow-lg active:scale-95 transition-all">
             <Printer size={18} />
             <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">Generate PDF</span>
           </button>
@@ -272,15 +270,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           <th className="p-5 text-[10px] font-black uppercase">PICKUP</th>
                           <th className="p-5 text-[10px] font-black uppercase">RELEASE</th>
                           <th className="p-5 text-[10px] font-black uppercase">FLIGHTS</th>
-                          <th className="p-5 text-[10px] font-black uppercase">HC / MIN</th>
+                          <th className="p-5 text-[10px] font-black uppercase">HC / MAX</th>
                           <th className="p-5 text-[10px] font-black uppercase">PERSONNEL</th>
                         </tr>
                       </thead>
                       <tbody>
                         {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
                           const sh = getShiftById(shiftId);
+                          const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'OPERATIONS';
                           
-                          // Group roles per staff member
                           const staffAssignments: Record<string, string[]> = {};
                           group.forEach(a => {
                             if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
@@ -291,13 +289,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           const uniqueHeadcount = Object.keys(staffAssignments).length;
 
                           return (
-                            <tr key={idx} className="border-b border-slate-100 group">
+                            <tr key={idx} className="border-b border-slate-100 group hover:bg-slate-50 transition-colors">
                               <td className="p-6 text-sm font-black italic">{sh?.pickupTime || '--:--'}</td>
                               <td className="p-6 text-sm font-black italic">{sh?.endTime || '--:--'}</td>
-                              <td className="p-6 text-xs font-bold uppercase">{sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'STATION'}</td>
+                              <td className="p-6 text-xs font-bold uppercase text-blue-600">{fls}</td>
                               <td className="p-6 text-xs font-black">
                                 <span className={uniqueHeadcount < (sh?.minStaff || 0) ? 'text-rose-600' : 'text-emerald-600'}>
-                                  {uniqueHeadcount} / {sh?.minStaff || '0'}
+                                  {uniqueHeadcount} / {sh?.maxStaff || sh?.minStaff || '0'}
                                 </span>
                               </td>
                               <td className="p-6 text-[10px] font-bold uppercase">
@@ -306,8 +304,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       const st = getStaffById(sid);
                                       const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
-                                        <span key={ai} className={`px-2 py-1 rounded-lg ${sid === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-50 text-slate-700'}`}>
-                                          {st?.initials || 'GAP'}{rolesStr}
+                                        <span key={ai} className={`px-2 py-1 rounded-lg ${sid === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
+                                          {st?.initials || 'GAP'} <span className="font-black text-slate-900">{rolesStr}</span>
                                         </span>
                                       );
                                   })}
