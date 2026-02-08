@@ -29,7 +29,8 @@ import {
   CloudOff,
   Calendar as CalendarIcon,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  Eraser
 } from 'lucide-react';
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
@@ -97,9 +98,11 @@ const App: React.FC = () => {
   const [incomingSearchTerm, setIncomingSearchTerm] = useState('');
   const [incomingSearchFocus, setIncomingSearchFocus] = useState(false);
 
-  const [quickLeaveStaffId, setQuickLeaveStaffId] = useState('');
+  const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
   const [quickLeaveDate, setQuickLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
+  const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState('');
+  const [quickLeaveSearchFocus, setQuickLeaveSearchFocus] = useState(false);
 
   const [isVisible, setIsVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -226,17 +229,24 @@ const App: React.FC = () => {
 
   const handleQuickLeaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickLeaveStaffId || !quickLeaveDate) return;
-    const newReq: LeaveRequest = {
+    if (quickLeaveStaffIds.length === 0 || !quickLeaveDate) return;
+    
+    const newRequests: LeaveRequest[] = quickLeaveStaffIds.map(sid => ({
       id: Math.random().toString(36).substr(2, 9),
-      staffId: quickLeaveStaffId,
+      staffId: sid,
       startDate: quickLeaveDate,
       endDate: quickLeaveDate,
       type: quickLeaveType
-    };
-    setLeaveRequests(prev => [...prev, newReq]);
-    if (supabase) await db.upsertLeave(newReq);
-    setQuickLeaveStaffId('');
+    }));
+    
+    setLeaveRequests(prev => [...prev, ...newRequests]);
+    
+    if (supabase) {
+      await db.upsertLeaves(newRequests);
+    }
+    
+    setQuickLeaveStaffIds([]);
+    setQuickLeaveSearchTerm('');
   };
 
   const handleLeaveDelete = async (id: string) => {
@@ -267,7 +277,9 @@ const App: React.FC = () => {
     });
 
     setIncomingDuties(currentDuties);
-    if (supabase) for (const d of newDuties) await db.upsertIncomingDuty(d);
+    if (supabase) {
+      await db.upsertIncomingDuties(newDuties);
+    }
     setIncomingSelectedStaffIds([]); setIncomingSearchTerm('');
   };
 
@@ -284,6 +296,12 @@ const App: React.FC = () => {
     const lower = incomingSearchTerm.toLowerCase();
     return staff.filter(s => s.initials.toLowerCase().includes(lower) || s.name.toLowerCase().includes(lower));
   }, [staff, incomingSearchTerm]);
+
+  const filteredQuickLeaveStaff = useMemo(() => {
+    if (!quickLeaveSearchTerm) return staff;
+    const lower = quickLeaveSearchTerm.toLowerCase();
+    return staff.filter(s => s.initials.toLowerCase().includes(lower) || s.name.toLowerCase().includes(lower));
+  }, [staff, quickLeaveSearchTerm]);
 
   const navigationTabs = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -372,11 +390,16 @@ const App: React.FC = () => {
                       </div>
                       <div className="flex flex-col gap-6">
                           <div className="relative group">
-                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block ml-1">Personnel Selection</label>
+                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block ml-1 flex justify-between items-center">
+                                <span>Personnel Selection</span>
+                                {incomingSelectedStaffIds.length > 0 && (
+                                  <button onClick={() => setIncomingSelectedStaffIds([])} className="text-[7px] text-slate-400 hover:text-rose-500 flex items-center gap-1"><Eraser size={8}/> Clear Selection</button>
+                                )}
+                              </label>
                               <div className={`w-full min-h-[56px] px-4 py-3 bg-white rounded-xl md:rounded-2xl border-2 flex flex-wrap items-center gap-2 transition-colors ${incomingSearchFocus ? 'border-amber-400' : 'border-slate-100'}`}>
                                   <Search size={18} className="text-slate-300" />
                                   {incomingSelectedStaffIds.map(id => (
-                                      <span key={id} className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-amber-100">
+                                      <span key={id} className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-amber-100 animate-in zoom-in-95">
                                           {staff.find(st => st.id === id)?.initials}
                                           <button onClick={() => setIncomingSelectedStaffIds(p => p.filter(x => x !== id))} className="hover:text-rose-500"><X size={12}/></button>
                                       </span>
@@ -457,20 +480,49 @@ const App: React.FC = () => {
                         </div>
                      </div>
                      <form onSubmit={handleQuickLeaveSubmit} className="flex flex-col gap-5 mb-8 p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                        <div className="flex flex-col sm:flex-row gap-4">
-                          <div className="flex-1 space-y-1.5">
-                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Select Staff</label>
-                             <select className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-xs uppercase outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveStaffId} onChange={e => setQuickLeaveStaffId(e.target.value)} required>
-                                <option value="">Select Personnel...</option>
-                                {staff.sort((a,b) => a.initials.localeCompare(b.initials)).map(s => (<option key={s.id} value={s.id}>{s.initials} — {s.name}</option>))}
-                             </select>
+                        <div className="flex flex-col gap-4">
+                          <div className="relative group">
+                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1 flex justify-between items-center">
+                                <span>Personnel Multi-Selection</span>
+                                {quickLeaveStaffIds.length > 0 && (
+                                  <button onClick={() => setQuickLeaveStaffIds([])} type="button" className="text-[7px] text-slate-400 hover:text-rose-500 flex items-center gap-1"><Eraser size={8}/> Clear Selection</button>
+                                )}
+                              </label>
+                              <div className={`w-full min-h-[56px] px-4 py-3 bg-white rounded-xl md:rounded-2xl border-2 flex flex-wrap items-center gap-2 transition-colors ${quickLeaveSearchFocus ? 'border-indigo-400' : 'border-slate-200'}`}>
+                                  <Search size={18} className="text-slate-300" />
+                                  {quickLeaveStaffIds.map(id => (
+                                      <span key={id} className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-indigo-100 animate-in zoom-in-95">
+                                          {staff.find(st => st.id === id)?.initials}
+                                          <button type="button" onClick={() => setQuickLeaveStaffIds(p => p.filter(x => x !== id))} className="hover:text-rose-500"><X size={12}/></button>
+                                      </span>
+                                  ))}
+                                  <input 
+                                      type="text" 
+                                      className="flex-1 bg-transparent text-sm font-bold outline-none py-1 min-w-[120px]"
+                                      placeholder="Search and tag personnel..."
+                                      value={quickLeaveSearchTerm}
+                                      onChange={e => setQuickLeaveSearchTerm(e.target.value)}
+                                      onFocus={() => setQuickLeaveSearchFocus(true)}
+                                      onBlur={() => setTimeout(() => setQuickLeaveSearchFocus(false), 200)}
+                                  />
+                              </div>
+                              {quickLeaveSearchFocus && (
+                                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-[180px] overflow-y-auto p-2 z-[200] animate-in slide-in-from-top-2">
+                                      {filteredQuickLeaveStaff.map(s => (
+                                          <button key={s.id} type="button" onMouseDown={(e) => { e.preventDefault(); setQuickLeaveStaffIds(p => p.includes(s.id) ? p.filter(x => x !== s.id) : [...p, s.id]); }} className={`w-full text-left p-2.5 rounded-lg text-[10px] font-black uppercase transition-colors ${quickLeaveStaffIds.includes(s.id) ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50 text-slate-600'}`}>
+                                              {s.initials} — {s.name}
+                                          </button>
+                                      ))}
+                                      {filteredQuickLeaveStaff.length === 0 && <p className="text-[10px] text-slate-400 p-3 italic">No matching personnel</p>}
+                                  </div>
+                              )}
                           </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-4">
                           <div className="flex-1 space-y-1.5">
                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Off-Duty Date</label>
                              <input type="date" className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-bold text-xs outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)} required />
                           </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-4">
                           <div className="flex-1 space-y-1.5">
                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Absence Reason</label>
                              <select className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-xs uppercase outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
@@ -481,7 +533,7 @@ const App: React.FC = () => {
                              </select>
                           </div>
                           <div className="flex items-end">
-                            <button type="submit" disabled={!quickLeaveStaffId} className="w-full sm:w-48 py-4 bg-slate-950 text-white rounded-xl font-black uppercase text-[10px] tracking-[0.2em] flex items-center justify-center gap-2 hover:bg-indigo-600 transition-all shadow-lg active:scale-95 disabled:opacity-50">
+                            <button type="submit" disabled={quickLeaveStaffIds.length === 0} className="w-full sm:w-48 py-4 bg-slate-950 text-white rounded-xl font-black uppercase text-[10px] tracking-[0.2em] flex items-center justify-center gap-2 hover:bg-indigo-600 transition-all shadow-lg active:scale-95 disabled:opacity-50">
                               <Plus size={16} /> ADD LOG
                             </button>
                           </div>
