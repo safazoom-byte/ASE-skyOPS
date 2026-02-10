@@ -118,34 +118,39 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER GENERATION
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    CRITICAL OPERATIONAL DIRECTIVES (MANDATORY):
-    1. **ZERO-RESERVE ENFORCEMENT**: 
-       - It is a CRITICAL FAILURE to have staff in "Standby (Reserve)" while any shift on the same day is below its 'minStaff' count.
-       - You MUST assign all available, rested, and qualified personnel to shifts until ALL 'minStaff' requirements are met.
-       - Only place staff in "Standby (Reserve)" if EVERY shift that day has already reached its 'maxStaff' or no qualified personnel remain.
+    CRITICAL COMPLIANCE DIRECTIVES (STRICT - DO NOT BREACH):
+    1. **LOCAL STAFF LABOR LAW**: 
+       - Every "Local" staff member MUST have exactly 2 DAYS OFF in any 7-day period.
+       - IMPORTANT: These 2 days DO NOT need to be sequential. They can be Monday and Thursday, for example.
+       - It is a CRITICAL COMPLIANCE BREACH to assign a Local staff member to more than 5 shifts in this 7-day window.
+       - Priority: Maintaining 5/2 compliance is more important than reaching 'maxStaff' targets.
 
-    2. **MANDATORY SKILL CHECK**: 
+    2. **ROSTER (CONTRACT) PRIORITY**:
+       - "Roster" staff are your primary relief workforce for filling headcount. 
+       - If a Local staff member is approaching their 5-shift limit, you MUST assign a Roster staff member instead.
+       - CONTRACT CHECK: "Roster" staff MUST NOT be assigned if the shift date is before their 'workFromDate' or after their 'workToDate'. They are on 'Roster leave' during these periods.
+
+    3. **MANDATORY SAFETY FLOOR (minStaff)**:
+       - You MUST meet the 'minStaff' count for every shift using qualified personnel.
+
+    4. **OPTIMIZED MANNING (maxStaff)**:
+       - Attempt to reach 'maxStaff' ONLY if it does not violate the 5-day limit for Local staff.
+       - Fill slots beyond 'minStaff' using this priority:
+          1. Available Roster staff (within contract dates).
+          2. Local staff (ONLY if they have worked < 5 shifts this week).
+
+    5. **REST HOURS**: Minimum rest between any two shifts is ${config.minRestHours} hours. Refer to the fatigue locks provided.
+
+    6. **MANDATORY SKILL CHECK**: 
        - ROLE 'SL': Only if 'isShiftLeader' is true.
        - ROLE 'OPS': Only if 'isOps' is true.
        - ROLE 'LC': Only if 'isLoadControl' is true.
        - ROLE 'RMP': Only if 'isRamp' is true.
        - ROLE 'LF': Only if 'isLostFound' is true.
-       - General headcount filling (General) can be used to meet 'minStaff'.
-
-    3. **FLIGHT COVERAGE**:
-       - Each shift handles specific flights. Assignments must follow the 'shiftId' logic.
-       - Ensure specialists are distributed based on the complexity of flights in those shifts.
-
-    4. **OPTIMIZED MANNING**:
-       - Aim for 'maxStaff' if personnel are available and rested.
-
-    5. **REST & LABOR PATTERNS**:
-       - Minimum ${config.minRestHours}h rest between any two shifts.
-       - "Local" staff: Max 5 shifts in 7 days (resulting in 2 "Days Off").
 
     INPUT CONTEXT:
     - STAFF: ${JSON.stringify(data.staff)}
-    - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - LEAVE/OFF-CONTRACT: ${JSON.stringify(data.leaveRequests)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
     - FATIGUE: ${JSON.stringify(fatigueLocks)}
   `;
@@ -201,6 +206,5 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
       thinkingConfig: { thinkingBudget: 16000 }
     }
   });
-  // Fixed: changed result.text to response.text to use the defined variable
   return safeParseJson(response.text);
 };
