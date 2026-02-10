@@ -118,26 +118,30 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER GENERATION
     PERIOD: ${config.startDate} for ${config.numDays} days.
 
-    STRICT OPERATIONAL DIRECTIVES:
-    1. **MANDATORY SKILL CHECK**: 
-       Check Boolean flags for every staff profile before role assignment:
+    CRITICAL OPERATIONAL DIRECTIVES (MANDATORY):
+    1. **ZERO-RESERVE ENFORCEMENT**: 
+       - It is a CRITICAL FAILURE to have staff in "Standby (Reserve)" while any shift on the same day is below its 'minStaff' count.
+       - You MUST assign all available, rested, and qualified personnel to shifts until ALL 'minStaff' requirements are met.
+       - Only place staff in "Standby (Reserve)" if EVERY shift that day has already reached its 'maxStaff' or no qualified personnel remain.
+
+    2. **MANDATORY SKILL CHECK**: 
        - ROLE 'SL': Only if 'isShiftLeader' is true.
        - ROLE 'OPS': Only if 'isOps' is true.
        - ROLE 'LC': Only if 'isLoadControl' is true.
        - ROLE 'RMP': Only if 'isRamp' is true.
        - ROLE 'LF': Only if 'isLostFound' is true.
-       - Staff lacking these flags can only be 'General' (headcount only).
+       - General headcount filling (General) can be used to meet 'minStaff'.
 
-    2. **OPTIMIZED MANNING (TARGET MAX)**:
-       - Aim to reach 'maxStaff' for every shift if personnel are available, qualified, and rested.
-       - DO NOT stop at 'minStaff' if extra staff are available.
+    3. **FLIGHT COVERAGE**:
+       - Each shift handles specific flights. Assignments must follow the 'shiftId' logic.
+       - Ensure specialists are distributed based on the complexity of flights in those shifts.
 
-    3. **CAPITALIZATION**:
-       - Use ONLY capitalized abbreviations: SL, OPS, LC, RMP, LF.
+    4. **OPTIMIZED MANNING**:
+       - Aim for 'maxStaff' if personnel are available and rested.
 
-    4. **REST & PATTERNS**:
-       - Ensure ${config.minRestHours}h rest between shifts.
-       - "Local" staff must work exactly 5 shifts and have 2 days off per week.
+    5. **REST & LABOR PATTERNS**:
+       - Minimum ${config.minRestHours}h rest between any two shifts.
+       - "Local" staff: Max 5 shifts in 7 days (resulting in 2 "Days Off").
 
     INPUT CONTEXT:
     - STAFF: ${JSON.stringify(data.staff)}
@@ -197,5 +201,6 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
       thinkingConfig: { thinkingBudget: 16000 }
     }
   });
+  // Fixed: changed result.text to response.text to use the defined variable
   return safeParseJson(response.text);
 };

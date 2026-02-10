@@ -146,9 +146,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
       
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(22).text(`SkyOPS Station Handling Program`, 14, 20);
-      doc.setFontSize(11).setTextColor(100, 100, 100).text(`Target Period: ${startDate} to ${endDate}`, 14, 28);
-      doc.setFontSize(16).setTextColor(0, 0, 0).text(getDayLabel(program), 14, 42);
+      doc.setFontSize(18).text(`SkyOPS Station Handling Program`, 14, 15);
+      doc.setFontSize(9).setTextColor(120, 120, 120).text(`Target Period: ${startDate} to ${endDate}`, 14, 21);
+      doc.setFontSize(14).setTextColor(0, 0, 0).text(getDayLabel(program), 14, 32);
 
       const shiftsMap: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
@@ -170,7 +170,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const personnelStr = Object.entries(staffAssignments).map(([sid, roles]) => {
           const st = getStaffById(sid);
           const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
-          return `${st?.initials || 'GAP'}${rolesStr}`;
+          return `${st?.initials || '??'}${rolesStr}`;
         }).join(' | ');
 
         const uniqueHeadcount = Object.keys(staffAssignments).length;
@@ -179,17 +179,25 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
 
       autoTable(doc, {
-        startY: 48,
+        startY: 38,
         head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
         body: tableData,
         theme: 'grid',
-        headStyles: { fillColor: headerColor, textColor: 255, fontStyle: 'bold', fontSize: 10 },
-        bodyStyles: { fontSize: 8, cellPadding: 4 },
-        columnStyles: { 5: { cellWidth: 100 } }
+        headStyles: { fillColor: headerColor, textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 6.5, cellPadding: 2, textColor: 50 },
+        columnStyles: { 
+          0: { cellWidth: 10 },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 35 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 'auto' }
+        },
+        margin: { top: 38, bottom: 10 }
       });
 
-      const currentY = (doc as any).lastAutoTable.finalY + 15;
-      doc.setFontSize(14).text('ABSENCE AND REST REGISTRY', 14, currentY);
+      const currentY = (doc as any).lastAutoTable.finalY + 8;
+      doc.setFontSize(11).setFont('helvetica', 'bold').text('ABSENCE AND REST REGISTRY', 14, currentY);
 
       const registry = getFullRegistryForDay(program);
       const absenceData = [
@@ -201,13 +209,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       ];
 
       autoTable(doc, {
-        startY: currentY + 5,
+        startY: currentY + 3,
         head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
         body: absenceData,
         theme: 'grid',
-        headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 10 },
-        bodyStyles: { fontSize: 10, cellPadding: 4 },
-        columnStyles: { 0: { cellWidth: 60, fontStyle: 'bold' } }
+        headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 8 },
+        bodyStyles: { fontSize: 7, cellPadding: 2 },
+        columnStyles: { 0: { cellWidth: 45, fontStyle: 'bold' } },
+        margin: { bottom: 10 }
       });
     });
 
@@ -262,7 +271,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             return (
               <div key={program.dateString || program.day} className="bg-white rounded-[4rem] border border-slate-200 shadow-xl overflow-hidden">
                 <div className="p-10 md:p-14">
-                  <h2 className="text-3xl font-black italic uppercase tracking-tighter text-slate-950 mb-10">{getDayLabel(program)}</h2>
+                  <div className="flex justify-between items-end mb-10">
+                    <h2 className="text-3xl font-black italic uppercase tracking-tighter text-slate-950">{getDayLabel(program)}</h2>
+                    <div className="flex items-center gap-2">
+                      <Plane className="text-blue-500" size={16} />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Station Handling Active</span>
+                    </div>
+                  </div>
+                  
                   <div className="overflow-x-auto rounded-3xl border border-slate-200">
                     <table className="w-full text-left border-collapse">
                       <thead>
@@ -277,7 +293,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       <tbody>
                         {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
                           const sh = getShiftById(shiftId);
-                          const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'OPERATIONS';
+                          const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
                           
                           const staffAssignments: Record<string, string[]> = {};
                           group.forEach(a => {
@@ -305,7 +321,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
                                         <span key={ai} className={`px-2 py-1 rounded-lg ${sid === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
-                                          {st?.initials || 'GAP'} <span className="font-black text-slate-900">{rolesStr}</span>
+                                          {st?.initials || '??'} <span className="font-black text-slate-900">{rolesStr}</span>
                                         </span>
                                       );
                                   })}

@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#020617" />
+    
+    <!-- PWA Installation Support -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SkyOPS AI" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2664/2664531.png" />
     
     <!-- Aggressive Anti-Caching Headers for Vercel -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
@@ -11,7 +18,7 @@
     <meta http-equiv="Expires" content="0" />
     
     <link rel="stylesheet" href="/style.css" />
-    <title>SkyOPS | Station Manager</title>
+    <title>SkyOPS AI | Program Builder</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -54,7 +61,6 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body class="bg-slate-50 overflow-x-hidden">
     <div id="root"></div>
