@@ -65,14 +65,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: string) => {
-    const r = role.toUpperCase();
-    if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
-    if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-    if (r === 'RAMP' || r === 'RMP') return 'RMP';
-    if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
-    if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
-    if (r === 'GENERAL') return ''; 
-    return r;
+    if (!role) return '';
+    return role.split('+').map(part => {
+      const r = part.trim().toUpperCase();
+      if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
+      if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
+      if (r === 'RAMP' || r === 'RMP') return 'RMP';
+      if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
+      if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
+      return r;
+    }).join('+');
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -323,7 +325,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       const st = isGap ? null : getStaffById(sid);
                                       const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
-                                        <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
+                                        <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100 ring-2 ring-rose-500/20' : 'bg-slate-100 text-slate-700 font-bold'}`}>
                                           {isGap && <ShieldAlert size={10} className="text-rose-400" />}
                                           {isGap ? 'VACANT' : (st?.initials || '??')} 
                                           <span className="font-black text-slate-900">{rolesStr}</span>

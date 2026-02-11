@@ -57,9 +57,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must exactly match a staff.id from the input list. NO HALLUCINATIONS." },
+                staffId: { type: Type.STRING, description: "Must match a real ID from the personnel list. Use 'VACANT' if no one is eligible." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Must be: SL, OPS, RMP, LC, LF" },
+                role: { type: Type.STRING, description: "Standard role. If covering multiple roles, use 'LC+SL' or 'LC+OPS'." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -71,7 +71,7 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 staffId: { type: Type.STRING },
-                type: { type: Type.STRING }
+                type: { type: Type.STRING, description: "Type of day off, e.g., 'Day off'." }
               },
               required: ["staffId", "type"]
             }
@@ -80,13 +80,13 @@ const ROSTER_SCHEMA = {
         required: ["day", "dateString", "assignments"]
       }
     },
-    stationHealth: { type: Type.NUMBER, description: "Percentage of total shifts fully staffed to minStaff requirements." },
+    stationHealth: { type: Type.NUMBER },
     alerts: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
-          type: { type: Type.STRING, description: "danger or warning" },
+          type: { type: Type.STRING },
           message: { type: Type.STRING }
         }
       }
@@ -97,60 +97,48 @@ const ROSTER_SCHEMA = {
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const rosterStart = new Date(config.startDate);
-  rosterStart.setHours(0,0,0,0);
-
-  const fatigueLocks = (data.incomingDuties || []).map(duty => {
-     const [h, m] = duty.shiftEndTime.split(':').map(Number);
-     const dutyEndDate = new Date(duty.date);
-     dutyEndDate.setHours(h, m, 0, 0);
-     const safeToWorkDate = new Date(dutyEndDate);
-     safeToWorkDate.setHours(safeToWorkDate.getHours() + config.minRestHours);
-     if (safeToWorkDate.getTime() <= rosterStart.getTime()) return null;
-     const diffMs = safeToWorkDate.getTime() - rosterStart.getTime();
-     const diffDays = diffMs / (1000 * 60 * 60 * 24);
-     const lockedDayIndex = Math.max(0, Math.floor(diffDays));
-     const timeStr = `${String(safeToWorkDate.getHours()).padStart(2, '0')}:${String(safeToWorkDate.getMinutes()).padStart(2, '0')}`;
-     return { staffId: duty.staffId, lockedUntilDay: lockedDayIndex, lockedUntilTime: timeStr };
-  }).filter(Boolean);
-
+  
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - INTELLIGENT ROSTER PIPELINE
+    COMMAND: STATION OPERATIONS COMMAND - SMART CALCULATION PIPELINE
     
-    CRITICAL INSTRUCTION: YOU MUST FOLLOW THIS EXACT 4-STEP CALCULATION SEQUENCE. 
-    FAILURE TO FOLLOW THE SEQUENCE WILL RESULT IN OPERATIONAL NON-COMPLIANCE.
+    CRITICAL CALCULATION LOGIC:
+    1. DEMAND-FIRST AUDIT: 
+       - For each day, calculate the total 'minStaff' required across all shifts. This is the Master Headcount.
+    
+    2. RESOURCE HIERARCHY (CONTRACT vs LOCAL):
+       - PRIORITY 1: Assign all available ROSTER (Contract) staff first. They must be utilized fully if within contract dates and rested.
+       - PRIORITY 2: Only assign LOCAL staff if Roster staff cannot meet the 'minStaff' headcount target for that day.
+       - AUTO DAY-OFF: Any Local staff member not required to reach the 'minStaff' floor is automatically assigned a "Day off".
 
-    STEP 1: CALCULATE STATION DEMAND
-    - For each day from ${config.startDate} for ${config.numDays} days, analyze all 'shifts'.
-    - Sum the 'minStaff' required and the specific roleCounts (SL, OPS, LC, RMP, LF).
-    - This is the mandatory "Target Headcount" you must fulfill.
+    3. MULTI-ROLE OPTIMIZATION (EFFICIENCY):
+       - SMART RULE: Only the following pairs are permitted for multi-role optimization:
+         * [Load Control (LC) + Shift Leader (SL)]
+         * [Load Control (LC) + Operations (OPS)]
+       - If a person is qualified for LC and SL, you MUST assign them as 'LC+SL' for the shift.
+       - If a person is qualified for LC and OPS, you MUST assign them as 'LC+OPS' for the shift.
+       - One person covering two roles counts as ONE head towards 'minStaff' but fulfills both role requirements.
+       - DO NOT assign two people if one person is qualified to cover these pairs.
 
-    STEP 2: ALLOCATE ROSTER (CONTRACT) STAFF (PRIORITY 1)
-    - Identify Roster staff currently within their contract window ('workFromDate' to 'workToDate').
-    - Assign them to the shifts calculated in Step 1 first.
-    - Match skills strictly (isShiftLeader for SL, isOps for OPS, etc.).
+    4. LABOR COMPLIANCE (THE 5/2 LAW):
+       - LOCAL STAFF: Strictly limited to 5 shifts per 7-day period.
+       - EXCLUSION RULE: No Local staff member can work 4, 6, or 7 shifts. It must be exactly 5 shifts per week OR 0 if demand is low.
+       - Rest of the days are hard-locked to "Day off".
 
-    STEP 3: ALLOCATE LOCAL STAFF (PRIORITY 2)
-    - Identify Local staff available for the day.
-    - RULE (5/2): A Local staff member CANNOT work more than 5 days in a 7-day period.
-    - RULE (REST): Check 'fatigueLocks' and 'minRestHours'. A person is LOCKED if they haven't rested.
-    - Fill any remaining gaps from Step 1 using eligible Local staff.
+    5. ANTI-HALLUCINATION & INTEGRITY:
+       - NEVER use initials or IDs not in the PERSONNEL list.
+       - ABSOLUTELY NO "??".
+       - If a position is unfillable due to rest/5-day limits, use staffId: 'VACANT'.
 
-    STEP 4: MANDATORY DAY OFF ASSIGNMENT (THE CLEANUP)
-    - Take ALL Local staff members who were NOT assigned to a shift in Step 3 (either because demand was met or they were ineligible/rested).
-    - YOU MUST EXPLICITLY assign them as "Day off" in the 'offDuty' array for that day. 
-    - This ensures they receive their required 2 rest days per week.
+    STATION PARAMS:
+    - Min Rest: ${config.minRestHours} hours
+    - Start Date: ${config.startDate}
+    - Duration: ${config.numDays} days
 
-    PASS 2: SELF-AUDIT & REVISION (THE AUDITOR)
-    - RE-CHECK MINIMUM STAFF: Review every shift. If assigned headcount < 'minStaff', you must try to re-allocate any available Local staff from Step 4.
-    - If a shift remains under-staffed after checking everyone, use 'staffId': 'GAP' for the missing slots and add a 'danger' alert.
-    - HALLUCINATION CHECK: Every 'staffId' in your response must be a real ID from the PERSONNEL REGISTRY. 
-
-    INPUT REGISTRIES:
+    INPUT DATA:
     - PERSONNEL: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
-    - FATIGUE/REST LOCKS: ${JSON.stringify(fatigueLocks)}
-    - APPROVED ABSENCE: ${JSON.stringify(data.leaveRequests)}
+    - REST LOCKS: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
   `;
 
   try {
