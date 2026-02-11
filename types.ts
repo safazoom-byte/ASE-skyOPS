@@ -72,7 +72,7 @@ export interface Assignment {
   id: string;
   staffId: string;
   flightId: string;
-  role: Skill;
+  role: string; // Changed from Skill to string to support combined roles like 'SL+LC'
   shiftId?: string; 
 }
 

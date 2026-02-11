@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -57,9 +58,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list. NO HALLUCINATIONS. Use 'VACANT' for gaps." },
+                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list. NO HALLUCINATIONS. Use 'VACANT' only if zero staff are available." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "One of: SL, OPS, RMP, LC, LF, or 'General' for filler help." },
+                role: { type: Type.STRING, description: "Role codes: SL, OPS, RMP, LC, LF. ONLY combinations allowed: 'SL+LC' or 'LC+OPS'. All other roles MUST be single." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -71,7 +72,7 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 staffId: { type: Type.STRING },
-                type: { type: Type.STRING, description: "Usually 'Day off'." }
+                type: { type: Type.STRING }
               },
               required: ["staffId", "type"]
             }
@@ -87,7 +88,7 @@ const ROSTER_SCHEMA = {
         type: Type.OBJECT,
         properties: {
           type: { type: Type.STRING },
-          message: { type: Type.STRING }
+          message: { type: { type: Type.STRING } }
         }
       }
     }
@@ -100,26 +101,30 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER ROSTER CALCULATION
-    OBJECTIVE: Build a 100% compliant program with ZERO hallucinations and balanced workload.
+    OBJECTIVE: Build a 100% compliant program with ZERO hallucinations and optimized specialist distribution.
 
-    1. IDENTITY LOCKDOWN (STRICT):
-       - NEVER invent staff IDs or initials. Every 'staffId' in assignments MUST be found in the provided Personnel Registry.
-       - NEVER use "???". If a slot cannot be filled by a real, rested person, use 'staffId': 'VACANT'.
+    1. SKILL-BASED ROLE LOCKDOWN (STRICT):
+       - CHECK STAFF QUALIFICATIONS: Use 'isShiftLeader', 'isLoadControl', 'isOps', 'isRamp', 'isLostFound' booleans.
+       - FORBIDDEN: NEVER assign a role (e.g., LC) to a staff member if their qualification boolean is FALSE.
+       - PERMITTED MULTI-ROLES: ONLY 'SL+LC' and 'LC+OPS' are allowed as combined roles for a single person.
+       - FORBIDDEN MULTI-ROLES: Any other combination (e.g., 'SL+OPS', 'RMP+LC', 'SL+RMP') is STRICTLY FORBIDDEN.
+       - INDIVIDUAL ASSIGNMENT: For all roles other than the two permitted combinations above, you MUST assign EXACTLY ONE unique staff member per role requirement.
+       - QUALIFICATION CHECK: To assign 'SL+LC', the staff member MUST have both 'isShiftLeader' AND 'isLoadControl' as TRUE. To assign 'LC+OPS', they MUST have both 'isLoadControl' AND 'isOps' as TRUE.
 
     2. THE 5/2 LABOR LAW & EQUAL LOADING:
-       - LOCAL STAFF: Calculate shift counts for every person. Target is EXACTLY 5 shifts per person.
-       - LIMIT: NO Local staff member can work more than 5 shifts. NO 6th or 7th shifts (e.g., prevent MS-ATZ working 7 shifts).
-       - BALANCING: If staff like SK-ATZ or NK-ATZ have only 2 shifts, assign them more work before giving anyone else a 4th or 5th shift.
-       - DAYS OFF: Every Local staff member MUST have exactly 2 days off. These 2 days should be NON-SEQUENTIAL (separated by work).
+       - LOCAL STAFF: Every local staff member MUST work EXACTLY 5 shifts and have EXACTLY 2 days off per 7-day period.
+       - NO OVERLOADING: Do not give any local staff 6 or 7 shifts.
+       - NO UNDERLOADING: Do not leave staff under-scheduled while others are at the limit.
+       - DISTRIBUTION: Exhaust all 'Standby' (Reserve) staff to reach 'maxStaff' before resorting to 'VACANT'.
 
-    3. ROLE ASSIGNMENT & CLEAN LABELING:
-       - SPECIALISTS: Use roles 'SL', 'OPS', 'LC', 'RMP', 'LF' only for people assigned to meet the specific shift requirements (roleCounts).
-       - HEADCOUNT FILLERS: If you assign someone just to reach 'maxStaff', set their 'role' to 'General'.
-       - NO CLUTTER: Do not mark everyone as (RMP) if they are just extra headcount.
+    3. SPECIALIST BALANCING:
+       - PRIORITIZE leadership: Every shift MUST have at least one SL (Shift Leader) and one LC (Load Control) if specified in requirements.
+       - BALANCE specialist coverage across the whole day. If a shift has 0 SLs, use a qualified 'SL+LC' staff member to bridge the gap.
 
     4. DEMAND PRIORITIZATION:
-       - 1st Priority: Fill the 'minStaff' floor for every shift using qualified specialist roles.
-       - 2nd Priority: Reach 'maxStaff' using remaining staff who have worked < 5 shifts and are rested.
+       - 1st: Fill 'minStaff' with required specialists (matching their boolean skills).
+       - 2nd: Fill up to 'maxStaff' using 'General' role for any remaining rested staff who are under their 5-shift limit.
+       - 3rd: Only use 'VACANT' if EVERY rested, qualified person has reached their 5-shift limit.
 
     PARAMS:
     - Min Rest: ${config.minRestHours}h

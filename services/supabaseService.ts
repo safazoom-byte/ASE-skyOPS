@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty } from '../types';
 
@@ -93,8 +94,8 @@ export const db = {
           endTime: s.end_time,
           minStaff: s.min_staff || 1,
           maxStaff: s.max_staff || 10,
-          role_counts: s.role_counts || {},
-          flight_ids: s.flight_ids || []
+          roleCounts: s.role_counts || {}, 
+          flightIds: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
