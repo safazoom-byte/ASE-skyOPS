@@ -57,9 +57,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING },
+                staffId: { type: Type.STRING, description: "Must exactly match a staff.id from the input list. NO HALLUCINATIONS." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Must be: SL, OPS, RMP, LC, LF, or 'General'" },
+                role: { type: Type.STRING, description: "Must be: SL, OPS, RMP, LC, LF" },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -80,13 +80,13 @@ const ROSTER_SCHEMA = {
         required: ["day", "dateString", "assignments"]
       }
     },
-    stationHealth: { type: Type.NUMBER },
+    stationHealth: { type: Type.NUMBER, description: "Percentage of total shifts fully staffed to minStaff requirements." },
     alerts: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
-          type: { type: Type.STRING },
+          type: { type: Type.STRING, description: "danger or warning" },
           message: { type: Type.STRING }
         }
       }
@@ -115,44 +115,42 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }).filter(Boolean);
 
   const prompt = `
-    FLIGHT HANDLING OPERATIONS COMMAND - STATION ROSTER GENERATION
-    PERIOD: ${config.startDate} for ${config.numDays} days.
+    COMMAND: STATION OPERATIONS COMMAND - INTELLIGENT ROSTER PIPELINE
+    
+    CRITICAL INSTRUCTION: YOU MUST FOLLOW THIS EXACT 4-STEP CALCULATION SEQUENCE. 
+    FAILURE TO FOLLOW THE SEQUENCE WILL RESULT IN OPERATIONAL NON-COMPLIANCE.
 
-    CRITICAL COMPLIANCE DIRECTIVES (STRICT - DO NOT BREACH):
-    1. **LOCAL STAFF LABOR LAW**: 
-       - Every "Local" staff member MUST have exactly 2 DAYS OFF in any 7-day period.
-       - IMPORTANT: These 2 days DO NOT need to be sequential. They can be Monday and Thursday, for example.
-       - It is a CRITICAL COMPLIANCE BREACH to assign a Local staff member to more than 5 shifts in this 7-day window.
-       - Priority: Maintaining 5/2 compliance is more important than reaching 'maxStaff' targets.
+    STEP 1: CALCULATE STATION DEMAND
+    - For each day from ${config.startDate} for ${config.numDays} days, analyze all 'shifts'.
+    - Sum the 'minStaff' required and the specific roleCounts (SL, OPS, LC, RMP, LF).
+    - This is the mandatory "Target Headcount" you must fulfill.
 
-    2. **ROSTER (CONTRACT) PRIORITY**:
-       - "Roster" staff are your primary relief workforce for filling headcount. 
-       - If a Local staff member is approaching their 5-shift limit, you MUST assign a Roster staff member instead.
-       - CONTRACT CHECK: "Roster" staff MUST NOT be assigned if the shift date is before their 'workFromDate' or after their 'workToDate'. They are on 'Roster leave' during these periods.
+    STEP 2: ALLOCATE ROSTER (CONTRACT) STAFF (PRIORITY 1)
+    - Identify Roster staff currently within their contract window ('workFromDate' to 'workToDate').
+    - Assign them to the shifts calculated in Step 1 first.
+    - Match skills strictly (isShiftLeader for SL, isOps for OPS, etc.).
 
-    3. **MANDATORY SAFETY FLOOR (minStaff)**:
-       - You MUST meet the 'minStaff' count for every shift using qualified personnel.
+    STEP 3: ALLOCATE LOCAL STAFF (PRIORITY 2)
+    - Identify Local staff available for the day.
+    - RULE (5/2): A Local staff member CANNOT work more than 5 days in a 7-day period.
+    - RULE (REST): Check 'fatigueLocks' and 'minRestHours'. A person is LOCKED if they haven't rested.
+    - Fill any remaining gaps from Step 1 using eligible Local staff.
 
-    4. **OPTIMIZED MANNING (maxStaff)**:
-       - Attempt to reach 'maxStaff' ONLY if it does not violate the 5-day limit for Local staff.
-       - Fill slots beyond 'minStaff' using this priority:
-          1. Available Roster staff (within contract dates).
-          2. Local staff (ONLY if they have worked < 5 shifts this week).
+    STEP 4: MANDATORY DAY OFF ASSIGNMENT (THE CLEANUP)
+    - Take ALL Local staff members who were NOT assigned to a shift in Step 3 (either because demand was met or they were ineligible/rested).
+    - YOU MUST EXPLICITLY assign them as "Day off" in the 'offDuty' array for that day. 
+    - This ensures they receive their required 2 rest days per week.
 
-    5. **REST HOURS**: Minimum rest between any two shifts is ${config.minRestHours} hours. Refer to the fatigue locks provided.
+    PASS 2: SELF-AUDIT & REVISION (THE AUDITOR)
+    - RE-CHECK MINIMUM STAFF: Review every shift. If assigned headcount < 'minStaff', you must try to re-allocate any available Local staff from Step 4.
+    - If a shift remains under-staffed after checking everyone, use 'staffId': 'GAP' for the missing slots and add a 'danger' alert.
+    - HALLUCINATION CHECK: Every 'staffId' in your response must be a real ID from the PERSONNEL REGISTRY. 
 
-    6. **MANDATORY SKILL CHECK**: 
-       - ROLE 'SL': Only if 'isShiftLeader' is true.
-       - ROLE 'OPS': Only if 'isOps' is true.
-       - ROLE 'LC': Only if 'isLoadControl' is true.
-       - ROLE 'RMP': Only if 'isRamp' is true.
-       - ROLE 'LF': Only if 'isLostFound' is true.
-
-    INPUT CONTEXT:
-    - STAFF: ${JSON.stringify(data.staff)}
-    - LEAVE/OFF-CONTRACT: ${JSON.stringify(data.leaveRequests)}
+    INPUT REGISTRIES:
+    - PERSONNEL: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
-    - FATIGUE: ${JSON.stringify(fatigueLocks)}
+    - FATIGUE/REST LOCKS: ${JSON.stringify(fatigueLocks)}
+    - APPROVED ABSENCE: ${JSON.stringify(data.leaveRequests)}
   `;
 
   try {

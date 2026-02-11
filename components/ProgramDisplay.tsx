@@ -19,7 +19,8 @@ import {
   Printer,
   ChevronRight,
   UserX,
-  Moon
+  Moon,
+  ShieldAlert
 } from 'lucide-react';
 
 interface Props {
@@ -168,12 +169,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         });
 
         const personnelStr = Object.entries(staffAssignments).map(([sid, roles]) => {
+          if (sid === 'GAP' || sid === 'VACANT') return 'VACANT';
           const st = getStaffById(sid);
           const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
           return `${st?.initials || '??'}${rolesStr}`;
         }).join(' | ');
 
-        const uniqueHeadcount = Object.keys(staffAssignments).length;
+        const uniqueHeadcount = Object.keys(staffAssignments).filter(k => k !== 'GAP' && k !== 'VACANT').length;
 
         return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${uniqueHeadcount} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
       });
@@ -302,7 +304,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                             if (label) staffAssignments[a.staffId].push(label);
                           });
 
-                          const uniqueHeadcount = Object.keys(staffAssignments).length;
+                          const uniqueHeadcount = Object.keys(staffAssignments).filter(k => k !== 'GAP' && k !== 'VACANT').length;
 
                           return (
                             <tr key={idx} className="border-b border-slate-100 group hover:bg-slate-50 transition-colors">
@@ -317,11 +319,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                               <td className="p-6 text-[10px] font-bold uppercase">
                                 <div className="flex flex-wrap gap-2">
                                   {Object.entries(staffAssignments).map(([sid, roles], ai) => {
-                                      const st = getStaffById(sid);
+                                      const isGap = sid === 'GAP' || sid === 'VACANT';
+                                      const st = isGap ? null : getStaffById(sid);
                                       const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
-                                        <span key={ai} className={`px-2 py-1 rounded-lg ${sid === 'GAP' ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
-                                          {st?.initials || '??'} <span className="font-black text-slate-900">{rolesStr}</span>
+                                        <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
+                                          {isGap && <ShieldAlert size={10} className="text-rose-400" />}
+                                          {isGap ? 'VACANT' : (st?.initials || '??')} 
+                                          <span className="font-black text-slate-900">{rolesStr}</span>
                                         </span>
                                       );
                                   })}
