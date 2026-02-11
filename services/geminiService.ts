@@ -88,7 +88,7 @@ const ROSTER_SCHEMA = {
         type: Type.OBJECT,
         properties: {
           type: { type: Type.STRING },
-          message: { type: { type: Type.STRING } }
+          message: { type: Type.STRING }
         }
       }
     }

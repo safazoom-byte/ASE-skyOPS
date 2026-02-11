@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty } from '../types';
 import { jsPDF } from 'jspdf';
@@ -64,9 +65,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  const formatRoleLabel = (role: string) => {
-    if (!role || role.toLowerCase() === 'general' || role.toUpperCase() === 'NIL') return '';
-    return role.split('+').map(part => {
+  const formatRoleLabel = (role: any) => {
+    // Robust check to prevent toUpperCase crashes
+    const rStr = String(role || '');
+    if (!rStr || rStr.toLowerCase() === 'general' || rStr.toUpperCase() === 'NIL') return '';
+    return rStr.split('+').map(part => {
       const r = part.trim().toUpperCase();
       if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
       if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
@@ -108,7 +111,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
       if (leave) {
-        const typeKey = leave.type.toUpperCase();
+        const typeKey = String(leave.type || '').toUpperCase();
         if (registry[typeKey]) registry[typeKey].push(s.initials);
         else registry['ANNUAL LEAVE'].push(s.initials);
         return;
@@ -123,7 +126,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
       const aiOff = (program.offDuty || []).find(od => od.staffId === s.id);
       if (aiOff) {
-        const typeKey = aiOff.type.toUpperCase();
+        const typeKey = String(aiOff.type || '').toUpperCase();
         if (registry[typeKey]) {
           registry[typeKey].push(s.initials);
           return;
