@@ -66,7 +66,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: any) => {
-    // Robust check to prevent toUpperCase crashes
+    // Forced string conversion to prevent "toUpperCase is not a function"
     const rStr = String(role || '');
     if (!rStr || rStr.toLowerCase() === 'general' || rStr.toUpperCase() === 'NIL') return '';
     return rStr.split('+').map(part => {

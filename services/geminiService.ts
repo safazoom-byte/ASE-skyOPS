@@ -75,11 +75,11 @@ const ROSTER_SCHEMA = {
                 type: { type: Type.STRING }
               },
               required: ["staffId", "type"]
-            }
-          }
-        },
+                }
+              }
+            },
         required: ["day", "dateString", "assignments"]
-      }
+          }
     },
     stationHealth: { type: Type.NUMBER },
     alerts: {
@@ -101,37 +101,42 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER ROSTER CALCULATION
-    OBJECTIVE: Build a 100% compliant program with ZERO hallucinations and optimized specialist distribution.
+    OBJECTIVE: Build a 100% compliant program with ZERO vacancies if staff are available and STRICT labor law adherence.
 
-    1. SKILL-BASED ROLE LOCKDOWN (STRICT):
+    ### CRITICAL CONSTRAINTS (MANDATORY):
+
+    1. ZERO-VACANCY PROTOCOL:
+       - You are STRICTLY FORBIDDEN from using 'VACANT' if there is ANY rested, qualified staff member in the 'STANDBY (RESERVE)' or 'Personnel Registry' pool.
+       - Staff of type 'Roster' are contracted to be available 24/7. Unless they have a 'Rest Lock' or 'Leave Request', they MUST be assigned to fill shifts before declaring a vacancy.
+       - If a shift is below 'maxStaff', you MUST fill it with available personnel. Leaving slots 'VACANT' while staff are on Standby is a CRITICAL FAILURE.
+
+    2. THE 5/2 LABOR LAW (STRICT 5-SHIFT CAP):
+       - LOCAL STAFF (type: 'Local') MUST work EXACTLY 5 shifts and have EXACTLY 2 days off per 7-day period.
+       - FORBIDDEN: NEVER assign 6 or 7 shifts to a local staff member. 
+       - MONITORING: Staff like MA-ATZ, SK-ATZ, FT-ATZ must NEVER exceed 5 shifts. 
+       - EQUAL LOADING: Prioritize staff with fewer shifts (e.g., MR-ATZ who only has 4) to fill gaps until they reach their 5-shift target.
+       - ACTIVATE CHAIN OF THOUGHT: For every local person, maintain a count. Once they hit 5 shifts, they are LOCKED.
+
+    3. SKILL-BASED ROLE LOCKDOWN:
        - CHECK STAFF QUALIFICATIONS: Use 'isShiftLeader', 'isLoadControl', 'isOps', 'isRamp', 'isLostFound' booleans.
-       - FORBIDDEN: NEVER assign a role (e.g., LC) to a staff member if their qualification boolean is FALSE.
-       - PERMITTED MULTI-ROLES: ONLY 'SL+LC' and 'LC+OPS' are allowed as combined roles for a single person.
-       - FORBIDDEN MULTI-ROLES: Any other combination (e.g., 'SL+OPS', 'RMP+LC', 'SL+RMP') is STRICTLY FORBIDDEN.
-       - INDIVIDUAL ASSIGNMENT: For all roles other than the two permitted combinations above, you MUST assign EXACTLY ONE unique staff member per role requirement.
-       - QUALIFICATION CHECK: To assign 'SL+LC', the staff member MUST have both 'isShiftLeader' AND 'isLoadControl' as TRUE. To assign 'LC+OPS', they MUST have both 'isLoadControl' AND 'isOps' as TRUE.
+       - PERMITTED MULTI-ROLES: ONLY 'SL+LC' and 'LC+OPS' are allowed as combined roles for a single person. 
+       - QUALIFICATION CHECK: To assign 'SL+LC', they MUST have both skills TRUE in their registry entry.
 
-    2. THE 5/2 LABOR LAW & EQUAL LOADING:
-       - LOCAL STAFF: Every local staff member MUST work EXACTLY 5 shifts and have EXACTLY 2 days off per 7-day period.
-       - NO OVERLOADING: Do not give any local staff 6 or 7 shifts.
-       - NO UNDERLOADING: Do not leave staff under-scheduled while others are at the limit.
-       - DISTRIBUTION: Exhaust all 'Standby' (Reserve) staff to reach 'maxStaff' before resorting to 'VACANT'.
+    4. SPECIALIST UTILIZATION:
+       - Every shift MUST have at least one SL (Shift Leader) and one LC (Load Control) if requirements specify them.
+       - If a shift has a LC vacancy, you MUST search the 'Standby' pool for ANY person with 'isLoadControl: true' before declaring a gap.
 
-    3. SPECIALIST BALANCING:
-       - PRIORITIZE leadership: Every shift MUST have at least one SL (Shift Leader) and one LC (Load Control) if specified in requirements.
-       - BALANCE specialist coverage across the whole day. If a shift has 0 SLs, use a qualified 'SL+LC' staff member to bridge the gap.
+    5. DEMAND PRIORITIZATION:
+       - 1st: Fill 'minStaff' with required specialists (matching their skill booleans).
+       - 2nd: Fill up to 'maxStaff' using 'General' role for any rested staff who are under their 5-shift limit.
+       - 3rd: Only use 'VACANT' if EVERY rested, qualified person has reached their 5-shift limit or is on leave.
 
-    4. DEMAND PRIORITIZATION:
-       - 1st: Fill 'minStaff' with required specialists (matching their boolean skills).
-       - 2nd: Fill up to 'maxStaff' using 'General' role for any remaining rested staff who are under their 5-shift limit.
-       - 3rd: Only use 'VACANT' if EVERY rested, qualified person has reached their 5-shift limit.
-
-    PARAMS:
+    ### PARAMS:
     - Min Rest: ${config.minRestHours}h
     - Start Date: ${config.startDate}
     - Duration: ${config.numDays} days
 
-    DATA:
+    ### DATA:
     - PERSONNEL REGISTRY: ${JSON.stringify(data.staff)}
     - PLANNED SHIFTS: ${JSON.stringify(data.shifts)}
     - FATIGUE/REST LOCKS: ${JSON.stringify(data.incomingDuties)}
