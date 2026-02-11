@@ -58,9 +58,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list. NO HALLUCINATIONS. Use 'VACANT' only if zero staff are available." },
+                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Role codes: SL, OPS, RMP, LC, LF. ONLY combinations allowed: 'SL+LC' or 'LC+OPS'. All other roles MUST be single." },
+                role: { type: Type.STRING, description: "Role codes: SL, OPS, LC, LF. Use 'General' for all other staff." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -75,11 +75,11 @@ const ROSTER_SCHEMA = {
                 type: { type: Type.STRING }
               },
               required: ["staffId", "type"]
-                }
-              }
-            },
-        required: ["day", "dateString", "assignments"]
+            }
           }
+        },
+        required: ["day", "dateString", "assignments"]
+      }
     },
     stationHealth: { type: Type.NUMBER },
     alerts: {
@@ -100,47 +100,35 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - MASTER ROSTER CALCULATION
-    OBJECTIVE: Build a 100% compliant program with ZERO vacancies if staff are available and STRICT labor law adherence.
+    COMMAND: STATION OPERATIONS COMMAND - 7-DAY MASTER PROGRAM
+    OBJECTIVE: Build a weekly program with ROSTER-FIRST priority and 5-SHIFT LOCAL HARD-CAP.
 
-    ### CRITICAL CONSTRAINTS (MANDATORY):
+    ### 1. ROSTER-FIRST ALLOCATION (CRITICAL)
+    - You MUST assign all available "Roster" staff members to shifts before assigning any "Local" staff.
+    - A "Roster" staff member should NEVER be on Standby if there is an empty slot in an active shift.
+    - Only use "Local" staff (StaffCategory: 'Local') to fill the headcount once all rested/available "Roster" staff are working.
 
-    1. ZERO-VACANCY PROTOCOL:
-       - You are STRICTLY FORBIDDEN from using 'VACANT' if there is ANY rested, qualified staff member in the 'STANDBY (RESERVE)' or 'Personnel Registry' pool.
-       - Staff of type 'Roster' are contracted to be available 24/7. Unless they have a 'Rest Lock' or 'Leave Request', they MUST be assigned to fill shifts before declaring a vacancy.
-       - If a shift is below 'maxStaff', you MUST fill it with available personnel. Leaving slots 'VACANT' while staff are on Standby is a CRITICAL FAILURE.
+    ### 2. LOCAL STAFF SHIFT CAP (5-SHIFT LIMIT)
+    - Local staff (e.g., NK-ATZ, WS-ATZ, MS-ATZ) are LIMITED to a maximum of 5 shifts per 7-day period.
+    - You MUST calculate and track the total shifts assigned to each Local person.
+    - Once a Local person reaches 5 shifts, they MUST be assigned as "DAYS OFF" for the rest of the week.
+    - DO NOT exceed 5 shifts for any Local staff member.
 
-    2. THE 5/2 LABOR LAW (STRICT 5-SHIFT CAP):
-       - LOCAL STAFF (type: 'Local') MUST work EXACTLY 5 shifts and have EXACTLY 2 days off per 7-day period.
-       - FORBIDDEN: NEVER assign 6 or 7 shifts to a local staff member. 
-       - MONITORING: Staff like MA-ATZ, SK-ATZ, FT-ATZ must NEVER exceed 5 shifts. 
-       - EQUAL LOADING: Prioritize staff with fewer shifts (e.g., MR-ATZ who only has 4) to fill gaps until they reach their 5-shift target.
-       - ACTIVATE CHAIN OF THOUGHT: For every local person, maintain a count. Once they hit 5 shifts, they are LOCKED.
+    ### 3. CLEAN ROLE LABELING
+    - Use specialist roles (SL, LC, OPS, LF) ONLY when specific requirements are met.
+    - For all other staff filling general headcount, strictly use the role name "General".
+    - Do NOT use "RMP" or "RAMP" as a role name.
 
-    3. SKILL-BASED ROLE LOCKDOWN:
-       - CHECK STAFF QUALIFICATIONS: Use 'isShiftLeader', 'isLoadControl', 'isOps', 'isRamp', 'isLostFound' booleans.
-       - PERMITTED MULTI-ROLES: ONLY 'SL+LC' and 'LC+OPS' are allowed as combined roles for a single person. 
-       - QUALIFICATION CHECK: To assign 'SL+LC', they MUST have both skills TRUE in their registry entry.
+    ### 4. DATA CONTEXT:
+    - START DATE: ${config.startDate}
+    - DURATION: ${config.numDays} Days
+    - PERSONNEL: ${JSON.stringify(data.staff)}
+    - SHIFTS: ${JSON.stringify(data.shifts)}
+    - REST LOG: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
-    4. SPECIALIST UTILIZATION:
-       - Every shift MUST have at least one SL (Shift Leader) and one LC (Load Control) if requirements specify them.
-       - If a shift has a LC vacancy, you MUST search the 'Standby' pool for ANY person with 'isLoadControl: true' before declaring a gap.
-
-    5. DEMAND PRIORITIZATION:
-       - 1st: Fill 'minStaff' with required specialists (matching their skill booleans).
-       - 2nd: Fill up to 'maxStaff' using 'General' role for any rested staff who are under their 5-shift limit.
-       - 3rd: Only use 'VACANT' if EVERY rested, qualified person has reached their 5-shift limit or is on leave.
-
-    ### PARAMS:
-    - Min Rest: ${config.minRestHours}h
-    - Start Date: ${config.startDate}
-    - Duration: ${config.numDays} days
-
-    ### DATA:
-    - PERSONNEL REGISTRY: ${JSON.stringify(data.staff)}
-    - PLANNED SHIFTS: ${JSON.stringify(data.shifts)}
-    - FATIGUE/REST LOCKS: ${JSON.stringify(data.incomingDuties)}
-    - LEAVE REQUESTS: ${JSON.stringify(data.leaveRequests)}
+    ### THINKING PROTOCOL:
+    Before outputting JSON, calculate shift totals for NK-ATZ, WS-ATZ, and MS-ATZ to ensure they do not exceed 5.
   `;
 
   try {

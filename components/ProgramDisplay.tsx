@@ -66,18 +66,22 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: any) => {
-    // Forced string conversion to prevent "toUpperCase is not a function"
-    const rStr = String(role || '');
-    if (!rStr || rStr.toLowerCase() === 'general' || rStr.toUpperCase() === 'NIL') return '';
+    const rStr = String(role || '').trim();
+    if (!rStr) return '';
+    
+    const lower = rStr.toLowerCase();
+    // Hide generic/default roles as per user request
+    if (lower === 'general' || lower === 'rmp' || lower === 'ramp' || lower === 'nil') return '';
+    
     return rStr.split('+').map(part => {
       const r = part.trim().toUpperCase();
       if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
       if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-      if (r === 'RAMP' || r === 'RMP') return 'RMP';
+      if (r === 'RAMP' || r === 'RMP') return ''; // Skip RMP/RAMP labeling
       if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
       if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
       return r;
-    }).join('+');
+    }).filter(Boolean).join('+');
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -331,7 +335,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                         <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100 ring-2 ring-rose-500/20' : 'bg-slate-100 text-slate-700 font-bold'}`}>
                                           {isGap && <ShieldAlert size={10} className="text-rose-400" />}
                                           {isGap ? 'VACANT' : (st?.initials || '??')} 
-                                          <span className="font-black text-slate-900">{rolesStr}</span>
+                                          {rolesStr && <span className="font-black text-slate-900">{rolesStr}</span>}
                                         </span>
                                       );
                                   })}
