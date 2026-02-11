@@ -65,7 +65,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: string) => {
-    if (!role) return '';
+    if (!role || role.toLowerCase() === 'general' || role.toUpperCase() === 'NIL') return '';
     return role.split('+').map(part => {
       const r = part.trim().toUpperCase();
       if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';

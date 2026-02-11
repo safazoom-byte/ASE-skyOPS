@@ -57,9 +57,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must match a real ID from the personnel list. Use 'VACANT' if no one is eligible." },
+                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list. NO HALLUCINATIONS. Use 'VACANT' for gaps." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Standard role. If covering multiple roles, use 'LC+SL' or 'LC+OPS'." },
+                role: { type: Type.STRING, description: "One of: SL, OPS, RMP, LC, LF, or 'General' for filler help." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -71,7 +71,7 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 staffId: { type: Type.STRING },
-                type: { type: Type.STRING, description: "Type of day off, e.g., 'Day off'." }
+                type: { type: Type.STRING, description: "Usually 'Day off'." }
               },
               required: ["staffId", "type"]
             }
@@ -99,46 +99,38 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SMART CALCULATION PIPELINE
-    
-    CRITICAL CALCULATION LOGIC:
-    1. DEMAND-FIRST AUDIT: 
-       - For each day, calculate the total 'minStaff' required across all shifts. This is the Master Headcount.
-    
-    2. RESOURCE HIERARCHY (CONTRACT vs LOCAL):
-       - PRIORITY 1: Assign all available ROSTER (Contract) staff first. They must be utilized fully if within contract dates and rested.
-       - PRIORITY 2: Only assign LOCAL staff if Roster staff cannot meet the 'minStaff' headcount target for that day.
-       - AUTO DAY-OFF: Any Local staff member not required to reach the 'minStaff' floor is automatically assigned a "Day off".
+    COMMAND: STATION OPERATIONS COMMAND - MASTER ROSTER CALCULATION
+    OBJECTIVE: Build a 100% compliant program with ZERO hallucinations and balanced workload.
 
-    3. MULTI-ROLE OPTIMIZATION (EFFICIENCY):
-       - SMART RULE: Only the following pairs are permitted for multi-role optimization:
-         * [Load Control (LC) + Shift Leader (SL)]
-         * [Load Control (LC) + Operations (OPS)]
-       - If a person is qualified for LC and SL, you MUST assign them as 'LC+SL' for the shift.
-       - If a person is qualified for LC and OPS, you MUST assign them as 'LC+OPS' for the shift.
-       - One person covering two roles counts as ONE head towards 'minStaff' but fulfills both role requirements.
-       - DO NOT assign two people if one person is qualified to cover these pairs.
+    1. IDENTITY LOCKDOWN (STRICT):
+       - NEVER invent staff IDs or initials. Every 'staffId' in assignments MUST be found in the provided Personnel Registry.
+       - NEVER use "???". If a slot cannot be filled by a real, rested person, use 'staffId': 'VACANT'.
 
-    4. LABOR COMPLIANCE (THE 5/2 LAW):
-       - LOCAL STAFF: Strictly limited to 5 shifts per 7-day period.
-       - EXCLUSION RULE: No Local staff member can work 4, 6, or 7 shifts. It must be exactly 5 shifts per week OR 0 if demand is low.
-       - Rest of the days are hard-locked to "Day off".
+    2. THE 5/2 LABOR LAW & EQUAL LOADING:
+       - LOCAL STAFF: Calculate shift counts for every person. Target is EXACTLY 5 shifts per person.
+       - LIMIT: NO Local staff member can work more than 5 shifts. NO 6th or 7th shifts (e.g., prevent MS-ATZ working 7 shifts).
+       - BALANCING: If staff like SK-ATZ or NK-ATZ have only 2 shifts, assign them more work before giving anyone else a 4th or 5th shift.
+       - DAYS OFF: Every Local staff member MUST have exactly 2 days off. These 2 days should be NON-SEQUENTIAL (separated by work).
 
-    5. ANTI-HALLUCINATION & INTEGRITY:
-       - NEVER use initials or IDs not in the PERSONNEL list.
-       - ABSOLUTELY NO "??".
-       - If a position is unfillable due to rest/5-day limits, use staffId: 'VACANT'.
+    3. ROLE ASSIGNMENT & CLEAN LABELING:
+       - SPECIALISTS: Use roles 'SL', 'OPS', 'LC', 'RMP', 'LF' only for people assigned to meet the specific shift requirements (roleCounts).
+       - HEADCOUNT FILLERS: If you assign someone just to reach 'maxStaff', set their 'role' to 'General'.
+       - NO CLUTTER: Do not mark everyone as (RMP) if they are just extra headcount.
 
-    STATION PARAMS:
-    - Min Rest: ${config.minRestHours} hours
+    4. DEMAND PRIORITIZATION:
+       - 1st Priority: Fill the 'minStaff' floor for every shift using qualified specialist roles.
+       - 2nd Priority: Reach 'maxStaff' using remaining staff who have worked < 5 shifts and are rested.
+
+    PARAMS:
+    - Min Rest: ${config.minRestHours}h
     - Start Date: ${config.startDate}
     - Duration: ${config.numDays} days
 
-    INPUT DATA:
-    - PERSONNEL: ${JSON.stringify(data.staff)}
-    - SHIFTS: ${JSON.stringify(data.shifts)}
-    - REST LOCKS: ${JSON.stringify(data.incomingDuties)}
-    - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    DATA:
+    - PERSONNEL REGISTRY: ${JSON.stringify(data.staff)}
+    - PLANNED SHIFTS: ${JSON.stringify(data.shifts)}
+    - FATIGUE/REST LOCKS: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE REQUESTS: ${JSON.stringify(data.leaveRequests)}
   `;
 
   try {
