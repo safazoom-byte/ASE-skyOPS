@@ -97,25 +97,17 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
   const formatRoleLabel = (role: any, shiftRoleCounts?: Partial<Record<Skill, number>>) => {
-    const rStr = String(role || '').trim();
-    if (!rStr || rStr.toLowerCase() === 'general') return '';
+    const rStr = String(role || '').trim().toUpperCase();
+    if (!rStr || rStr === 'GENERAL' || rStr === 'ROSTER' || rStr === 'NIL') return '';
     
-    // Split combined roles like "LC+SL" or "RMP+OPS"
-    const parts = rStr.split('+').map(p => p.trim().toUpperCase());
+    const parts = rStr.split('+').map(p => p.trim());
     
     const filtered = parts.map(r => {
-      // 1. Specialist roles: only show if shift explicitly requested them
-      if ((r === 'SHIFT LEADER' || r === 'SL') && (!shiftRoleCounts || (shiftRoleCounts['Shift Leader'] || 0) > 0)) return 'SL';
-      if ((r === 'LOAD CONTROL' || r === 'LC') && (!shiftRoleCounts || (shiftRoleCounts['Load Control'] || 0) > 0)) return 'LC';
-      if ((r === 'OPERATIONS' || r === 'OPS') && (!shiftRoleCounts || (shiftRoleCounts['Operations'] || 0) > 0)) return 'OPS';
-      if ((r === 'LOST AND FOUND' || r === 'LF') && (!shiftRoleCounts || (shiftRoleCounts['Lost and Found'] || 0) > 0)) return 'LF';
-      
-      // 2. RMP: Per user request, never hide RMP
-      if (r === 'RAMP' || r === 'RMP') return 'RMP';
-      
-      // 3. ROSTER: Handle category labels assigned by AI
-      if (r === 'ROSTER') return 'ROSTER';
-
+      if ((r === 'SHIFT LEADER' || r === 'SL') && (shiftRoleCounts && (shiftRoleCounts['Shift Leader'] || 0) > 0)) return 'SL';
+      if ((r === 'LOAD CONTROL' || r === 'LC') && (shiftRoleCounts && (shiftRoleCounts['Load Control'] || 0) > 0)) return 'LC';
+      if ((r === 'OPERATIONS' || r === 'OPS') && (shiftRoleCounts && (shiftRoleCounts['Operations'] || 0) > 0)) return 'OPS';
+      if ((r === 'LOST AND FOUND' || r === 'LF') && (shiftRoleCounts && (shiftRoleCounts['Lost and Found'] || 0) > 0)) return 'LF';
+      if ((r === 'RAMP' || r === 'RMP') && (shiftRoleCounts && (shiftRoleCounts['Ramp'] || 0) > 0)) return 'RMP';
       return null;
     }).filter(Boolean);
 
@@ -223,20 +215,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    // Page 8: Local Audit
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(18).text(`Weekly Personnel Utilization Audit (Local Staff Only)`, 14, 20);
     doc.setFontSize(9).setTextColor(100).text(`Validation of 5 Shifts / 2 Days Off Policy`, 14, 26);
     const localAuditBody = staff.filter(s => s.type === 'Local').map(s => {
       const stats = utilizationData[s.id];
-      return [s.name, s.initials, stats.work.toString(), stats.off.toString(), (stats.work === 5 && stats.off === 2) ? 'MATCH (5/2)' : `FAULT (${stats.work}/${stats.off})` ];
+      const isCompliant = stats.work <= 5;
+      return [s.name, s.initials, stats.work.toString(), stats.off.toString(), isCompliant ? 'MATCH' : `FAULT (${stats.work}/5)` ];
     });
     autoTable(doc, {
       startY: 35, head: [['PERSONNEL NAME', 'INITIALS', 'TOTAL SHIFTS', 'TOTAL DAYS OFF', 'STATUS']], body: localAuditBody, theme: 'grid',
       headStyles: { fillColor: headerColor, textColor: 255 }, didParseCell: (d) => { if (d.column.index === 4 && String(d.cell.raw).startsWith('FAULT')) d.cell.styles.textColor = [190, 18, 60]; }
     });
 
-    // Page 9: Roster Audit
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(217, 119, 6).text(`Weekly Personnel Utilization Audit (Roster Staff)`, 14, 20);
     doc.setFontSize(9).setTextColor(100).text(`Validation of Contract Window Alignment`, 14, 26);
@@ -320,17 +311,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-10">
-                    <div className="space-y-6"><h4 className="text-xl font-black italic uppercase text-slate-900">Personnel Status Registry</h4>
-                      <div className="overflow-hidden rounded-3xl border border-slate-200">
-                        <table className="w-full text-left">
-                          {Object.entries(registry).filter(([_, l]) => l.length > 0).map(([cat, l], i) => (
-                            <tr key={i} className="border-b"><td className="p-5 text-[10px] font-black uppercase text-slate-900 bg-slate-50 w-1/3">{cat}</td><td className="p-5 text-[11px] font-bold text-slate-600">{l.join(', ')}</td></tr>
-                          ))}
-                        </table>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
             );
@@ -342,28 +322,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                <div className="p-8 overflow-hidden"><table className="w-full text-left">
                   <thead className="text-[10px] font-black uppercase text-slate-400 border-b"><tr className="bg-slate-50"><th className="p-4">Personnel</th><th className="p-4 text-center">Worked</th><th className="p-4 text-center">Off</th><th className="p-4 text-right">Status</th></tr></thead>
                   <tbody>{staff.filter(s => s.type === 'Local').map(s => (
-                    <tr key={s.id} className="border-b text-xs font-bold"><td className="p-4">{s.name} ({s.initials})</td><td className="p-4 text-center">{utilizationData[s.id].work}</td><td className="p-4 text-center">{utilizationData[s.id].off}</td><td className={`p-4 text-right italic ${utilizationData[s.id].work !== 5 ? 'text-rose-600' : 'text-emerald-600'}`}>{utilizationData[s.id].work === 5 ? 'MATCH' : 'FAULT'}</td></tr>
+                    <tr key={s.id} className="border-b text-xs font-bold"><td className="p-4">{s.name} ({s.initials})</td><td className="p-4 text-center">{utilizationData[s.id].work}</td><td className="p-4 text-center">{utilizationData[s.id].off}</td><td className={`p-4 text-right italic ${utilizationData[s.id].work > 5 ? 'text-rose-600' : 'text-emerald-600'}`}>{utilizationData[s.id].work <= 5 ? 'MATCH' : 'FAULT'}</td></tr>
                   ))}</tbody>
-               </table></div>
-            </div>
-            <div className="bg-white rounded-[4rem] border-4 border-amber-500 shadow-2xl overflow-hidden">
-               <div className="p-10 bg-amber-500 text-white flex justify-between items-center"><h2 className="text-2xl font-black uppercase italic">Roster Contract Audit</h2><TrendingUp size={24} /></div>
-               <div className="p-8 overflow-hidden"><table className="w-full text-left">
-                  <thead className="text-[10px] font-black uppercase text-slate-400 border-b"><tr className="bg-slate-50"><th className="p-4">Personnel</th><th className="p-4 text-center">Potential</th><th className="p-4 text-center">Actual</th><th className="p-4 text-right">Status</th></tr></thead>
-                  <tbody>{staff.filter(s => s.type === 'Roster').map(s => {
-                    const stats = utilizationData[s.id];
-                    const winStr = (s.workFromDate && s.workToDate) ? `${s.workFromDate} to ${s.workToDate}` : 'N/A';
-                    return (
-                      <tr key={s.id} className="border-b text-xs font-bold">
-                        <td className="p-4">{s.name}<br/><span className="text-[9px] text-amber-600 uppercase">{winStr}</span></td>
-                        <td className="p-4 text-center">{stats.rosterPotential}</td>
-                        <td className="p-4 text-center">{stats.work}</td>
-                        <td className={`p-4 text-right italic ${stats.work > stats.rosterPotential ? 'text-rose-600' : 'text-emerald-600'}`}>
-                          {stats.work > stats.rosterPotential ? 'OVERWORK' : 'COMPLIANT'}
-                        </td>
-                      </tr>
-                    );
-                  })}</tbody>
                </table></div>
             </div>
           </div>

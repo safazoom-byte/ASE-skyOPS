@@ -99,38 +99,37 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a 7-day program with STRIKE-TEAM EFFICIENCY and DOUBLE-PASS AUDIT.
+    OBJECTIVE: Build a 7-day program enforcing the 5/2 POLICY and PRIORITY SPECIALIST COVERAGE.
 
-    ### MANDATORY ROLE CONSOLIDATION (PAIRS ONLY)
-    To optimize headcount and maximize the Standby pool, use multi-skilled staff as PAIRS ONLY:
-    - If a shift needs SL and LC, and staff is qualified for both, assign as "LC+SL".
-    - If a shift needs OPS and LC, and staff is qualified for both, assign as "LC+OPS".
-    - HARD LIMIT: Never assign 3 roles. Only 2 roles maximum per person. 
-    - EFFICIENCY: Use consolidated pairs whenever possible to save shifts for the weekly budget.
+    ### PRIORITY HIERARCHY (MANDATORY):
+    1. **5/2 POLICY**: Local staff MUST NOT work more than 5 shifts. This is a HARD LIMIT.
+    2. **SPECIALIST COVERAGE**: Every shift must have its requested SL (Shift Leader) and LC (Load Control) filled first.
+    3. **MINIMUM STAFF**: Fill to minStaff.
+    4. **MAXIMUM STAFF**: Fill to maxStaff ONLY if 5/2 policy allows.
 
-    ### PRIORITY ASSIGNMENT LOGIC
-    1. ROSTER POOL (PRIMARY): You MUST fill the 'Max Staff' for every shift using Roster staff first (if the date is within their contract window).
-    2. LOCAL POOL (SECONDARY): Use Local staff only to fill remaining gaps up to 'Max Staff'.
-    3. STANDBY POOL: Anyone not used must be marked in [offDuty].
+    ### RULE 1: THE ABSOLUTE 5/2 LAW (LOCAL STAFF)
+    - NO LOCAL STAFF MEMBER can work more than 5 SHIFTS in this 7-day window.
+    - If you run out of staff who have shifts left, leave the shift at "Minimum Staff" or even UNDERSTAFFED. 
+    - UNDERSTAFFING is better than breaking the 5/2 law or using placeholders.
 
-    ### DOUBLE-PASS REVISION PROTOCOL (AUDIT BEFORE OUTPUT)
-    PASS 1 (MIN-STAFF AUDIT): 
-    - Review every shift. If assigned headcount < minStaff, you MUST add staff from the Standby pool immediately. 
-    - FAILURE TO MEET MINSTAFF IS NOT ALLOWED.
+    ### RULE 2: SPECIALIST PRIORITY (SL/LC/RMP)
+    - Prioritize using Specialists for their specialized roles. 
+    - Do not waste an SL's shift on a general duty if that SL is needed later in the week for a leadership role.
+    - If a shift needs 1 SL and 1 LC, you MUST assign people with those skills first.
 
-    PASS 2 (LOCAL 5/2 AUDIT): 
-    - Calculate total weekly shifts for Local staff. 
-    - If anyone exceeds 5 shifts, move those shifts to Roster staff or other Local staff with < 5 shifts.
-    - NO LOCAL STAFF CAN HAVE MORE THAN 5 SHIFTS.
+    ### RULE 3: DATA INTEGRITY
+    - Only use staffId from the provided STAFF list. 
+    - NEVER return placeholders like "??", "TBD", or "0".
+    - If no one is available, leave the slot empty in the JSON.
 
     ### DATA CONTEXT:
-    - PERIOD: ${config.startDate}
+    - START DATE: ${config.startDate}
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFT SPECS: ${JSON.stringify(data.shifts)}
-    - LEAVE: ${JSON.stringify(data.leaveRequests)}
-    - REST LOG: ${JSON.stringify(data.incomingDuties)}
+    - PRE-EXISTING LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - REST LOG (LAST RELEASE): ${JSON.stringify(data.incomingDuties)}
 
-    CONFIRMATION: I will revise the program to ensure minStaff is met for every shift, role pairs are used efficiently, and Local staff stick to the 5/2 rule.
+    Build the program now with strict adherence to the 5/2 rule and Specialist coverage.
   `;
 
   try {
