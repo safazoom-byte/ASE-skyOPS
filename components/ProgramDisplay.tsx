@@ -99,9 +99,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleLabel = (role: any, shiftRoleCounts?: Partial<Record<Skill, number>>) => {
     const rStr = String(role || '').trim().toUpperCase();
     if (!rStr || rStr === 'GENERAL' || rStr === 'ROSTER' || rStr === 'NIL') return '';
-    
     const parts = rStr.split('+').map(p => p.trim());
-    
     const filtered = parts.map(r => {
       if ((r === 'SHIFT LEADER' || r === 'SL') && (shiftRoleCounts && (shiftRoleCounts['Shift Leader'] || 0) > 0)) return 'SL';
       if ((r === 'LOAD CONTROL' || r === 'LC') && (shiftRoleCounts && (shiftRoleCounts['Load Control'] || 0) > 0)) return 'LC';
@@ -110,7 +108,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       if ((r === 'RAMP' || r === 'RMP') && (shiftRoleCounts && (shiftRoleCounts['Ramp'] || 0) > 0)) return 'RMP';
       return null;
     }).filter(Boolean);
-
     return filtered.join('+');
   };
 
@@ -128,7 +125,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const registry: Record<string, string[]> = {
       'RESTING (POST-DUTY)': [], 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'STANDBY (RESERVE)': []
     };
-
     staff.forEach(s => {
       if (assignedStaffIds.has(s.id)) return;
       const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
@@ -155,13 +151,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     if (filteredPrograms.length === 0) return;
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
     const headerColor = [2, 6, 23];
-
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
       doc.setFont('helvetica', 'bold').setFontSize(18).text(`SkyOPS Station Handling Program`, 14, 15);
       doc.setFontSize(9).setTextColor(120, 120, 120).text(`Target Period: ${startDate} to ${endDate}`, 14, 21);
       doc.setFontSize(14).setTextColor(0, 0, 0).text(getDayLabel(program), 14, 32);
-
+      
       const shiftsMap: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
         if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
@@ -184,8 +179,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           return `[${totalShifts}] ${st?.initials || '??'}${rolesStr}`;
         }).join(' | ');
         const uniqueHeadcount = Object.keys(staffAssignments).length;
-        const minHc = sh?.minStaff || 0;
-        const hcLabel = `${uniqueHeadcount} / ${sh?.maxStaff || minHc || '0'}`;
+        const hcLabel = `${uniqueHeadcount} / ${sh?.maxStaff || sh?.minStaff || '0'}`;
         return [(i+1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, hcLabel, personnelStr];
       });
 
@@ -196,10 +190,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         didParseCell: (d) => {
           if (d.column.index === 4 && d.section === 'body') {
             const val = String(d.cell.raw);
-            const [hc, rest] = val.split(' / ');
+            const hc = parseInt(val.split(' / ')[0]);
             const shId = Object.keys(shiftsMap)[d.row.index];
             const sh = getShiftById(shId);
-            if (parseInt(hc) < (sh?.minStaff || 0)) d.cell.styles.textColor = [190, 18, 60];
+            if (hc < (sh?.minStaff || 0)) {
+              d.cell.styles.textColor = [190, 18, 60];
+              d.cell.styles.fontStyle = 'bold';
+            }
           }
         }
       });
@@ -227,21 +224,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       startY: 35, head: [['PERSONNEL NAME', 'INITIALS', 'TOTAL SHIFTS', 'TOTAL DAYS OFF', 'STATUS']], body: localAuditBody, theme: 'grid',
       headStyles: { fillColor: headerColor, textColor: 255 }, didParseCell: (d) => { if (d.column.index === 4 && String(d.cell.raw).startsWith('FAULT')) d.cell.styles.textColor = [190, 18, 60]; }
     });
-
-    doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(217, 119, 6).text(`Weekly Personnel Utilization Audit (Roster Staff)`, 14, 20);
-    doc.setFontSize(9).setTextColor(100).text(`Validation of Contract Window Alignment`, 14, 26);
-    const rosterAuditBody = staff.filter(s => s.type === 'Roster').map(s => {
-      const stats = utilizationData[s.id];
-      const winStr = (s.workFromDate && s.workToDate) ? `${s.workFromDate} - ${s.workToDate}` : 'No Window Defined';
-      return [s.name, s.initials, winStr, stats.rosterPotential.toString(), stats.work.toString(), (stats.work > stats.rosterPotential) ? 'OVERWORKED' : 'COMPLIANT' ];
-    });
-    autoTable(doc, {
-      startY: 35, head: [['PERSONNEL NAME', 'INITIALS', 'WINDOW', 'MUST WORK (POTENTIAL)', 'ACTUALLY WORKED', 'STATUS']], body: rosterAuditBody, theme: 'grid',
-      headStyles: { fillColor: [217, 119, 6], textColor: 255 }, didParseCell: (d) => { if (d.column.index === 5 && d.cell.raw === 'OVERWORKED') d.cell.styles.textColor = [190, 18, 60]; }
-    });
-
-    doc.save(`SkyOPS_Full_Station_Report_${startDate}.pdf`);
+    doc.save(`SkyOPS_Station_Report_${startDate}.pdf`);
   };
 
   return (
@@ -259,7 +242,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           <button onClick={exportPDF} className="p-4 bg-slate-950 text-white rounded-2xl flex items-center gap-2 shadow-lg hover:bg-blue-600 transition-all"><Printer size={18} /><span className="text-[10px] font-black uppercase">Print Full Report</span></button>
         </div>
       </div>
-
       {viewMode === 'detailed' && (
         <div className="space-y-16">
           {filteredPrograms.map(program => {
@@ -285,22 +267,18 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           });
                           const currentHc = Object.keys(staffAssignments).length;
                           const isUnderstaffed = currentHc < (sh?.minStaff || 0);
-                          
                           return (
                             <tr key={idx} className={`border-b border-slate-100 hover:bg-slate-50 ${isUnderstaffed ? 'bg-rose-50/30' : ''}`}>
                               <td className="p-6 text-sm font-black italic">{sh?.pickupTime}</td><td className="p-6 text-sm font-black italic">{sh?.endTime}</td><td className="p-6 text-xs font-bold uppercase text-blue-600">{fls}</td>
-                              <td className={`p-6 text-xs font-black text-center ${isUnderstaffed ? 'text-rose-600 animate-pulse' : ''}`}>
-                                {isUnderstaffed && <AlertIcon size={12} className="inline mr-2" />}
-                                {currentHc} / {sh?.maxStaff || sh?.minStaff || '0'}
-                              </td>
+                              <td className={`p-6 text-xs font-black text-center ${isUnderstaffed ? 'text-rose-600 animate-pulse' : ''}`}>{currentHc} / {sh?.maxStaff || sh?.minStaff || '0'}</td>
                               <td className="p-6 flex flex-wrap gap-2">
                                 {Object.entries(staffAssignments).map(([sid, roles], ai) => {
                                   const st = getStaffById(sid);
                                   const count = utilizationData[sid]?.work || 0;
-                                  const isWorkloadHigh = (st?.type === 'Local' && count > 5);
+                                  const isFault = st?.type === 'Local' && count > 5;
                                   return (
-                                    <span key={ai} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${isWorkloadHigh ? 'bg-rose-50 text-rose-600 border border-rose-200 shadow-sm' : 'bg-slate-100 text-slate-700'}`}>
-                                      <span className={isWorkloadHigh ? 'animate-pulse font-black' : 'font-black'}>[{count}]</span> {st?.initials} {roles.length > 0 && <span className="text-slate-950 font-black ml-1">({roles.join('+')})</span>}
+                                    <span key={ai} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${isFault ? 'bg-rose-50 text-rose-600 border border-rose-200 shadow-sm' : 'bg-slate-100 text-slate-700'}`}>
+                                      <span className="font-black">[{count}]</span> {st?.initials} {roles.length > 0 && <span className="text-slate-950 font-black ml-1">({roles.join('+')})</span>}
                                     </span>
                                   );
                                 })}
@@ -315,17 +293,32 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
               </div>
             );
           })}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mt-20">
-            <div className="bg-white rounded-[4rem] border-4 border-slate-950 shadow-2xl overflow-hidden">
-               <div className="p-10 bg-slate-950 text-white flex justify-between items-center"><h2 className="text-2xl font-black uppercase italic">Local Personnel Audit</h2><BarChart3 size={24} className="text-blue-500" /></div>
-               <div className="p-8 overflow-hidden"><table className="w-full text-left">
-                  <thead className="text-[10px] font-black uppercase text-slate-400 border-b"><tr className="bg-slate-50"><th className="p-4">Personnel</th><th className="p-4 text-center">Worked</th><th className="p-4 text-center">Off</th><th className="p-4 text-right">Status</th></tr></thead>
-                  <tbody>{staff.filter(s => s.type === 'Local').map(s => (
-                    <tr key={s.id} className="border-b text-xs font-bold"><td className="p-4">{s.name} ({s.initials})</td><td className="p-4 text-center">{utilizationData[s.id].work}</td><td className="p-4 text-center">{utilizationData[s.id].off}</td><td className={`p-4 text-right italic ${utilizationData[s.id].work > 5 ? 'text-rose-600' : 'text-emerald-600'}`}>{utilizationData[s.id].work <= 5 ? 'MATCH' : 'FAULT'}</td></tr>
-                  ))}</tbody>
-               </table></div>
-            </div>
+          
+          {/* Quick Audit Bar */}
+          <div className="bg-white rounded-[3rem] p-10 border-4 border-slate-950 shadow-2xl flex flex-col md:flex-row gap-10">
+             <div className="flex-1">
+                <h4 className="text-xl font-black italic uppercase mb-4 flex items-center gap-3"><ShieldAlert className="text-rose-600" /> Local Audit</h4>
+                <div className="space-y-2">
+                   {staff.filter(s => s.type === 'Local').map(s => (
+                     <div key={s.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <span className="text-[10px] font-black uppercase">{s.initials}</span>
+                        <div className="flex items-center gap-4">
+                           <span className="text-[9px] font-bold text-slate-400 uppercase">Shifts: {utilizationData[s.id].work}/5</span>
+                           {utilizationData[s.id].work > 5 ? <TriangleAlert size={14} className="text-rose-600" /> : <CheckCircle2 size={14} className="text-emerald-500" />}
+                        </div>
+                     </div>
+                   ))}
+                </div>
+             </div>
+             <div className="flex-1">
+                <h4 className="text-xl font-black italic uppercase mb-4 flex items-center gap-3"><TrendingUp className="text-blue-600" /> Station Health</h4>
+                <div className="h-40 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-100">
+                   <div className="text-center">
+                      <p className="text-5xl font-black italic text-slate-900 leading-none">{stationHealth}%</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Operational Score</p>
+                   </div>
+                </div>
+             </div>
           </div>
         </div>
       )}

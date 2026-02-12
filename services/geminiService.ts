@@ -99,28 +99,18 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a 7-day program enforcing the 5/2 POLICY and PRIORITY SPECIALIST COVERAGE.
+    OBJECTIVE: Build a 7-day program ensuring 5/2 compliance and coverage through to the END of the week.
 
-    ### PRIORITY HIERARCHY (MANDATORY):
-    1. **5/2 POLICY**: Local staff MUST NOT work more than 5 shifts. This is a HARD LIMIT.
-    2. **SPECIALIST COVERAGE**: Every shift must have its requested SL (Shift Leader) and LC (Load Control) filled first.
-    3. **MINIMUM STAFF**: Fill to minStaff.
-    4. **MAXIMUM STAFF**: Fill to maxStaff ONLY if 5/2 policy allows.
+    ### CRITICAL FAILURE RECTIFICATION (THOMAS/THURSDAY RULE):
+    Previous builds failed because you "Front-Loaded" Local staff (5-shift limit) too aggressively on the first 3 days. 
+    RESULT: Thursday was left with 1-2 people because the shift budget was exhausted. This is UNACCEPTABLE.
 
-    ### RULE 1: THE ABSOLUTE 5/2 LAW (LOCAL STAFF)
-    - NO LOCAL STAFF MEMBER can work more than 5 SHIFTS in this 7-day window.
-    - If you run out of staff who have shifts left, leave the shift at "Minimum Staff" or even UNDERSTAFFED. 
-    - UNDERSTAFFING is better than breaking the 5/2 law or using placeholders.
-
-    ### RULE 2: SPECIALIST PRIORITY (SL/LC/RMP)
-    - Prioritize using Specialists for their specialized roles. 
-    - Do not waste an SL's shift on a general duty if that SL is needed later in the week for a leadership role.
-    - If a shift needs 1 SL and 1 LC, you MUST assign people with those skills first.
-
-    ### RULE 3: DATA INTEGRITY
-    - Only use staffId from the provided STAFF list. 
-    - NEVER return placeholders like "??", "TBD", or "0".
-    - If no one is available, leave the slot empty in the JSON.
+    ### MANDATORY LOGIC:
+    1. **PERSONNEL BUDGETING**: Calculate (Local Staff * 5) + (Roster Staff * 7). This is your TOTAL shift budget.
+    2. **STRICT HMB PRIORITY**: Staff ending in "-HMB" (Roster) have a 7-day capacity. Use them FIRST on Friday and Saturday to save Local staff for the mid-week and end-week peaks.
+    3. **LEVELING**: Do NOT allow a shift to reach "Max Staff" if it risks any other shift in the week falling below "Min Staff".
+    4. **MINIMUM STAFFING GUARANTEE**: Every shift MUST reach its "minStaff" target before you assign a single extra person to any other shift.
+    5. **SPECIALIST CONTINUITY**: Ensure SL and LC coverage is available for Thursday by not wasting their shifts early in the week.
 
     ### DATA CONTEXT:
     - START DATE: ${config.startDate}
@@ -129,7 +119,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - PRE-EXISTING LEAVE: ${JSON.stringify(data.leaveRequests)}
     - REST LOG (LAST RELEASE): ${JSON.stringify(data.incomingDuties)}
 
-    Build the program now with strict adherence to the 5/2 rule and Specialist coverage.
+    Build the program now. Balance the week. Thursday must be fully staffed.
   `;
 
   try {
