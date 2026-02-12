@@ -99,27 +99,33 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a 7-day program ensuring 5/2 compliance and coverage through to the END of the week.
+    OBJECTIVE: Build a 7-day program with EXACTLY 5 shifts for Locals and OPTIMIZED coverage using Roster staff and Multi-skilled staff.
 
-    ### CRITICAL FAILURE RECTIFICATION (THOMAS/THURSDAY RULE):
-    Previous builds failed because you "Front-Loaded" Local staff (5-shift limit) too aggressively on the first 3 days. 
-    RESULT: Thursday was left with 1-2 people because the shift budget was exhausted. This is UNACCEPTABLE.
+    ### MANDATORY LOGIC RULES:
+    1. **THE 5-SHIFT LAW (LOCAL STAFF)**: Every Local staff member MUST work EXACTLY 5 shifts in this 7-day period. 4 shifts is a FAILURE. 6 shifts is a FAILURE. You must hit 5 exactly.
+    2. **ROSTER CONTRACT ADHERENCE**: 
+       - Strictly check "workFromDate" and "workToDate" for every Roster staff member.
+       - If the current day is OUTSIDE their contract dates, you MUST put them in the "offDuty" array with type "Roster leave".
+       - Within their contract dates, use them as the primary engine to satisfy "minStaff" and save Local staff shifts for the end of the week.
+    3. **SMART SKILL COVERAGE**: 
+       - Prioritize staff who have multiple skills (e.g., SL + LC). Use them to cover shifts that require multiple specialist roles simultaneously.
+       - IMPORTANT: Only assign a specific role (SL, LC, OPS, LF, RMP) if that role is explicitly requested in the shift "roleCounts".
+       - If a staff member is just filling headcount (HC) to meet minStaff but NOT filling a requested specialist role, leave the "role" field EMPTY ("") or set it to "NIL".
+    4. **NO THURSDAY GAPS**: Build the week starting from Friday. Ensure coverage for Wednesday/Thursday is secured before over-allocating on the weekend.
 
-    ### MANDATORY LOGIC:
-    1. **PERSONNEL BUDGETING**: Calculate (Local Staff * 5) + (Roster Staff * 7). This is your TOTAL shift budget.
-    2. **STRICT HMB PRIORITY**: Staff ending in "-HMB" (Roster) have a 7-day capacity. Use them FIRST on Friday and Saturday to save Local staff for the mid-week and end-week peaks.
-    3. **LEVELING**: Do NOT allow a shift to reach "Max Staff" if it risks any other shift in the week falling below "Min Staff".
-    4. **MINIMUM STAFFING GUARANTEE**: Every shift MUST reach its "minStaff" target before you assign a single extra person to any other shift.
-    5. **SPECIALIST CONTINUITY**: Ensure SL and LC coverage is available for Thursday by not wasting their shifts early in the week.
+    ### PRIORITY HIERARCHY:
+    1. Fulfill "minStaff" using active Roster staff and multi-skilled staff first.
+    2. Use Local staff exactly 5 times each to fill remaining gaps to reach "minStaff".
+    3. Only populate roles (SL, LC, etc.) for names that are actually filling a specialist requirement from "roleCounts".
+    4. Fill to "maxStaff" only if all other rules (especially the 5-shift law) are satisfied.
 
     ### DATA CONTEXT:
     - START DATE: ${config.startDate}
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFT SPECS: ${JSON.stringify(data.shifts)}
-    - PRE-EXISTING LEAVE: ${JSON.stringify(data.leaveRequests)}
-    - REST LOG (LAST RELEASE): ${JSON.stringify(data.incomingDuties)}
+    - LEAVE/REST: ${JSON.stringify(data.leaveRequests)} / ${JSON.stringify(data.incomingDuties)}
 
-    Build the program now. Balance the week. Thursday must be fully staffed.
+    Build the program now. Follow the "requested roles only" rule and the "5-shift law" strictly.
   `;
 
   try {
