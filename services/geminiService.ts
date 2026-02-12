@@ -103,21 +103,23 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     COMMAND: STATION OPERATIONS COMMAND - 7-DAY MASTER PROGRAM
     OBJECTIVE: Build a weekly program with ROSTER-FIRST priority and 5-SHIFT LOCAL HARD-CAP.
 
-    ### 1. ROSTER-FIRST ALLOCATION (CRITICAL)
-    - You MUST assign all available "Roster" staff members to shifts before assigning any "Local" staff.
-    - A "Roster" staff member should NEVER be on Standby if there is an empty slot in an active shift.
-    - Only use "Local" staff (StaffCategory: 'Local') to fill the headcount once all rested/available "Roster" staff are working.
+    ### 1. SKILL-ROLE LOCK (STOP HALLUCINATIONS)
+    - YOU ARE FORBIDDEN from assigning a specialist role unless the staff member has the flag 'true':
+      - Role 'SL' REQUIRES 'isShiftLeader': true
+      - Role 'LC' REQUIRES 'isLoadControl': true
+      - Role 'OPS' REQUIRES 'isOps': true
+      - Role 'LF' REQUIRES 'isLostFound': true
+    - If a staff member has NONE of these set to true, they MUST be assigned the role "General".
+    - DO NOT guess roles. Check the data for every single assignment.
 
-    ### 2. LOCAL STAFF SHIFT CAP (5-SHIFT LIMIT)
-    - Local staff (e.g., NK-ATZ, WS-ATZ, MS-ATZ) are LIMITED to a maximum of 5 shifts per 7-day period.
-    - You MUST calculate and track the total shifts assigned to each Local person.
-    - Once a Local person reaches 5 shifts, they MUST be assigned as "DAYS OFF" for the rest of the week.
-    - DO NOT exceed 5 shifts for any Local staff member.
+    ### 2. THE 5/2 BALANCED DISTRIBUTION (LOCAL STAFF)
+    - Local staff (e.g., NK-ATZ, WS-ATZ, MS-ATZ, MA-ATZ) MUST be assigned exactly 5 shifts and 2 days off per 7-day period.
+    - Do NOT give a Local staff member 3, 4, or 5 days off. This is a waste of resources.
+    - Spread assignments across the week so every Local staff member works their full 5-shift quota.
 
-    ### 3. CLEAN ROLE LABELING
-    - Use specialist roles (SL, LC, OPS, LF) ONLY when specific requirements are met.
-    - For all other staff filling general headcount, strictly use the role name "General".
-    - Do NOT use "RMP" or "RAMP" as a role name.
+    ### 3. ROSTER-FIRST ALLOCATION
+    - Assign all available "Roster" staff members to shifts before using "Local" staff.
+    - Only use "Local" staff to fill the remaining headcount once "Roster" staff are fully utilized.
 
     ### 4. DATA CONTEXT:
     - START DATE: ${config.startDate}
@@ -128,7 +130,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
     ### THINKING PROTOCOL:
-    Before outputting JSON, calculate shift totals for NK-ATZ, WS-ATZ, and MS-ATZ to ensure they do not exceed 5.
+    Before outputting JSON, verify the shift counts for every Local staff member. Ensure no one has more than 2 days off and no one has roles they aren't qualified for.
   `;
 
   try {

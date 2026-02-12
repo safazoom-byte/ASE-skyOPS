@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty } from '../types';
 import { jsPDF } from 'jspdf';
@@ -7,7 +6,7 @@ import {
   FileText, 
   Plane, 
   ShieldCheck, 
-  AlertTriangle, 
+  TriangleAlert, 
   CalendarDays, 
   LayoutGrid, 
   List,
@@ -15,13 +14,15 @@ import {
   Users,
   CheckCircle2,
   Calendar,
-  AlertCircle,
+  CircleAlert,
   Coffee,
   Printer,
   ChevronRight,
   UserX,
   Moon,
-  ShieldAlert
+  ShieldAlert,
+  BarChart3,
+  Check
 } from 'lucide-react';
 
 interface Props {
@@ -61,6 +62,23 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     });
   }, [programs, startDate, endDate]);
 
+  const utilizationData = useMemo(() => {
+    const stats: Record<string, { work: number, off: number }> = {};
+    staff.forEach(s => stats[s.id] = { work: 0, off: 0 });
+    
+    filteredPrograms.forEach(program => {
+      const assignedIds = new Set(program.assignments.map(a => a.staffId));
+      staff.forEach(s => {
+        if (assignedIds.has(s.id)) {
+          stats[s.id].work++;
+        } else {
+          stats[s.id].off++;
+        }
+      });
+    });
+    return stats;
+  }, [filteredPrograms, staff]);
+
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
@@ -68,16 +86,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleLabel = (role: any) => {
     const rStr = String(role || '').trim();
     if (!rStr) return '';
-    
     const lower = rStr.toLowerCase();
-    // Hide generic/default roles as per user request
     if (lower === 'general' || lower === 'rmp' || lower === 'ramp' || lower === 'nil') return '';
     
     return rStr.split('+').map(part => {
       const r = part.trim().toUpperCase();
       if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
       if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-      if (r === 'RAMP' || r === 'RMP') return ''; // Skip RMP/RAMP labeling
+      if (r === 'RAMP' || r === 'RMP') return ''; 
       if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
       if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
       return r;
@@ -105,6 +121,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     };
 
     staff.forEach(s => {
+      const offCount = utilizationData[s.id]?.off || 0;
+      const countLabel = ` (${offCount})`;
       if (assignedStaffIds.has(s.id)) return;
 
       const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
@@ -116,14 +134,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
       if (leave) {
         const typeKey = String(leave.type || '').toUpperCase();
-        if (registry[typeKey]) registry[typeKey].push(s.initials);
-        else registry['ANNUAL LEAVE'].push(s.initials);
+        if (registry[typeKey]) registry[typeKey].push(`${s.initials}${countLabel}`);
+        else registry['ANNUAL LEAVE'].push(`${s.initials}${countLabel}`);
         return;
       }
 
       if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
         if (dateStr < s.workFromDate || dateStr > s.workToDate) {
-          registry['ROSTER LEAVE'].push(s.initials);
+          registry['ROSTER LEAVE'].push(`${s.initials}${countLabel}`);
           return;
         }
       }
@@ -132,15 +150,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       if (aiOff) {
         const typeKey = String(aiOff.type || '').toUpperCase();
         if (registry[typeKey]) {
-          registry[typeKey].push(s.initials);
+          registry[typeKey].push(`${s.initials}${countLabel}`);
           return;
         }
       }
 
       if (s.type === 'Local') {
-        registry['DAYS OFF'].push(s.initials);
+        registry['DAYS OFF'].push(`${s.initials}${countLabel}`);
       } else {
-        registry['STANDBY (RESERVE)'].push(s.initials);
+        registry['STANDBY (RESERVE)'].push(`${s.initials}${countLabel}`);
       }
     });
 
@@ -154,7 +172,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
-      
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18).text(`SkyOPS Station Handling Program`, 14, 15);
       doc.setFontSize(9).setTextColor(120, 120, 120).text(`Target Period: ${startDate} to ${endDate}`, 14, 21);
@@ -169,7 +186,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const tableData = Object.entries(shiftsMap).map(([shiftId, group], i) => {
         const sh = getShiftById(shiftId);
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
-        
         const staffAssignments: Record<string, string[]> = {};
         group.forEach(a => {
           if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
@@ -185,7 +201,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         }).join(' | ');
 
         const uniqueHeadcount = Object.keys(staffAssignments).filter(k => k !== 'GAP' && k !== 'VACANT').length;
-
         return [(i + 1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${uniqueHeadcount} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
       });
 
@@ -196,20 +211,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         theme: 'grid',
         headStyles: { fillColor: headerColor, textColor: 255, fontStyle: 'bold', fontSize: 9 },
         bodyStyles: { fontSize: 6.5, cellPadding: 2, textColor: 50 },
-        columnStyles: { 
-          0: { cellWidth: 10 },
-          1: { cellWidth: 20 },
-          2: { cellWidth: 20 },
-          3: { cellWidth: 35 },
-          4: { cellWidth: 20 },
-          5: { cellWidth: 'auto' }
-        },
+        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 35 }, 4: { cellWidth: 20 }, 5: { cellWidth: 'auto' } },
         margin: { top: 38, bottom: 10 }
       });
 
       const currentY = (doc as any).lastAutoTable.finalY + 8;
       doc.setFontSize(11).setFont('helvetica', 'bold').text('ABSENCE AND REST REGISTRY', 14, currentY);
-
       const registry = getFullRegistryForDay(program);
       const absenceData = [
         ['RESTING (POST-DUTY)', registry['RESTING (POST-DUTY)'].join(', ') || 'NONE'],
@@ -218,7 +225,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         ['ANNUAL LEAVE', registry['ANNUAL LEAVE'].join(', ') || 'NONE'],
         ['STANDBY (RESERVE)', registry['STANDBY (RESERVE)'].join(', ') || 'NONE']
       ];
-
       autoTable(doc, {
         startY: currentY + 3,
         head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
@@ -231,17 +237,47 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    doc.save(`SkyOPS_Station_Program_${startDate}.pdf`);
-  };
+    // Add Final Audit Page
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18).setTextColor(headerColor[0], headerColor[1], headerColor[2]).text(`Weekly Personnel Utilization Audit`, 14, 20);
+    doc.setFontSize(9).setTextColor(100).text(`Validation of 5 Shifts / 2 Days Off Policy (Local Staff Only)`, 14, 26);
 
-  if (filteredPrograms.length === 0) {
-    return (
-      <div className="space-y-8 max-w-4xl mx-auto py-20 text-center">
-        <h2 className="text-4xl font-black italic uppercase text-slate-900 leading-none">Handling Program</h2>
-        <p className="text-slate-400 mt-4">Registry idle or out of filter range. Generate program for {startDate} to see results.</p>
-      </div>
-    );
-  }
+    const auditBody = staff.filter(s => s.type === 'Local').map(s => {
+      const stats = utilizationData[s.id];
+      const isCompliant = stats.work === 5 && stats.off === 2;
+      return [
+        s.name,
+        s.initials,
+        stats.work.toString(),
+        stats.off.toString(),
+        isCompliant ? 'MATCH (5/2)' : `ERROR (${stats.work}/${stats.off})`
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 35,
+      head: [['PERSONNEL NAME', 'INITIALS', 'TOTAL SHIFTS', 'TOTAL DAYS OFF', 'COMPLIANCE STATUS']],
+      body: auditBody,
+      theme: 'grid',
+      headStyles: { fillColor: headerColor, textColor: 255, fontSize: 10 },
+      bodyStyles: { fontSize: 9, cellPadding: 4 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 4) {
+          const text = String(data.cell.raw);
+          if (text.startsWith('ERROR')) {
+            data.cell.styles.textColor = [190, 18, 60]; // rose-700
+            data.cell.styles.fontStyle = 'bold';
+          } else if (text.startsWith('MATCH')) {
+            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      }
+    });
+
+    doc.save(`SkyOPS_Station_Full_Program_${startDate}.pdf`);
+  };
 
   return (
     <div className="space-y-12 pb-32 animate-in fade-in duration-700">
@@ -305,14 +341,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                         {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
                           const sh = getShiftById(shiftId);
                           const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
-                          
                           const staffAssignments: Record<string, string[]> = {};
                           group.forEach(a => {
                             if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
                             const label = formatRoleLabel(a.role);
                             if (label) staffAssignments[a.staffId].push(label);
                           });
-
                           const uniqueHeadcount = Object.keys(staffAssignments).filter(k => k !== 'GAP' && k !== 'VACANT').length;
 
                           return (
@@ -373,6 +407,86 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
               </div>
             );
           })}
+
+          {/* Weekly Utilization Audit Table Ledger */}
+          <div className="bg-white rounded-[4rem] border-4 border-slate-900 shadow-2xl overflow-hidden mt-20">
+            <div className="p-10 md:p-14 bg-slate-900 text-white flex flex-col md:flex-row justify-between items-center gap-6">
+               <div className="flex items-center gap-6">
+                 <div className="w-16 h-16 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/30">
+                   <BarChart3 size={32} />
+                 </div>
+                 <div>
+                    <h2 className="text-3xl font-black italic uppercase tracking-tighter">Utilization Audit Ledger</h2>
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">Personnel Efficiency & 5/2 Compliance (Local Staff)</p>
+                 </div>
+               </div>
+               <div className="flex gap-4">
+                  <div className="px-5 py-3 bg-white/10 rounded-2xl flex items-center gap-3">
+                     <CheckCircle2 className="text-emerald-500" size={18} />
+                     <span className="text-[10px] font-black uppercase tracking-widest">Logic Policy Active</span>
+                  </div>
+               </div>
+            </div>
+            
+            <div className="p-10 md:p-14">
+              <div className="overflow-x-auto rounded-[2rem] border border-slate-200">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-500 border-b border-slate-200">
+                      <th className="p-6 text-[10px] font-black uppercase">Personnel Name</th>
+                      <th className="p-6 text-[10px] font-black uppercase">Initials</th>
+                      <th className="p-6 text-[10px] font-black uppercase text-center">Total Shifts</th>
+                      <th className="p-6 text-[10px] font-black uppercase text-center">Total Days Off</th>
+                      <th className="p-6 text-[10px] font-black uppercase text-right">Compliance Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staff.filter(s => s.type === 'Local').map(s => {
+                      const stats = utilizationData[s.id];
+                      const isCompliant = stats.work === 5 && stats.off === 2;
+                      return (
+                        <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                          <td className="p-6 font-bold text-slate-900 text-sm">{s.name}</td>
+                          <td className="p-6 font-black italic text-slate-900 text-sm">{s.initials}</td>
+                          <td className="p-6 text-center">
+                            <span className={`px-4 py-2 rounded-xl text-xs font-black ${stats.work === 5 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                              {stats.work} / 5
+                            </span>
+                          </td>
+                          <td className="p-6 text-center">
+                             <span className={`px-4 py-2 rounded-xl text-xs font-black ${stats.off === 2 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                               {stats.off} / 2
+                             </span>
+                          </td>
+                          <td className="p-6 text-right">
+                             {isCompliant ? (
+                               <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase italic">
+                                 <Check size={14} /> Match 5/2
+                               </div>
+                             ) : (
+                               <div className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase italic animate-pulse">
+                                 <TriangleAlert size={14} /> Policy Fault
+                               </div>
+                             )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="mt-10 p-8 bg-slate-50 rounded-[2.5rem] border border-slate-200 flex items-start gap-6">
+                 <CircleAlert className="text-blue-600 shrink-0" size={24} />
+                 <div className="space-y-1">
+                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Operational Audit Note</p>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      The "Utilization Audit Ledger" ensures high-fidelity adherence to local handling laws. Personnel flagged with "Policy Fault" indicates a deviation from the mandatory 5/2 cycle. Use the Refiner AI Chat to redistribute workload if faults persist.
+                    </p>
+                 </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
