@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -60,7 +59,7 @@ const ROSTER_SCHEMA = {
                 id: { type: Type.STRING },
                 staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list." },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Role codes: SL, OPS, LC, LF. Use 'General' for all other staff." },
+                role: { type: Type.STRING, description: "Role codes: SL, OPS, LC, LF, RMP. Use 'General' for all other staff." },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -103,25 +102,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     COMMAND: STATION OPERATIONS COMMAND - 7-DAY MASTER PROGRAM
     OBJECTIVE: Build a weekly program with ROSTER-FIRST priority and 5-SHIFT LOCAL HARD-CAP.
 
-    ### 1. SKILL-ROLE LOCK (STOP HALLUCINATIONS)
-    - YOU ARE FORBIDDEN from assigning a specialist role unless the staff member has the flag 'true':
-      - Role 'SL' REQUIRES 'isShiftLeader': true
-      - Role 'LC' REQUIRES 'isLoadControl': true
-      - Role 'OPS' REQUIRES 'isOps': true
-      - Role 'LF' REQUIRES 'isLostFound': true
-    - If a staff member has NONE of these set to true, they MUST be assigned the role "General".
-    - DO NOT guess roles. Check the data for every single assignment.
+    ### RESOURCE EFFICIENCY DIRECTIVE (MULTI-ROLE)
+    1. CONSOLIDATE ROLES: If a person is qualified for multiple roles (e.g., SL + LC) and a shift needs both, assign them as "SL+LC" to save staff slots. 
+    2. MINIMIZE PERSONNEL: Use multi-skilled staff to satisfy multiple role requirements in a single shift whenever possible. Do not assign two people for two roles if one person can do both.
 
-    ### 2. THE 5/2 BALANCED DISTRIBUTION (LOCAL STAFF)
-    - Local staff (e.g., NK-ATZ, WS-ATZ, MS-ATZ, MA-ATZ) MUST be assigned exactly 5 shifts and 2 days off per 7-day period.
-    - Do NOT give a Local staff member 3, 4, or 5 days off. This is a waste of resources.
-    - Spread assignments across the week so every Local staff member works their full 5-shift quota.
+    ### CRITICAL SAFETY LIMITS (STRICT ENFORCEMENT)
+    1. MAX 1 SHIFT PER DAY: No person can work 2 shifts in one calendar date. Assigning 8 or 9 shifts in 7 days is a CRITICAL FAILURE.
+    2. LOCAL STAFF (5/2 RULE): Every 'Local' staff member MUST have exactly 5 shifts and 2 days off per 7-day period. 
+    3. ROSTER STAFF (WINDOW RULE): 'Roster' staff MUST only work on dates within their workFromDate and workToDate. Maximum 7 shifts per week (1 per day).
+    4. NO DOUBLE BOOKING: One person can only be in ONE shift at any given time.
 
-    ### 3. ROSTER-FIRST ALLOCATION
-    - Assign all available "Roster" staff members to shifts before using "Local" staff.
-    - Only use "Local" staff to fill the remaining headcount once "Roster" staff are fully utilized.
+    ### SKILL-ROLE LOCK
+    - Role 'SL' REQUIRES 'isShiftLeader': true
+    - Role 'LC' REQUIRES 'isLoadControl': true
+    - Role 'OPS' REQUIRES 'isOps': true
+    - Role 'LF' REQUIRES 'isLostFound': true
+    - Role 'RMP' REQUIRES 'isRamp': true
+    - Otherwise use "General".
 
-    ### 4. DATA CONTEXT:
+    ### DATA CONTEXT:
     - START DATE: ${config.startDate}
     - DURATION: ${config.numDays} Days
     - PERSONNEL: ${JSON.stringify(data.staff)}
@@ -130,7 +129,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
     ### THINKING PROTOCOL:
-    Before outputting JSON, verify the shift counts for every Local staff member. Ensure no one has more than 2 days off and no one has roles they aren't qualified for.
+    Iteratively check the 'shifts-per-person' counter. If a Local staff has 6 shifts, REMOVE one. If a Roster staff has more than 7 shifts total, or more than 1 per day, REMOVE them. Prioritize combined roles (e.g. SL+LC) to keep counts low.
   `;
 
   try {

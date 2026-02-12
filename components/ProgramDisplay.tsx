@@ -22,7 +22,9 @@ import {
   Moon,
   ShieldAlert,
   BarChart3,
-  Check
+  Check,
+  CalendarRange,
+  TrendingUp
 } from 'lucide-react';
 
 interface Props {
@@ -63,9 +65,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   }, [programs, startDate, endDate]);
 
   const utilizationData = useMemo(() => {
-    const stats: Record<string, { work: number, off: number }> = {};
-    staff.forEach(s => stats[s.id] = { work: 0, off: 0 });
+    const stats: Record<string, { work: number, off: number, rosterPotential: number }> = {};
+    staff.forEach(s => stats[s.id] = { work: 0, off: 0, rosterPotential: 0 });
     
+    // Calculate Roster Potential Days within the 7-day program window
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      staff.forEach(s => {
+        if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+          const sFrom = new Date(s.workFromDate);
+          const sTo = new Date(s.workToDate);
+          let potential = 0;
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const current = new Date(d);
+            if (current >= sFrom && current <= sTo) potential++;
+          }
+          stats[s.id].rosterPotential = potential;
+        } else if (s.type === 'Local') {
+          // Local potential is always the window length (usually 7) for 5/2 logic
+          stats[s.id].rosterPotential = 7;
+        }
+      });
+    }
+
     filteredPrograms.forEach(program => {
       const assignedIds = new Set(program.assignments.map(a => a.staffId));
       staff.forEach(s => {
@@ -77,7 +100,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
     return stats;
-  }, [filteredPrograms, staff]);
+  }, [filteredPrograms, staff, startDate, endDate]);
 
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getFlightById = (id: string) => flights.find(f => f.id === id);
@@ -87,13 +110,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const rStr = String(role || '').trim();
     if (!rStr) return '';
     const lower = rStr.toLowerCase();
-    if (lower === 'general' || lower === 'rmp' || lower === 'ramp' || lower === 'nil') return '';
+    if (lower === 'general' || lower === 'nil') return '';
     
     return rStr.split('+').map(part => {
       const r = part.trim().toUpperCase();
       if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
       if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-      if (r === 'RAMP' || r === 'RMP') return ''; 
+      if (r === 'RAMP' || r === 'RMP') return 'RMP'; 
       if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
       if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
       return r;
@@ -197,7 +220,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           if (sid === 'GAP' || sid === 'VACANT') return 'VACANT';
           const st = getStaffById(sid);
           const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
-          return `${st?.initials || '??'}${rolesStr}`;
+          const totalShifts = utilizationData[st?.id || '']?.work || 0;
+          return `[${totalShifts}] ${st?.initials || '??'}${rolesStr}`;
         }).join(' | ');
 
         const uniqueHeadcount = Object.keys(staffAssignments).filter(k => k !== 'GAP' && k !== 'VACANT').length;
@@ -237,46 +261,55 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    // Add Final Audit Page
+    // Page 8: Local Audit
     doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18).setTextColor(headerColor[0], headerColor[1], headerColor[2]).text(`Weekly Personnel Utilization Audit`, 14, 20);
-    doc.setFontSize(9).setTextColor(100).text(`Validation of 5 Shifts / 2 Days Off Policy (Local Staff Only)`, 14, 26);
-
-    const auditBody = staff.filter(s => s.type === 'Local').map(s => {
+    doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(headerColor[0], headerColor[1], headerColor[2]).text(`Weekly Personnel Utilization Audit (Local Staff Only)`, 14, 20);
+    doc.setFontSize(9).setTextColor(100).text(`Validation of 5 Shifts / 2 Days Off Policy`, 14, 26);
+    const localAuditBody = staff.filter(s => s.type === 'Local').map(s => {
       const stats = utilizationData[s.id];
       const isCompliant = stats.work === 5 && stats.off === 2;
-      return [
-        s.name,
-        s.initials,
-        stats.work.toString(),
-        stats.off.toString(),
-        isCompliant ? 'MATCH (5/2)' : `ERROR (${stats.work}/${stats.off})`
-      ];
+      return [s.name, s.initials, stats.work.toString(), stats.off.toString(), isCompliant ? 'MATCH (5/2)' : `ERROR (${stats.work}/${stats.off})` ];
     });
-
     autoTable(doc, {
       startY: 35,
       head: [['PERSONNEL NAME', 'INITIALS', 'TOTAL SHIFTS', 'TOTAL DAYS OFF', 'COMPLIANCE STATUS']],
-      body: auditBody,
+      body: localAuditBody,
       theme: 'grid',
-      headStyles: { fillColor: headerColor, textColor: 255, fontSize: 10 },
-      bodyStyles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: headerColor, textColor: 255 },
       didParseCell: (data) => {
         if (data.section === 'body' && data.column.index === 4) {
           const text = String(data.cell.raw);
-          if (text.startsWith('ERROR')) {
-            data.cell.styles.textColor = [190, 18, 60]; // rose-700
-            data.cell.styles.fontStyle = 'bold';
-          } else if (text.startsWith('MATCH')) {
-            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
-            data.cell.styles.fontStyle = 'bold';
-          }
+          if (text.startsWith('ERROR')) data.cell.styles.textColor = [190, 18, 60];
+          else if (text.startsWith('MATCH')) data.cell.styles.textColor = [5, 150, 105];
         }
       }
     });
 
-    doc.save(`SkyOPS_Station_Full_Program_${startDate}.pdf`);
+    // Page 9: Roster Audit
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(217, 119, 6).text(`Weekly Personnel Utilization Audit (Roster Staff)`, 14, 20);
+    doc.setFontSize(9).setTextColor(100).text(`Validation of Contract Window Alignment`, 14, 26);
+    const rosterAuditBody = staff.filter(s => s.type === 'Roster').map(s => {
+      const stats = utilizationData[s.id];
+      const isOverWorked = stats.work > stats.rosterPotential;
+      return [s.name, s.initials, `${s.workFromDate} to ${s.workToDate}`, stats.rosterPotential.toString(), stats.work.toString(), isOverWorked ? `OVERWORK (${stats.work}/${stats.rosterPotential})` : 'COMPLIANT' ];
+    });
+    autoTable(doc, {
+      startY: 35,
+      head: [['PERSONNEL NAME', 'INITIALS', 'CONTRACT WINDOW', 'MUST WORK (POTENTIAL)', 'ACTUALLY WORKED', 'STATUS']],
+      body: rosterAuditBody,
+      theme: 'grid',
+      headStyles: { fillColor: [217, 119, 6], textColor: 255 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 5) {
+          const text = String(data.cell.raw);
+          if (text.startsWith('OVERWORK')) data.cell.styles.textColor = [190, 18, 60];
+          else if (text === 'COMPLIANT') data.cell.styles.textColor = [5, 150, 105];
+        }
+      }
+    });
+
+    doc.save(`SkyOPS_Full_Station_Report_${startDate}.pdf`);
   };
 
   return (
@@ -333,8 +366,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           <th className="p-5 text-[10px] font-black uppercase">PICKUP</th>
                           <th className="p-5 text-[10px] font-black uppercase">RELEASE</th>
                           <th className="p-5 text-[10px] font-black uppercase">FLIGHTS</th>
-                          <th className="p-5 text-[10px] font-black uppercase">HC / MAX</th>
-                          <th className="p-5 text-[10px] font-black uppercase">PERSONNEL</th>
+                          <th className="p-5 text-[10px] font-black uppercase text-center">HC / MAX</th>
+                          <th className="p-5 text-[10px] font-black uppercase">PERSONNEL & WEEKLY SHIFT COUNT</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -354,7 +387,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                               <td className="p-6 text-sm font-black italic">{sh?.pickupTime || '--:--'}</td>
                               <td className="p-6 text-sm font-black italic">{sh?.endTime || '--:--'}</td>
                               <td className="p-6 text-xs font-bold uppercase text-blue-600">{fls}</td>
-                              <td className="p-6 text-xs font-black">
+                              <td className="p-6 text-xs font-black text-center">
                                 <span className={uniqueHeadcount < (sh?.minStaff || 0) ? 'text-rose-600' : 'text-emerald-600'}>
                                   {uniqueHeadcount} / {sh?.maxStaff || sh?.minStaff || '0'}
                                 </span>
@@ -364,10 +397,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                   {Object.entries(staffAssignments).map(([sid, roles], ai) => {
                                       const isGap = sid === 'GAP' || sid === 'VACANT';
                                       const st = isGap ? null : getStaffById(sid);
+                                      const totalShifts = utilizationData[st?.id || '']?.work || 0;
                                       const rolesStr = roles.length > 0 ? ` (${roles.join('+')})` : '';
                                       return (
-                                        <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100 ring-2 ring-rose-500/20' : 'bg-slate-100 text-slate-700 font-bold'}`}>
-                                          {isGap && <ShieldAlert size={10} className="text-rose-400" />}
+                                        <span key={ai} className={`px-2 py-1 rounded-lg flex items-center gap-1 ${isGap ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-700 font-bold'}`}>
+                                          {!isGap && <span className={`mr-1 font-black ${totalShifts > 7 ? 'text-rose-600 animate-pulse' : 'text-slate-400'}`}>[{totalShifts}]</span>}
                                           {isGap ? 'VACANT' : (st?.initials || '??')} 
                                           {rolesStr && <span className="font-black text-slate-900">{rolesStr}</span>}
                                         </span>
@@ -408,83 +442,88 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             );
           })}
 
-          {/* Weekly Utilization Audit Table Ledger */}
-          <div className="bg-white rounded-[4rem] border-4 border-slate-900 shadow-2xl overflow-hidden mt-20">
-            <div className="p-10 md:p-14 bg-slate-900 text-white flex flex-col md:flex-row justify-between items-center gap-6">
-               <div className="flex items-center gap-6">
-                 <div className="w-16 h-16 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/30">
-                   <BarChart3 size={32} />
-                 </div>
-                 <div>
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter">Utilization Audit Ledger</h2>
-                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">Personnel Efficiency & 5/2 Compliance (Local Staff)</p>
-                 </div>
+          {/* Audit Master Ledger */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mt-20">
+            {/* Local Staff Ledger */}
+            <div className="bg-white rounded-[4rem] border-4 border-slate-900 shadow-2xl overflow-hidden flex flex-col">
+               <div className="p-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-6">
+                    <BarChart3 size={24} className="text-blue-500" />
+                    <h2 className="text-2xl font-black italic uppercase">Local Personnel Audit</h2>
+                  </div>
+                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Page A: 5/2 Compliance</span>
                </div>
-               <div className="flex gap-4">
-                  <div className="px-5 py-3 bg-white/10 rounded-2xl flex items-center gap-3">
-                     <CheckCircle2 className="text-emerald-500" size={18} />
-                     <span className="text-[10px] font-black uppercase tracking-widest">Logic Policy Active</span>
+               <div className="p-8 flex-1">
+                  <div className="overflow-hidden rounded-3xl border border-slate-100">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
+                          <th className="p-4">Personnel</th>
+                          <th className="p-4 text-center">Shifts</th>
+                          <th className="p-4 text-center">Off</th>
+                          <th className="p-4 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {staff.filter(s => s.type === 'Local').map((s, idx) => {
+                          const stats = utilizationData[s.id];
+                          const isCompliant = stats.work === 5 && stats.off === 2;
+                          return (
+                            <tr key={s.id} className="hover:bg-slate-50/50">
+                              <td className="p-4"><p className="font-bold text-slate-900 text-xs">{idx + 1}. {s.name}</p><p className="text-[9px] font-black text-slate-400">[{stats.work}] {s.initials}</p></td>
+                              <td className="p-4 text-center font-black text-xs text-slate-950">{stats.work}</td>
+                              <td className="p-4 text-center font-black text-xs text-slate-400">{stats.off}</td>
+                              <td className="p-4 text-right">
+                                {isCompliant ? <span className="text-emerald-600 font-black italic text-[9px] uppercase">Match 5/2</span> : <span className="text-rose-600 font-black italic text-[9px] uppercase animate-pulse">FAULT</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                </div>
             </div>
-            
-            <div className="p-10 md:p-14">
-              <div className="overflow-x-auto rounded-[2rem] border border-slate-200">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 text-slate-500 border-b border-slate-200">
-                      <th className="p-6 text-[10px] font-black uppercase">Personnel Name</th>
-                      <th className="p-6 text-[10px] font-black uppercase">Initials</th>
-                      <th className="p-6 text-[10px] font-black uppercase text-center">Total Shifts</th>
-                      <th className="p-6 text-[10px] font-black uppercase text-center">Total Days Off</th>
-                      <th className="p-6 text-[10px] font-black uppercase text-right">Compliance Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {staff.filter(s => s.type === 'Local').map(s => {
-                      const stats = utilizationData[s.id];
-                      const isCompliant = stats.work === 5 && stats.off === 2;
-                      return (
-                        <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                          <td className="p-6 font-bold text-slate-900 text-sm">{s.name}</td>
-                          <td className="p-6 font-black italic text-slate-900 text-sm">{s.initials}</td>
-                          <td className="p-6 text-center">
-                            <span className={`px-4 py-2 rounded-xl text-xs font-black ${stats.work === 5 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                              {stats.work} / 5
-                            </span>
-                          </td>
-                          <td className="p-6 text-center">
-                             <span className={`px-4 py-2 rounded-xl text-xs font-black ${stats.off === 2 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                               {stats.off} / 2
-                             </span>
-                          </td>
-                          <td className="p-6 text-right">
-                             {isCompliant ? (
-                               <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase italic">
-                                 <Check size={14} /> Match 5/2
-                               </div>
-                             ) : (
-                               <div className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase italic animate-pulse">
-                                 <TriangleAlert size={14} /> Policy Fault
-                               </div>
-                             )}
-                          </td>
+
+            {/* Roster Staff Ledger */}
+            <div className="bg-white rounded-[4rem] border-4 border-amber-500 shadow-2xl overflow-hidden flex flex-col">
+               <div className="p-10 bg-amber-500 text-white flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-6">
+                    <TrendingUp size={24} />
+                    <h2 className="text-2xl font-black italic uppercase">Roster Personnel Audit</h2>
+                  </div>
+                  <span className="text-[10px] font-black text-amber-100 uppercase tracking-widest">Page B: Contract Window</span>
+               </div>
+               <div className="p-8 flex-1">
+                  <div className="overflow-hidden rounded-3xl border border-slate-100">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
+                          <th className="p-4">Personnel</th>
+                          <th className="p-4 text-center">Must Work</th>
+                          <th className="p-4 text-center">Actual</th>
+                          <th className="p-4 text-right">Status</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              
-              <div className="mt-10 p-8 bg-slate-50 rounded-[2.5rem] border border-slate-200 flex items-start gap-6">
-                 <CircleAlert className="text-blue-600 shrink-0" size={24} />
-                 <div className="space-y-1">
-                    <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Operational Audit Note</p>
-                    <p className="text-[10px] text-slate-500 leading-relaxed">
-                      The "Utilization Audit Ledger" ensures high-fidelity adherence to local handling laws. Personnel flagged with "Policy Fault" indicates a deviation from the mandatory 5/2 cycle. Use the Refiner AI Chat to redistribute workload if faults persist.
-                    </p>
-                 </div>
-              </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {staff.filter(s => s.type === 'Roster').map((s, idx) => {
+                          const stats = utilizationData[s.id];
+                          const isOverworked = stats.work > stats.rosterPotential;
+                          return (
+                            <tr key={s.id} className="hover:bg-amber-50/30">
+                              <td className="p-4"><p className="font-bold text-slate-900 text-xs">{idx + 1}. {s.name}</p><p className="text-[9px] font-black text-amber-600 uppercase">[{stats.work}] {s.initials} | Window: {s.workFromDate} - {s.workToDate}</p></td>
+                              <td className="p-4 text-center font-black text-xs text-slate-950">{stats.rosterPotential}</td>
+                              <td className="p-4 text-center font-black text-xs text-slate-950">{stats.work}</td>
+                              <td className="p-4 text-right">
+                                {isOverworked ? <span className="text-rose-600 font-black italic text-[9px] uppercase animate-pulse">OVERWORK</span> : <span className="text-emerald-600 font-black italic text-[9px] uppercase">COMPLIANT</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+               </div>
             </div>
           </div>
         </div>
