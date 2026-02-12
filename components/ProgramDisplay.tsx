@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty } from '../types';
+import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty, Skill } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -96,18 +96,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  const formatRoleLabel = (role: any) => {
+  const formatRoleLabel = (role: any, shiftRoleCounts?: Partial<Record<Skill, number>>) => {
     const rStr = String(role || '').trim();
     if (!rStr || rStr.toLowerCase() === 'general') return '';
-    return rStr.split('+').map(part => {
-      const r = part.trim().toUpperCase();
-      if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
-      if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-      if (r === 'RAMP' || r === 'RMP') return 'RMP'; 
-      if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
-      if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
-      return r;
-    }).filter(Boolean).join('+');
+    
+    // Split combined roles like "LC+SL" or "RMP+OPS"
+    const parts = rStr.split('+').map(p => p.trim().toUpperCase());
+    
+    const filtered = parts.map(r => {
+      // 1. Specialist roles: only show if shift explicitly requested them
+      if ((r === 'SHIFT LEADER' || r === 'SL') && (!shiftRoleCounts || (shiftRoleCounts['Shift Leader'] || 0) > 0)) return 'SL';
+      if ((r === 'LOAD CONTROL' || r === 'LC') && (!shiftRoleCounts || (shiftRoleCounts['Load Control'] || 0) > 0)) return 'LC';
+      if ((r === 'OPERATIONS' || r === 'OPS') && (!shiftRoleCounts || (shiftRoleCounts['Operations'] || 0) > 0)) return 'OPS';
+      if ((r === 'LOST AND FOUND' || r === 'LF') && (!shiftRoleCounts || (shiftRoleCounts['Lost and Found'] || 0) > 0)) return 'LF';
+      
+      // 2. RMP: Per user request, never hide RMP
+      if (r === 'RAMP' || r === 'RMP') return 'RMP';
+      
+      // 3. ROSTER: Handle category labels assigned by AI
+      if (r === 'ROSTER') return 'ROSTER';
+
+      return null;
+    }).filter(Boolean);
+
+    return filtered.join('+');
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -170,7 +182,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const staffAssignments: Record<string, string[]> = {};
         group.forEach(a => {
           if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
-          const label = formatRoleLabel(a.role);
+          const label = formatRoleLabel(a.role, sh?.roleCounts);
           if (label) staffAssignments[a.staffId].push(label);
         });
         const personnelStr = Object.entries(staffAssignments).map(([sid, roles]) => {
@@ -213,7 +225,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
     // Page 8: Local Audit
     doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(18).setTextColor(0).text(`Weekly Personnel Utilization Audit (Local Staff Only)`, 14, 20);
+    doc.setFont('helvetica', 'bold').setFontSize(18).text(`Weekly Personnel Utilization Audit (Local Staff Only)`, 14, 20);
     doc.setFontSize(9).setTextColor(100).text(`Validation of 5 Shifts / 2 Days Off Policy`, 14, 26);
     const localAuditBody = staff.filter(s => s.type === 'Local').map(s => {
       const stats = utilizationData[s.id];
@@ -275,7 +287,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           const sh = getShiftById(shiftId);
                           const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
                           const staffAssignments: Record<string, string[]> = {};
-                          group.forEach(a => { if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = []; const label = formatRoleLabel(a.role); if (label) staffAssignments[a.staffId].push(label); });
+                          group.forEach(a => {
+                            if (!staffAssignments[a.staffId]) staffAssignments[a.staffId] = [];
+                            const label = formatRoleLabel(a.role, sh?.roleCounts);
+                            if (label) staffAssignments[a.staffId].push(label);
+                          });
                           const currentHc = Object.keys(staffAssignments).length;
                           const isUnderstaffed = currentHc < (sh?.minStaff || 0);
                           

@@ -99,33 +99,38 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a 7-day program with REINFORCED REVISION LOGIC.
+    OBJECTIVE: Build a 7-day program with STRIKE-TEAM EFFICIENCY and DOUBLE-PASS AUDIT.
 
-    ### PHASE 1: DAILY DEMAND & ASSIGNMENT
-    For each day in the 7-day period:
-    1. Calculate 'minStaff' required for all shifts on that specific day.
-    2. Assign 'Roster' staff first, but ONLY if the current date is within their [workFromDate] and [workToDate].
-    3. Fill the remaining gap to meet 'minStaff' using 'Local' staff.
-    4. Any 'Local' staff NOT used for that day must be explicitly marked as "Day off" in the [offDuty] array.
+    ### MANDATORY ROLE CONSOLIDATION (PAIRS ONLY)
+    To optimize headcount and maximize the Standby pool, use multi-skilled staff as PAIRS ONLY:
+    - If a shift needs SL and LC, and staff is qualified for both, assign as "LC+SL".
+    - If a shift needs OPS and LC, and staff is qualified for both, assign as "LC+OPS".
+    - HARD LIMIT: Never assign 3 roles. Only 2 roles maximum per person. 
+    - EFFICIENCY: Use consolidated pairs whenever possible to save shifts for the weekly budget.
 
-    ### PHASE 2: ROLE CONSOLIDATION (RESTRICTED PAIRS)
-    To optimize headcount and meet minimum staff, use multi-skilled personnel:
-    - If a shift needs SL and LC, and a person is qualified for both, assign as "LC+SL".
-    - If a shift needs OPS and LC, and a person is qualified for both, assign as "LC+OPS".
-    - HARD LIMIT: Never assign 3 roles. Max is 2 roles (e.g., LC+SL).
+    ### PRIORITY ASSIGNMENT LOGIC
+    1. ROSTER POOL (PRIMARY): You MUST fill the 'Max Staff' for every shift using Roster staff first (if the date is within their contract window).
+    2. LOCAL POOL (SECONDARY): Use Local staff only to fill remaining gaps up to 'Max Staff'.
+    3. STANDBY POOL: Anyone not used must be marked in [offDuty].
 
-    ### PHASE 3: DOUBLE-PASS REVISION (CRITICAL AUDIT)
-    PASS 1 (SAFETY AUDIT): Check every shift. If assigned headcount < minStaff, you MUST add more Local staff. Do not leave a shift under-staffed if Local staff are available.
-    PASS 2 (WORKLOAD BALANCE): Count total weekly shifts for Local staff. If anyone has > 5 shifts, swap their extra shifts with staff who have < 5 shifts. 
+    ### DOUBLE-PASS REVISION PROTOCOL (AUDIT BEFORE OUTPUT)
+    PASS 1 (MIN-STAFF AUDIT): 
+    - Review every shift. If assigned headcount < minStaff, you MUST add staff from the Standby pool immediately. 
+    - FAILURE TO MEET MINSTAFF IS NOT ALLOWED.
 
-    ### CONTEXT DATA:
-    - PERSONNEL: ${JSON.stringify(data.staff)}
-    - SHIFTS: ${JSON.stringify(data.shifts)}
+    PASS 2 (LOCAL 5/2 AUDIT): 
+    - Calculate total weekly shifts for Local staff. 
+    - If anyone exceeds 5 shifts, move those shifts to Roster staff or other Local staff with < 5 shifts.
+    - NO LOCAL STAFF CAN HAVE MORE THAN 5 SHIFTS.
+
+    ### DATA CONTEXT:
+    - PERIOD: ${config.startDate}
+    - STAFF: ${JSON.stringify(data.staff)}
+    - SHIFT SPECS: ${JSON.stringify(data.shifts)}
     - LEAVE: ${JSON.stringify(data.leaveRequests)}
-    - REST: ${JSON.stringify(data.incomingDuties)}
-    - START: ${config.startDate}
+    - REST LOG: ${JSON.stringify(data.incomingDuties)}
 
-    EXECUTION: I will revise the draft twice before final JSON output to ensure every shift meets minStaff and Local staff adhere to the 5/2 rule.
+    CONFIRMATION: I will revise the program to ensure minStaff is met for every shift, role pairs are used efficiently, and Local staff stick to the 5/2 rule.
   `;
 
   try {
