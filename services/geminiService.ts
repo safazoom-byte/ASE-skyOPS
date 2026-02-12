@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -91,29 +92,26 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
     OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### SMART MAPPING LOGIC (MANDATORY):
-    1. **GLOBAL MAPPING**: First, scan the entire week to map personnel availability, arrival/departure windows, and rest logs.
-    2. **CORE SPECIALISTS FIRST**: Assign SL (Shift Leader) and LC (Load Control) across the ENTIRE weekly program first. 
-    3. **COMBINED ROLES**: Use "SL+LC" for agents qualified in both to optimize headcount.
-    4. **REQUESTED ROLES**: Fill the specific counts for OPS, LF, RMP as defined in each shift configuration.
-    5. **GAP FILLING (HC / MAX)**: If the headcount is below the "minStaff", assign any remaining available staff as "General Staff" (leave role string empty "") until the MIN requirement is reached.
-    6. **DAILY BALANCE**:
-       - Priority 1: Exhaust Roster staff within their contract windows.
-       - Priority 2: Use Local staff for remaining gaps.
-       - Priority 3: Assign "Day Off" to any Local staff not required for that specific day.
-    7. **REST**: Enforce a strict ${config.minRestHours}-hour rest period.
+    ### CRITICAL LOGIC REQUIREMENTS (SOLVE AUDIT ERRORS):
+    1. **ROSTER STAFF PRIORITY**: You MUST exhaust Roster staff (initials ending in -HMB) first. Use them up to 7 shifts if their contract window allows. Do not leave Roster staff idle while Local staff are working.
+    2. **LOCAL STAFF LIMIT**: Strictly limit Local staff (initials ending in -ATZ) to a maximum of 5 shifts per week.
+    3. **DAY OFF ASSIGNMENT**: If a Local staff member is not needed to meet the "minStaff" requirement for a day (after prioritizing Roster staff), assign them a "DAY OFF". 
+    4. **MIN STAFF GAP FILLING**: Reach the "minStaff" requirement for every shift. If roles (SL, LC, OPS, etc.) are filled but headcount is still low, add available staff with an empty role label "".
+    5. **SPECIALIST ASSIGNMENT**: Assign SL, LC, and combined SL+LC roles first across the entire period to ensure coverage.
+    6. **REST COMPLIANCE**: Ensure exactly ${config.minRestHours} hours of rest between shifts.
 
     ### FORMATTING RULES:
-    - Role shortcuts ONLY: "SL", "LC", "SL+LC", "OPS", "LF", "RMP".
-    - General staff for gap filling must have an empty role label "".
+    - ONLY use these shortcuts for roles: "SL", "LC", "SL+LC", "OPS", "LF", "RMP".
+    - For general gap filling (personnel needed for headcount but no specific specialist role), set role to "".
 
-    ### DATA:
+    ### STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
-    - REST LOG: ${JSON.stringify(data.incomingDuties)}
-    - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - PREVIOUS DUTIES: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE/ABSENCE: ${JSON.stringify(data.leaveRequests)}
 
-    Return JSON matching the provided ROSTER_SCHEMA.
+    ### OUTPUT:
+    Return JSON matching the ROSTER_SCHEMA. Ensure the "stationHealth" reflects how well you balanced the 5-shift limit for Locals vs Roster utilization.
   `;
 
   try {
@@ -150,7 +148,12 @@ export const extractDataFromContent = async (params: {
   if (params.media && params.media.length > 0) {
     params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
-  const prompt = `COMMAND: STATION REGISTRY EXTRACTION...`;
+  const prompt = `
+    COMMAND: STATION REGISTRY EXTRACTION
+    OBJECTIVE: Parse and extract aviation station data into structured JSON.
+    TARGET: ${params.targetType}
+    STATION_START_DATE: ${params.startDate || 'N/A'}
+  `;
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',

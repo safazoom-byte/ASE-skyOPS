@@ -197,6 +197,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const greyHeader = [71, 85, 105];
     const orangeHeader = [217, 119, 6];
     
+    // 1. Daily Program Pages
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
       doc.setFont('helvetica', 'bold').setFontSize(22).text(`SkyOPS Station Handling Program`, 14, 20);
@@ -240,7 +241,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
-    // Local Audit Page
+    // 2. Local Audit Page
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Personnel Utilization Audit (Local)`, 14, 20);
     const localData = staff.filter(s => s.type === 'Local').map((s, i) => {
@@ -256,7 +257,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       bodyStyles: { fontSize: 8, cellPadding: 3 }
     });
 
-    // Roster Audit Page
+    // 3. Roster Audit Page
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Personnel Utilization Audit (Roster)`, 14, 20);
     const rosterData = staff.filter(s => s.type === 'Roster').map((s, i) => {
@@ -269,6 +270,65 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       theme: 'grid', 
       headStyles: { fillColor: orangeHeader, fontSize: 10, cellPadding: 3 },
       bodyStyles: { fontSize: 8, cellPadding: 3 }
+    });
+
+    // 4. Matrix View Page (Polished with Color Coding)
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Operations Matrix View`, 14, 20);
+    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Detailed Assignment Timeline`, 14, 27);
+    
+    const matrixHeader = [
+      'S/N', 
+      'AGENT', 
+      ...filteredPrograms.map(p => {
+        const d = new Date(p.dateString || '');
+        return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+      }),
+      'AUDIT'
+    ];
+
+    const matrixBody = staff.sort((a,b) => a.type.localeCompare(b.type)).map((s, i) => {
+      const assignments = filteredPrograms.map(p => {
+        const ass = p.assignments.find(a => a.staffId === s.id);
+        if (!ass) return '-';
+        const sh = getShiftById(ass.shiftId);
+        return sh ? sh.pickupTime : '-';
+      });
+      const workCount = utilizationData[s.id].work;
+      const potential = utilizationData[s.id].rosterPotential;
+      return [
+        (i + 1).toString(),
+        `${s.initials} (${s.type[0]})`,
+        ...assignments,
+        `${workCount}/${potential}`
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 35,
+      head: [matrixHeader],
+      body: matrixBody,
+      theme: 'grid',
+      headStyles: { fillColor: darkHeader, textColor: 255, fontSize: 8, cellPadding: 3 },
+      bodyStyles: { fontSize: 8, cellPadding: 3 },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        1: { cellWidth: 25 },
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index >= 2 && data.column.index < matrixHeader.length - 1) {
+          if (data.cell.text[0] !== '-') {
+            data.cell.styles.fillColor = [240, 249, 255]; // Blue for work
+            data.cell.styles.textColor = [2, 6, 23];
+            data.cell.styles.fontStyle = 'bold';
+          } else {
+            data.cell.styles.textColor = [200, 200, 200]; // Grey for off
+          }
+        }
+        if (data.section === 'body' && data.column.index === matrixHeader.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
     });
 
     doc.save(`SkyOPS_Station_Program_${startDate}.pdf`);
