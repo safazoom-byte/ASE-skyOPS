@@ -1,11 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
-
-export interface ExtractionMedia {
-  data: string;
-  mimeType: string;
-}
 
 export interface BuildResult {
   programs: DailyProgram[];
@@ -13,6 +7,11 @@ export interface BuildResult {
   isCompliant: boolean;
   stationHealth: number; 
   alerts?: { type: 'danger' | 'warning', message: string }[];
+}
+
+export interface ExtractionMedia {
+  data: string;
+  mimeType: string;
 }
 
 const safeParseJson = (text: string | undefined): any => {
@@ -65,16 +64,6 @@ const ROSTER_SCHEMA = {
               },
               required: ["id", "staffId", "role", "shiftId"]
             }
-          },
-          offDuty: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                staffId: { type: Type.STRING },
-                type: { type: Type.STRING }
-              }
-            }
           }
         },
         required: ["day", "dateString", "assignments"]
@@ -100,33 +89,31 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a ${config.numDays}-day program using a STRICT STAGE-BASED ALLOCATION sequence.
+    OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### MANDATORY ALLOCATION SEQUENCE:
-    1. **STAGE 1: MANDATORY SPECIALISTS (SL & LC)**: 
-       - Identify all shifts requiring "Shift Leader" (SL) or "Load Control" (LC).
-       - ALLOCATE THESE FIRST using qualified personnel.
-       - OPTIMIZATION: Prioritize multi-skilled staff (e.g., NK-ATZ who is both SL and LC). Assign them to cover BOTH roles in a single shift (Label role as "SL+LC"). This is the highest priority to optimize headcount.
-    
-    2. **STAGE 2: ROSTER ENGINE**: 
-       - Fill remaining station needs using Roster staff.
-       - RULE: ONLY assign Roster staff if the shift falls exactly within their contract dates ("workFromDate" to "workToDate").
-    
-    3. **STAGE 3: LOCAL RESERVE**:
-       - Fill any remaining gaps using Local staff.
-       - THE 5-SHIFT LAW: Every Local staff member MUST work EXACTLY 5 shifts in this 7-day period.
+    ### SMART MAPPING LOGIC (MANDATORY):
+    1. **GLOBAL MAPPING**: First, scan the entire week to map personnel availability, arrival/departure windows, and rest logs.
+    2. **CORE SPECIALISTS FIRST**: Assign SL (Shift Leader) and LC (Load Control) across the ENTIRE weekly program first. 
+    3. **COMBINED ROLES**: Use "SL+LC" for agents qualified in both to optimize headcount.
+    4. **REQUESTED ROLES**: Fill the specific counts for OPS, LF, RMP as defined in each shift configuration.
+    5. **GAP FILLING (HC / MAX)**: If the headcount is below the "minStaff", assign any remaining available staff as "General Staff" (leave role string empty "") until the MIN requirement is reached.
+    6. **DAILY BALANCE**:
+       - Priority 1: Exhaust Roster staff within their contract windows.
+       - Priority 2: Use Local staff for remaining gaps.
+       - Priority 3: Assign "Day Off" to any Local staff not required for that specific day.
+    7. **REST**: Enforce a strict ${config.minRestHours}-hour rest period.
 
-    ### CRITICAL CONSTRAINTS:
-    - **FATIGUE PREVENTION**: Ensure exactly ${config.minRestHours} hours of rest between consecutive shifts. Use the "incomingDuties" for rest context before the program starts.
-    - **ROLE LABELS**: Only use specialized labels (SL, LC, SL+LC, OPS, etc.) when filling a required role slot. Default to empty for general support.
+    ### FORMATTING RULES:
+    - Role shortcuts ONLY: "SL", "LC", "SL+LC", "OPS", "LF", "RMP".
+    - General staff for gap filling must have an empty role label "".
 
-    ### DATA CONTEXT:
-    - START DATE: ${config.startDate}
+    ### DATA:
     - STAFF: ${JSON.stringify(data.staff)}
-    - SHIFT SPECS: ${JSON.stringify(data.shifts)}
-    - LEAVE/REST: ${JSON.stringify(data.leaveRequests)} / ${JSON.stringify(data.incomingDuties)}
+    - SHIFTS: ${JSON.stringify(data.shifts)}
+    - REST LOG: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
-    Produce JSON result following ROSTER_SCHEMA.
+    Return JSON matching the provided ROSTER_SCHEMA.
   `;
 
   try {
@@ -151,15 +138,24 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
 };
 
-export const extractDataFromContent = async (options: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
+export const extractDataFromContent = async (params: { 
+  textData?: string; 
+  media?: ExtractionMedia[]; 
+  startDate?: string; 
+  targetType: 'flights' | 'staff' | 'shifts' | 'all';
+}): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const parts: any[] = [{ text: `Extract station data for ${options.targetType} into a structured JSON format.` }];
-  if (options.textData) parts.push({ text: options.textData });
-  if (options.media) options.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
+  const parts: any[] = [];
+  if (params.textData) parts.push({ text: `DATA SOURCE TEXT:\n${params.textData}` });
+  if (params.media && params.media.length > 0) {
+    params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
+  }
+  const prompt = `COMMAND: STATION REGISTRY EXTRACTION...`;
+  parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: 'application/json' }
+    config: { responseMimeType: "application/json" }
   });
   return safeParseJson(response.text);
 };
