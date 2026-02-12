@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -99,25 +100,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
-    OBJECTIVE: Build a 7-day program with EXACTLY 5 shifts for Locals and OPTIMIZED coverage using Roster staff and Multi-skilled staff.
+    OBJECTIVE: Build a ${config.numDays}-day program using a STRICT STAGE-BASED ALLOCATION sequence.
 
-    ### MANDATORY LOGIC RULES:
-    1. **THE 5-SHIFT LAW (LOCAL STAFF)**: Every Local staff member MUST work EXACTLY 5 shifts in this 7-day period. 4 shifts is a FAILURE. 6 shifts is a FAILURE. You must hit 5 exactly.
-    2. **ROSTER CONTRACT ADHERENCE**: 
-       - Strictly check "workFromDate" and "workToDate" for every Roster staff member.
-       - If the current day is OUTSIDE their contract dates, you MUST put them in the "offDuty" array with type "Roster leave".
-       - Within their contract dates, use them as the primary engine to satisfy "minStaff" and save Local staff shifts for the end of the week.
-    3. **SMART SKILL COVERAGE**: 
-       - Prioritize staff who have multiple skills (e.g., SL + LC). Use them to cover shifts that require multiple specialist roles simultaneously.
-       - IMPORTANT: Only assign a specific role (SL, LC, OPS, LF, RMP) if that role is explicitly requested in the shift "roleCounts".
-       - If a staff member is just filling headcount (HC) to meet minStaff but NOT filling a requested specialist role, leave the "role" field EMPTY ("") or set it to "NIL".
-    4. **NO THURSDAY GAPS**: Build the week starting from Friday. Ensure coverage for Wednesday/Thursday is secured before over-allocating on the weekend.
+    ### MANDATORY ALLOCATION SEQUENCE:
+    1. **STAGE 1: MANDATORY SPECIALISTS (SL & LC)**: 
+       - Identify all shifts requiring "Shift Leader" (SL) or "Load Control" (LC).
+       - ALLOCATE THESE FIRST using qualified personnel.
+       - OPTIMIZATION: Prioritize multi-skilled staff (e.g., NK-ATZ who is both SL and LC). Assign them to cover BOTH roles in a single shift (Label role as "SL+LC"). This is the highest priority to optimize headcount.
+    
+    2. **STAGE 2: ROSTER ENGINE**: 
+       - Fill remaining station needs using Roster staff.
+       - RULE: ONLY assign Roster staff if the shift falls exactly within their contract dates ("workFromDate" to "workToDate").
+    
+    3. **STAGE 3: LOCAL RESERVE**:
+       - Fill any remaining gaps using Local staff.
+       - THE 5-SHIFT LAW: Every Local staff member MUST work EXACTLY 5 shifts in this 7-day period.
 
-    ### PRIORITY HIERARCHY:
-    1. Fulfill "minStaff" using active Roster staff and multi-skilled staff first.
-    2. Use Local staff exactly 5 times each to fill remaining gaps to reach "minStaff".
-    3. Only populate roles (SL, LC, etc.) for names that are actually filling a specialist requirement from "roleCounts".
-    4. Fill to "maxStaff" only if all other rules (especially the 5-shift law) are satisfied.
+    ### CRITICAL CONSTRAINTS:
+    - **FATIGUE PREVENTION**: Ensure exactly ${config.minRestHours} hours of rest between consecutive shifts. Use the "incomingDuties" for rest context before the program starts.
+    - **ROLE LABELS**: Only use specialized labels (SL, LC, SL+LC, OPS, etc.) when filling a required role slot. Default to empty for general support.
 
     ### DATA CONTEXT:
     - START DATE: ${config.startDate}
@@ -125,7 +126,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - SHIFT SPECS: ${JSON.stringify(data.shifts)}
     - LEAVE/REST: ${JSON.stringify(data.leaveRequests)} / ${JSON.stringify(data.incomingDuties)}
 
-    Build the program now. Follow the "requested roles only" rule and the "5-shift law" strictly.
+    Produce JSON result following ROSTER_SCHEMA.
   `;
 
   try {
