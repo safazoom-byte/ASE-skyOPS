@@ -272,10 +272,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       bodyStyles: { fontSize: 8, cellPadding: 3 }
     });
 
-    // 4. Matrix View Page (Polished with Color Coding)
+    // 4. Matrix View Page (NEW)
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Operations Matrix View`, 14, 20);
-    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Detailed Assignment Timeline`, 14, 27);
+    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Comprehensive Assignment Timeline`, 14, 27);
     
     const matrixHeader = [
       'S/N', 
@@ -318,11 +318,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       didParseCell: function(data) {
         if (data.section === 'body' && data.column.index >= 2 && data.column.index < matrixHeader.length - 1) {
           if (data.cell.text[0] !== '-') {
-            data.cell.styles.fillColor = [240, 249, 255]; // Blue for work
+            data.cell.styles.fillColor = [240, 249, 255]; // Professional Blue for work
             data.cell.styles.textColor = [2, 6, 23];
             data.cell.styles.fontStyle = 'bold';
           } else {
-            data.cell.styles.textColor = [200, 200, 200]; // Grey for off
+            data.cell.styles.textColor = [200, 200, 200]; // Muted Grey for off
           }
         }
         if (data.section === 'body' && data.column.index === matrixHeader.length - 1) {

@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -95,7 +94,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ### CRITICAL LOGIC REQUIREMENTS (SOLVE AUDIT ERRORS):
     1. **ROSTER STAFF PRIORITY**: You MUST exhaust Roster staff (initials ending in -HMB) first. Use them up to 7 shifts if their contract window allows. Do not leave Roster staff idle while Local staff are working.
     2. **LOCAL STAFF LIMIT**: Strictly limit Local staff (initials ending in -ATZ) to a maximum of 5 shifts per week.
-    3. **DAY OFF ASSIGNMENT**: If a Local staff member is not needed to meet the "minStaff" requirement for a day (after prioritizing Roster staff), assign them a "DAY OFF". 
+    3. **DAY OFF ASSIGNMENT**: If a Local staff member is not needed to meet the "minStaff" requirement for a day (after prioritizing Roster staff), assign them a "DAY OFF". This is mandatory to prevent overwork.
     4. **MIN STAFF GAP FILLING**: Reach the "minStaff" requirement for every shift. If roles (SL, LC, OPS, etc.) are filled but headcount is still low, add available staff with an empty role label "".
     5. **SPECIALIST ASSIGNMENT**: Assign SL, LC, and combined SL+LC roles first across the entire period to ensure coverage.
     6. **REST COMPLIANCE**: Ensure exactly ${config.minRestHours} hours of rest between shifts.
