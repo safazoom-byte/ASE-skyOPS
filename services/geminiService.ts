@@ -57,9 +57,9 @@ const ROSTER_SCHEMA = {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                staffId: { type: Type.STRING, description: "Must exactly match an ID from the personnel list." },
+                staffId: { type: Type.STRING },
                 flightId: { type: Type.STRING },
-                role: { type: Type.STRING, description: "Role codes: SL, OPS, LC, LF, RMP. Use 'General' for all other staff." },
+                role: { type: Type.STRING },
                 shiftId: { type: Type.STRING }
               },
               required: ["id", "staffId", "role", "shiftId"]
@@ -72,8 +72,7 @@ const ROSTER_SCHEMA = {
               properties: {
                 staffId: { type: Type.STRING },
                 type: { type: Type.STRING }
-              },
-              required: ["staffId", "type"]
+              }
             }
           }
         },
@@ -99,37 +98,34 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - 7-DAY MASTER PROGRAM
-    OBJECTIVE: Build a weekly program with ROSTER-FIRST priority and 5-SHIFT LOCAL HARD-CAP.
+    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
+    OBJECTIVE: Build a 7-day program with REINFORCED REVISION LOGIC.
 
-    ### RESOURCE EFFICIENCY DIRECTIVE (MULTI-ROLE)
-    1. CONSOLIDATE ROLES: If a person is qualified for multiple roles (e.g., SL + LC) and a shift needs both, assign them as "SL+LC" to save staff slots. 
-    2. MINIMIZE PERSONNEL: Use multi-skilled staff to satisfy multiple role requirements in a single shift whenever possible. Do not assign two people for two roles if one person can do both.
+    ### PHASE 1: DAILY DEMAND & ASSIGNMENT
+    For each day in the 7-day period:
+    1. Calculate 'minStaff' required for all shifts on that specific day.
+    2. Assign 'Roster' staff first, but ONLY if the current date is within their [workFromDate] and [workToDate].
+    3. Fill the remaining gap to meet 'minStaff' using 'Local' staff.
+    4. Any 'Local' staff NOT used for that day must be explicitly marked as "Day off" in the [offDuty] array.
 
-    ### CRITICAL SAFETY LIMITS (STRICT ENFORCEMENT)
-    1. MAX 1 SHIFT PER DAY: No person can work 2 shifts in one calendar date. Assigning 8 or 9 shifts in 7 days is a CRITICAL FAILURE.
-    2. LOCAL STAFF (5/2 RULE): Every 'Local' staff member MUST have exactly 5 shifts and 2 days off per 7-day period. 
-    3. ROSTER STAFF (WINDOW RULE): 'Roster' staff MUST only work on dates within their workFromDate and workToDate. Maximum 7 shifts per week (1 per day).
-    4. NO DOUBLE BOOKING: One person can only be in ONE shift at any given time.
+    ### PHASE 2: ROLE CONSOLIDATION (RESTRICTED PAIRS)
+    To optimize headcount and meet minimum staff, use multi-skilled personnel:
+    - If a shift needs SL and LC, and a person is qualified for both, assign as "LC+SL".
+    - If a shift needs OPS and LC, and a person is qualified for both, assign as "LC+OPS".
+    - HARD LIMIT: Never assign 3 roles. Max is 2 roles (e.g., LC+SL).
 
-    ### SKILL-ROLE LOCK
-    - Role 'SL' REQUIRES 'isShiftLeader': true
-    - Role 'LC' REQUIRES 'isLoadControl': true
-    - Role 'OPS' REQUIRES 'isOps': true
-    - Role 'LF' REQUIRES 'isLostFound': true
-    - Role 'RMP' REQUIRES 'isRamp': true
-    - Otherwise use "General".
+    ### PHASE 3: DOUBLE-PASS REVISION (CRITICAL AUDIT)
+    PASS 1 (SAFETY AUDIT): Check every shift. If assigned headcount < minStaff, you MUST add more Local staff. Do not leave a shift under-staffed if Local staff are available.
+    PASS 2 (WORKLOAD BALANCE): Count total weekly shifts for Local staff. If anyone has > 5 shifts, swap their extra shifts with staff who have < 5 shifts. 
 
-    ### DATA CONTEXT:
-    - START DATE: ${config.startDate}
-    - DURATION: ${config.numDays} Days
+    ### CONTEXT DATA:
     - PERSONNEL: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
-    - REST LOG: ${JSON.stringify(data.incomingDuties)}
     - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    - REST: ${JSON.stringify(data.incomingDuties)}
+    - START: ${config.startDate}
 
-    ### THINKING PROTOCOL:
-    Iteratively check the 'shifts-per-person' counter. If a Local staff has 6 shifts, REMOVE one. If a Roster staff has more than 7 shifts total, or more than 1 per day, REMOVE them. Prioritize combined roles (e.g. SL+LC) to keep counts low.
+    EXECUTION: I will revise the draft twice before final JSON output to ensure every shift meets minStaff and Local staff adhere to the 5/2 rule.
   `;
 
   try {
@@ -170,9 +166,9 @@ export const extractDataFromContent = async (options: { textData?: string, media
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [
-    { text: `CONTEXT: Current handling programs: ${JSON.stringify(data.programs)}` },
+    { text: `CONTEXT: Current programs: ${JSON.stringify(data.programs)}` },
     { text: `INSTRUCTION: ${instruction}` },
-    { text: `Available Staff: ${JSON.stringify(data.staff)}` }
+    { text: `Staff: ${JSON.stringify(data.staff)}` }
   ];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
