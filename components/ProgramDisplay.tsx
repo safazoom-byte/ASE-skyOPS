@@ -1,6 +1,8 @@
+
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty, Skill } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { repairProgramWithAI } from '../services/geminiService';
 import { 
   FileText, 
   Plane, 
@@ -26,7 +28,10 @@ import {
   TrendingUp,
   ShieldAlert as AlertIcon,
   Briefcase,
-  Timer
+  Timer,
+  Zap,
+  Loader2,
+  Clock
 } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
@@ -45,8 +50,9 @@ interface Props {
   minRestHours?: number;
 }
 
-export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, stationHealth = 100, alerts = [], minRestHours = 12 }) => {
+export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, onUpdatePrograms, stationHealth = 100, alerts = [], minRestHours = 12 }) => {
   const [viewMode, setViewMode] = useState<'detailed' | 'matrix'>('detailed');
+  const [isRepairing, setIsRepairing] = useState(false);
   
   const filteredPrograms = useMemo(() => {
     if (!Array.isArray(programs)) return [];
@@ -61,6 +67,171 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       return true;
     });
   }, [programs, startDate, endDate]);
+
+  const getStaffById = (id: string) => staff.find(s => s.id === id);
+  const getFlightById = (id: string) => flights.find(f => f.id === id);
+  const getShiftById = (id?: string) => shifts.find(s => s.id === id);
+
+  const calculateRest = (staffId: string, currentProgram: DailyProgram, currentShift: ShiftConfig) => {
+    const programIndex = filteredPrograms.findIndex(p => p.dateString === currentProgram.dateString);
+    if (programIndex < 0) return null;
+    
+    let previousShiftEnd: Date | null = null;
+    
+    // 1. Check current program's previous days for duty
+    for (let i = programIndex - 1; i >= 0; i--) {
+      const prevProg = filteredPrograms[i];
+      const prevAss = prevProg.assignments.find(a => a.staffId === staffId);
+      if (prevAss) {
+        const prevShift = getShiftById(prevAss.shiftId);
+        if (prevShift && prevProg.dateString) {
+          const endDateStr = prevShift.endDate || prevProg.dateString;
+          const endTimeStr = prevShift.endTime || '00:00';
+          previousShiftEnd = new Date(`${endDateStr}T${endTimeStr}:00`);
+          break;
+        }
+      }
+    }
+    
+    // 2. Fallback: check incomingDuties (historical log from dashboard) for pre-program duties
+    if (!previousShiftEnd && currentProgram.dateString) {
+      const historicalDuty = incomingDuties
+        .filter(d => d.staffId === staffId && d.date < currentProgram.dateString!)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime))[0];
+        
+      if (historicalDuty) {
+        previousShiftEnd = new Date(`${historicalDuty.date}T${historicalDuty.shiftEndTime}:00`);
+      }
+    }
+
+    if (previousShiftEnd && currentProgram.dateString) {
+      const currentStart = new Date(`${currentProgram.dateString}T${currentShift.pickupTime}:00`);
+      const diffMs = currentStart.getTime() - previousShiftEnd.getTime();
+      return diffMs / (1000 * 60 * 60);
+    }
+    return null;
+  };
+
+  const runAudit = () => {
+    const errors: string[] = [];
+    const staffWorkCounts: Record<string, number> = {};
+    staff.forEach(s => staffWorkCounts[s.id] = 0);
+
+    // 1. Scan Shifts for Requirements
+    filteredPrograms.forEach(p => {
+        // Group assignments by shift
+        const shiftsMap: Record<string, Assignment[]> = {};
+        p.assignments.forEach(a => {
+            if (!shiftsMap[a.shiftId]) shiftsMap[a.shiftId] = [];
+            shiftsMap[a.shiftId].push(a);
+        });
+
+        shifts.forEach(s => {
+             const assigned = shiftsMap[s.id] || [];
+             
+             // Check Min Staff
+             if (assigned.length < s.minStaff) {
+                 errors.push(`SHIFT ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${s.minStaff - assigned.length} staff (Has ${assigned.length}, Need ${s.minStaff})`);
+             }
+
+             // Check Roles
+             if (s.roleCounts) {
+                 Object.entries(s.roleCounts).forEach(([role, requiredCount]) => {
+                     const count = assigned.filter(a => {
+                         const staffMember = getStaffById(a.staffId);
+                         if (role === 'Shift Leader' && staffMember?.isShiftLeader) return true;
+                         if (role === 'Load Control' && staffMember?.isLoadControl) return true;
+                         if (role === 'Ramp' && staffMember?.isRamp) return true;
+                         if (role === 'Operations' && staffMember?.isOps) return true;
+                         if (role === 'Lost and Found' && staffMember?.isLostFound) return true;
+                         return false;
+                     }).length;
+                     
+                     if (count < (requiredCount as number)) {
+                         errors.push(`ROLE ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${(requiredCount as number) - count} ${role} (Has ${count}, Need ${requiredCount})`);
+                     }
+                 });
+             }
+        });
+
+        // 2. Track Work Counts & Rest per Assignment
+        p.assignments.forEach(a => {
+            if (staffWorkCounts[a.staffId] !== undefined) staffWorkCounts[a.staffId]++;
+            
+            // Check Rest
+            const s = getStaffById(a.staffId);
+            const sh = getShiftById(a.shiftId);
+            if (s && sh) {
+                const rest = calculateRest(a.staffId, p, sh);
+                if (rest !== null && rest < (minRestHours || 12)) {
+                    errors.push(`REST VIOLATION: ${s.initials} on ${p.dateString} has only ${rest.toFixed(1)}h rest.`);
+                }
+            }
+
+            // Check Contract Dates for Roster
+            if (s?.type === 'Roster' && s.workFromDate && s.workToDate) {
+                 if (p.dateString! < s.workFromDate || p.dateString! > s.workToDate) {
+                     errors.push(`CONTRACT VIOLATION: ${s.initials} assigned on ${p.dateString} outside contract.`);
+                 }
+            }
+        });
+    });
+
+    // 3. Check Staff Utilization Caps
+    staff.forEach(s => {
+        if (s.type === 'Local') {
+            // Strict 5 days for Local
+            if (staffWorkCounts[s.id] !== 5) {
+                errors.push(`UTILIZATION ERROR: Local staff ${s.initials} has ${staffWorkCounts[s.id]} shifts (Required: 5).`);
+            }
+        } else if (s.type === 'Roster') {
+             // Check if they are available in this period and under-utilized
+             if (s.workFromDate && s.workToDate && startDate && endDate) {
+                 const availableDays = filteredPrograms.filter(p => p.dateString! >= s.workFromDate! && p.dateString! <= s.workToDate!).length;
+                 // Strict utilization check for Roster staff "no more no less"
+                 if (availableDays > 0 && staffWorkCounts[s.id] !== availableDays) {
+                    errors.push(`UTILIZATION ERROR: Roster staff ${s.initials} has ${staffWorkCounts[s.id]} shifts (Required: ${availableDays} per contract window).`);
+                 }
+             }
+        }
+    });
+
+    return errors;
+  };
+
+  const handleAutoRepair = async () => {
+    setIsRepairing(true);
+    try {
+      const report = runAudit();
+      if (report.length === 0) {
+        alert("System Audit Passed: No critical violations found.");
+        setIsRepairing(false);
+        return;
+      }
+      
+      const confirmMsg = `Found ${report.length} violations:\n\n${report.slice(0, 5).join('\n')}${report.length > 5 ? '\n...' : ''}\n\nProceed with AI Surgical Repair?`;
+      if (!window.confirm(confirmMsg)) {
+        setIsRepairing(false);
+        return;
+      }
+
+      const result = await repairProgramWithAI(
+          filteredPrograms, 
+          report.join('\n'), 
+          { flights, staff, shifts, programs: filteredPrograms }, 
+          { minRestHours: minRestHours || 12 }
+      );
+      
+      if (result.programs && onUpdatePrograms) {
+        onUpdatePrograms(result.programs);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert("Repair failed: " + e.message);
+    } finally {
+      setIsRepairing(false);
+    }
+  };
 
   const utilizationData = useMemo(() => {
     const stats: Record<string, { work: number, off: number, rosterPotential: number, rosterLeave: number, annualLeave: number, standby: number, resting: number }> = {};
@@ -115,10 +286,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return stats;
   }, [filteredPrograms, staff, startDate, endDate, leaveRequests, incomingDuties]);
 
-  const getStaffById = (id: string) => staff.find(s => s.id === id);
-  const getFlightById = (id: string) => flights.find(f => f.id === id);
-  const getShiftById = (id?: string) => shifts.find(s => s.id === id);
-
   const formatRoleLabel = (role: string | undefined) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r || r === 'NIL' || r === 'GENERAL') return '';
@@ -164,46 +331,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return `DAY ${program.day + 1}`;
   };
 
-  const calculateRest = (staffId: string, currentProgram: DailyProgram, currentShift: ShiftConfig) => {
-    const programIndex = filteredPrograms.findIndex(p => p.dateString === currentProgram.dateString);
-    if (programIndex < 0) return null;
-    
-    let previousShiftEnd: Date | null = null;
-    
-    // 1. Check current program's previous days for duty
-    for (let i = programIndex - 1; i >= 0; i--) {
-      const prevProg = filteredPrograms[i];
-      const prevAss = prevProg.assignments.find(a => a.staffId === staffId);
-      if (prevAss) {
-        const prevShift = getShiftById(prevAss.shiftId);
-        if (prevShift && prevProg.dateString) {
-          const endDateStr = prevShift.endDate || prevProg.dateString;
-          const endTimeStr = prevShift.endTime || '00:00';
-          previousShiftEnd = new Date(`${endDateStr}T${endTimeStr}:00`);
-          break;
-        }
-      }
-    }
-    
-    // 2. Fallback: check incomingDuties (historical log from dashboard) for pre-program duties
-    if (!previousShiftEnd && currentProgram.dateString) {
-      const historicalDuty = incomingDuties
-        .filter(d => d.staffId === staffId && d.date < currentProgram.dateString!)
-        .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime))[0];
-        
-      if (historicalDuty) {
-        previousShiftEnd = new Date(`${historicalDuty.date}T${historicalDuty.shiftEndTime}:00`);
-      }
-    }
-
-    if (previousShiftEnd && currentProgram.dateString) {
-      const currentStart = new Date(`${currentProgram.dateString}T${currentShift.pickupTime}:00`);
-      const diffMs = currentStart.getTime() - previousShiftEnd.getTime();
-      return diffMs / (1000 * 60 * 60);
-    }
-    return null;
-  };
-
   const exportPDF = () => {
     if (filteredPrograms.length === 0) return;
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
@@ -245,266 +372,145 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       const registryData = Object.entries(registry).map(([cat, agents]) => [cat, agents.length > 0 ? agents.join(', ') : 'NONE']);
       doc.setFontSize(14).setFont('helvetica', 'bold').text("ABSENCE AND REST REGISTRY", 14, (doc as any).lastAutoTable.finalY + 15);
       autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 20,
-        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
-        body: registryData,
-        theme: 'grid',
-        headStyles: { fillColor: greyHeader, textColor: 255, fontSize: 9, cellPadding: 3 },
-        bodyStyles: { fontSize: 8, cellPadding: 3 },
-        columnStyles: { 0: { cellWidth: 60 }, 1: { cellWidth: 'auto' } }
+        startY: (doc as any).lastAutoTable.finalY + 20, head: [['CATEGORY', 'PERSONNEL LIST']], body: registryData,
+        theme: 'grid', headStyles: { fillColor: greyHeader, textColor: 255, fontSize: 10 }, bodyStyles: { fontSize: 8 },
+        columnStyles: { 0: { cellWidth: 60, fontStyle: 'bold' } }
       });
     });
 
-    // 2. Local Audit Page
+    // 2. Staff Utilization Matrix
     doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Personnel Utilization Audit (Local)`, 14, 20);
-    const localData = staff.filter(s => s.type === 'Local').map((s, i) => {
-      const work = utilizationData[s.id].work;
-      return [(i + 1).toString(), s.name, s.initials, work.toString(), utilizationData[s.id].off.toString(), work === 5 ? 'MATCH' : 'CHECK'];
+    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Staff Utilization Matrix`, 14, 20);
+    const utilizationRows = staff.map(s => {
+      const u = utilizationData[s.id];
+      return [s.initials, s.name, s.type, u.work.toString(), u.off.toString(), u.annualLeave.toString(), u.rosterLeave.toString(), `${Math.round((u.work / (u.rosterPotential || 1)) * 100)}%`];
     });
-    autoTable(doc, { 
-      startY: 35, 
-      head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], 
-      body: localData, 
-      theme: 'grid', 
-      headStyles: { fillColor: darkHeader, fontSize: 10, cellPadding: 3 },
-      bodyStyles: { fontSize: 8, cellPadding: 3 }
-    });
-
-    // 3. Roster Audit Page
-    doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Personnel Utilization Audit (Roster)`, 14, 20);
-    const rosterData = staff.filter(s => s.type === 'Roster').map((s, i) => {
-      return [(i + 1).toString(), s.name, s.initials, `${s.workFromDate} to ${s.workToDate}`, utilizationData[s.id].rosterPotential.toString(), utilizationData[s.id].work.toString()];
-    });
-    autoTable(doc, { 
-      startY: 35, 
-      head: [['S/N', 'NAME', 'INIT', 'CONTRACT WINDOW', 'POTENTIAL', 'ACTUAL']], 
-      body: rosterData, 
-      theme: 'grid', 
-      headStyles: { fillColor: orangeHeader, fontSize: 10, cellPadding: 3 },
-      bodyStyles: { fontSize: 8, cellPadding: 3 }
-    });
-
-    // 4. Matrix View Page (Polished Grid)
-    doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Operations Matrix View`, 14, 20);
-    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Comprehensive Assignment Timeline with Rest Tracking`, 14, 27);
-    
-    const matrixHeader = [
-      'S/N', 
-      'AGENT', 
-      ...filteredPrograms.map(p => {
-        const d = new Date(p.dateString || '');
-        return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-      }),
-      'AUDIT'
-    ];
-
-    const matrixBody = staff.sort((a,b) => a.type.localeCompare(b.type)).map((s, i) => {
-      const assignments = filteredPrograms.map(p => {
-        const ass = p.assignments.find(a => a.staffId === s.id);
-        if (!ass) return '-';
-        const sh = getShiftById(ass.shiftId);
-        if (!sh) return '-';
-        
-        const rest = calculateRest(s.id, p, sh);
-        if (rest !== null) {
-          // Multi-line cell: [Shift Time]\n([Rest]H REST)
-          return `${sh.pickupTime}\n(${rest.toFixed(1)}H REST)`;
-        }
-        return sh.pickupTime;
-      });
-      const workCount = utilizationData[s.id].work;
-      const potential = utilizationData[s.id].rosterPotential;
-      return [
-        (i + 1).toString(),
-        `${s.initials} (${s.type[0]})`,
-        ...assignments,
-        `${workCount}/${potential}`
-      ];
-    });
-
     autoTable(doc, {
-      startY: 35,
-      head: [matrixHeader],
-      body: matrixBody,
-      theme: 'grid',
-      headStyles: { fillColor: darkHeader, textColor: 255, fontSize: 8, cellPadding: 3 },
-      bodyStyles: { fontSize: 7, cellPadding: 2 },
-      columnStyles: {
-        0: { cellWidth: 10 },
-        1: { cellWidth: 25 },
-      },
-      didParseCell: function(data) {
-        if (data.section === 'body' && data.column.index >= 2 && data.column.index < matrixHeader.length - 1) {
-          const cellText = String(data.cell.text[0] || '');
-          if (cellText !== '-') {
-            data.cell.styles.fillColor = [240, 249, 255]; // Light blue for duty
-            data.cell.styles.textColor = [2, 6, 23];
-            data.cell.styles.fontStyle = 'bold';
-            
-            // Highlight fatigue violation in PDF (red text)
-            if (data.cell.text.length > 1) {
-              const restLine = data.cell.text[1];
-              // Extract decimal value from the rest string e.g. "(10.5H REST)"
-              const restVal = parseFloat(restLine.replace(/[^\d.]/g, ''));
-              if (!isNaN(restVal) && restVal < (minRestHours || 12)) {
-                 data.cell.styles.textColor = [190, 18, 60]; // Rose-600
-              }
-            }
-          } else {
-            data.cell.styles.textColor = [200, 200, 200]; // Grey for off
-          }
-        }
-        if (data.section === 'body' && data.column.index === matrixHeader.length - 1) {
-          data.cell.styles.fontStyle = 'bold';
-        }
-      }
+      startY: 30, head: [['INITIALS', 'NAME', 'TYPE', 'WORK DAYS', 'OFF DAYS', 'ANNUAL LEAVE', 'ROSTER LEAVE', 'UTILIZATION %']], body: utilizationRows,
+      theme: 'striped', headStyles: { fillColor: orangeHeader, textColor: 255, fontSize: 9 }, bodyStyles: { fontSize: 8 }
     });
 
-    doc.save(`SkyOPS_Station_Program_${startDate}.pdf`);
+    doc.save(`SkyOPS_Program_${startDate}_${endDate}.pdf`);
   };
 
   return (
-    <div className="space-y-12 pb-32 animate-in fade-in duration-700">
-      <div className="bg-white p-6 md:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-6">
-           <div className="w-14 h-14 bg-slate-950 rounded-[1.8rem] flex items-center justify-center text-white shadow-lg"><CalendarDays size={24} /></div>
-           <div><h2 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Handling Registry</h2><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-2">{startDate} - {endDate}</p></div>
-        </div>
-        <div className="flex gap-2">
-          <div className="flex gap-1 p-1 bg-slate-100 rounded-2xl">
-             <button onClick={() => setViewMode('detailed')} className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase italic ${viewMode === 'detailed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Program</button>
-             <button onClick={() => setViewMode('matrix')} className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase italic ${viewMode === 'matrix' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>Matrix</button>
+    <div className="space-y-8 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
+      <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col xl:flex-row items-center justify-between gap-8 relative overflow-hidden">
+        <div className="flex items-center gap-6 md:gap-8 relative z-10 flex-col md:flex-row text-center xl:text-left">
+          <div className="w-16 h-16 md:w-24 md:h-24 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/40 border-4 border-white/10">
+            <CalendarDays size={32} className="md:w-10 md:h-10 text-white" />
           </div>
-          <button onClick={exportPDF} className="p-4 bg-slate-950 text-white rounded-2xl flex items-center gap-2 shadow-lg hover:bg-blue-600 transition-all"><Printer size={18} /><span className="text-[10px] font-black uppercase">Print Master Report</span></button>
+          <div>
+            <h3 className="text-2xl md:text-4xl font-black uppercase italic tracking-tighter text-white leading-none">Weekly Program</h3>
+            <p className="text-blue-300 text-[9px] md:text-xs font-black uppercase tracking-[0.3em] mt-2 flex items-center justify-center xl:justify-start gap-2">
+              <CheckCircle2 size={14} className="text-emerald-400" /> {filteredPrograms.length} Days Generated
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
+           <button onClick={handleAutoRepair} disabled={isRepairing} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group disabled:opacity-50 disabled:cursor-not-allowed">
+             {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} className="group-hover:animate-pulse" />}
+             <span className="text-[10px] font-black uppercase tracking-widest italic">{isRepairing ? 'Running AI Audit...' : 'Full Repair (100%)'}</span>
+           </button>
+           <button onClick={exportPDF} className="flex-1 px-8 py-5 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg">
+             <Printer size={18} />
+             <span className="text-[10px] font-black uppercase tracking-widest italic">Print PDF</span>
+           </button>
         </div>
       </div>
 
-      {viewMode === 'detailed' && (
-        <div className="space-y-16">
-          {filteredPrograms.map(program => {
-            const shiftsMap: Record<string, Assignment[]> = {};
-            program.assignments.forEach(a => { if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = []; shiftsMap[a.shiftId || ''].push(a); });
-            const registry = getFullRegistryForDay(program);
-            return (
-              <div key={program.dateString || program.day} className="bg-white rounded-[4rem] border border-slate-200 shadow-xl overflow-hidden animate-in slide-in-from-bottom">
-                <div className="p-10 md:p-14">
-                  <div className="flex justify-between items-end mb-10">
-                    <h2 className="text-3xl font-black italic uppercase tracking-tighter text-slate-950">{getDayLabel(program)}</h2>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Station Handling Active</span>
-                  </div>
-                  <div className="overflow-x-auto rounded-3xl border border-slate-200 mb-12">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-950 text-white"><tr className="text-[10px] font-black uppercase"><th className="p-5">PICKUP</th><th className="p-5">RELEASE</th><th className="p-5">FLIGHTS</th><th className="p-5 text-center">HC / MAX</th><th className="p-5">PERSONNEL & ROLES</th></tr></thead>
-                      <tbody>
-                        {Object.entries(shiftsMap).map(([shiftId, group], idx) => {
-                          const sh = getShiftById(shiftId);
-                          const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
-                          return (
-                            <tr key={idx} className={`border-b border-slate-100 hover:bg-slate-50`}>
-                              <td className="p-6 text-sm font-black italic">{sh?.pickupTime}</td><td className="p-6 text-sm font-black italic">{sh?.endTime}</td><td className="p-6 text-xs font-bold uppercase text-blue-600">{fls}</td>
-                              <td className="p-6 text-xs font-black text-center">{group.length} / {sh?.maxStaff || sh?.minStaff || '0'}</td>
-                              <td className="p-6 flex flex-wrap gap-2 items-center">
-                                {group.map((a, ai) => {
-                                  const st = getStaffById(a.staffId);
-                                  const roleLabel = formatRoleLabel(a.role);
-                                  return (
-                                    <React.Fragment key={ai}>
-                                      <span className="text-[10px] font-black text-slate-700">
-                                        {st?.initials} {roleLabel && <span className="text-blue-600 ml-1">{roleLabel}</span>}
-                                      </span>
-                                      {ai < group.length - 1 && <span className="text-slate-300">|</span>}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="space-y-4">
-                    <h3 className="text-xl font-black italic uppercase text-slate-950 tracking-tighter">ABSENCE AND REST REGISTRY</h3>
-                    <div className="overflow-x-auto rounded-3xl border border-slate-200">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-700 text-white"><tr className="text-[9px] font-black uppercase"><th className="p-4 w-64">STATUS CATEGORY</th><th className="p-4">PERSONNEL INITIALS</th></tr></thead>
-                        <tbody>
-                          {Object.entries(registry).map(([cat, agents], idx) => (
-                            <tr key={idx} className="border-b border-slate-100">
-                              <td className="p-4 text-[10px] font-black uppercase text-slate-500">{cat}</td>
-                              <td className="p-4 text-[10px] font-bold text-slate-900">{agents.length > 0 ? agents.join(', ') : 'NONE'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+      <div className="space-y-8">
+        {filteredPrograms.length === 0 ? (
+          <div className="py-20 md:py-32 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+             <LayoutGrid size={48} className="mx-auto text-slate-200 mb-6" />
+             <h4 className="text-xl font-black uppercase italic text-slate-300">No Program Generated</h4>
+             <p className="text-xs text-slate-400 mt-2 font-bold uppercase tracking-widest">Use the dashboard to build a schedule</p>
+          </div>
+        ) : (
+          filteredPrograms.map((program) => (
+             <div key={program.day} className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col gap-6">
+                 <div className="flex justify-between items-center pb-6 border-b border-slate-50">
+                    <div className="flex items-center gap-4">
+                       <div className="w-12 h-12 bg-slate-950 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-lg">
+                          {new Date(program.dateString || '').getDate()}
+                       </div>
+                       <div>
+                          <h4 className="text-xl font-black italic uppercase text-slate-900">{getDayLabel(program)}</h4>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Daily Operations Log</p>
+                       </div>
                     </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                    <div className="hidden md:flex items-center gap-2">
+                       <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-[8px] font-black uppercase">{program.assignments.length} Duties</span>
+                    </div>
+                 </div>
 
-      {viewMode === 'matrix' && (
-        <div className="bg-white rounded-[4rem] border border-slate-200 shadow-2xl p-10 md:p-14 animate-in zoom-in-95 overflow-x-auto no-scrollbar">
-          <div className="flex justify-between items-end mb-10"><h2 className="text-3xl font-black italic uppercase tracking-tighter text-slate-950">Personnel Matrix</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Roster Timeline</p></div>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="text-[10px] font-black uppercase text-slate-400 border-b border-slate-100">
-                <th className="p-4 text-left sticky left-0 bg-white z-10 border-r">Agent</th>
-                {filteredPrograms.map(p => (
-                  <th key={p.dateString} className="p-4 text-center min-w-[130px]">{p.dateString?.split('-')[2]}/{p.dateString?.split('-')[1]}</th>
-                ))}
-                <th className="p-4 text-center border-l">Audit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {staff.sort((a,b) => a.type.localeCompare(b.type)).map(s => {
-                const count = utilizationData[s.id].work;
-                return (
-                  <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50/50 group">
-                    <td className="p-4 sticky left-0 bg-white z-10 group-hover:bg-slate-50 border-r">
-                      <p className="text-xs font-black italic text-slate-900">{s.initials}</p>
-                      <p className="text-[7px] font-black text-slate-400 uppercase">{s.type}</p>
-                    </td>
-                    {filteredPrograms.map(p => {
-                      const ass = p.assignments.find(a => a.staffId === s.id);
-                      const sh = ass ? getShiftById(ass.shiftId) : null;
-                      const rest = (ass && sh) ? calculateRest(s.id, p, sh) : null;
-                      const isRestFault = rest !== null && rest < (minRestHours || 12);
-                      return (
-                        <td key={p.dateString} className="p-4 text-center">
-                          {sh ? (
-                            <div className="space-y-1.5 animate-in fade-in">
-                              <div className="px-3 py-1 bg-slate-950 text-white rounded-lg text-[9px] font-black italic shadow-sm">{sh.pickupTime}</div>
-                              {rest !== null && (
-                                <div className={`flex items-center justify-center gap-1 text-[8px] font-black uppercase italic ${isRestFault ? 'text-rose-600 animate-pulse' : 'text-emerald-600'}`}>
-                                  <Timer size={10} /> {rest.toFixed(1)}H REST
+                 <div className="grid grid-cols-1 gap-4">
+                    {(() => {
+                        const shiftsMap: Record<string, Assignment[]> = {};
+                        program.assignments.forEach(a => {
+                          if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
+                          shiftsMap[a.shiftId || ''].push(a);
+                        });
+                        return Object.entries(shiftsMap).map(([shiftId, group]) => {
+                           const sh = getShiftById(shiftId);
+                           const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ');
+                           return (
+                             <div key={shiftId} className="flex flex-col md:flex-row gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+                                <div className="w-full md:w-48 shrink-0 space-y-2">
+                                   <div className="flex items-center gap-2">
+                                      <Clock size={14} className="text-blue-500" />
+                                      <span className="text-sm font-black italic text-slate-900">{sh?.pickupTime} - {sh?.endTime}</span>
+                                   </div>
+                                   {fls && (
+                                     <div className="flex items-center gap-2">
+                                        <Plane size={12} className="text-slate-400" />
+                                        <span className="text-[9px] font-bold text-slate-500">{fls}</span>
+                                     </div>
+                                   )}
                                 </div>
-                              )}
+                                <div className="flex-1 flex flex-wrap gap-2">
+                                   {group.map(a => {
+                                      const st = getStaffById(a.staffId);
+                                      const isSpecialist = a.role && a.role !== 'General' && a.role !== 'NIL';
+                                      return (
+                                        <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 ${isSpecialist ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-100 border-transparent text-slate-500'}`}>
+                                           <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials}</span>
+                                           {isSpecialist && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{a.role}</span>}
+                                        </div>
+                                      )
+                                   })}
+                                   {group.length < (sh?.minStaff || 0) && (
+                                     <div className="px-3 py-2 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-500 animate-pulse">
+                                        <AlertIcon size={12} />
+                                        <span className="text-[9px] font-black uppercase">Understaffed</span>
+                                     </div>
+                                   )}
+                                </div>
+                             </div>
+                           );
+                        });
+                    })()}
+                 </div>
+
+                 <div className="mt-4 pt-6 border-t border-slate-100">
+                    <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absence & Rest Registry</h5>
+                    <div className="flex flex-wrap gap-4">
+                       {Object.entries(getFullRegistryForDay(program)).map(([cat, agents]) => (
+                          agents.length > 0 && (
+                            <div key={cat} className="space-y-1">
+                               <span className="text-[8px] font-bold text-slate-300 uppercase block">{cat}</span>
+                               <div className="text-[10px] font-black text-slate-600 uppercase leading-relaxed max-w-xs">
+                                 {agents.join(', ')}
+                               </div>
                             </div>
-                          ) : (
-                            <span className="text-[8px] font-black text-slate-100">---</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="p-4 text-center border-l">
-                       <span className={`text-[10px] font-black ${s.type === 'Local' && count !== 5 ? 'text-rose-600' : 'text-slate-900'}`}>
-                         {count}/{utilizationData[s.id].rosterPotential}
-                       </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                          )
+                       ))}
+                    </div>
+                 </div>
+             </div>
+          ))
+        )}
+      </div>
     </div>
   );
 };

@@ -192,3 +192,55 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   });
   return safeParseJson(response.text);
 };
+
+export const repairProgramWithAI = async (
+  currentPrograms: DailyProgram[],
+  auditReport: string,
+  data: ProgramData,
+  constraints: { minRestHours: number }
+): Promise<{ programs: DailyProgram[] }> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const prompt = `
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR
+    OBJECTIVE: Fix the specific roster violations listed below to achieve 100% compliance.
+
+    ### CRITICAL AUDIT REPORT (ERRORS TO FIX):
+    ${auditReport}
+
+    ### REPAIR RULES (STRICT):
+    1. **ADDRESS REPORTED ERRORS ONLY**: Do not reshuffle compliant shifts unless absolutely necessary to free up staff.
+    2. **STAFF COUNT & UTILIZATION**: 
+       - **Local Staff**: Must work exactly 5 days. If > 5, remove from surplus shifts. If < 5, assign to understaffed shifts or general slots.
+       - **Roster Staff**: Must work every day they are available within their contract dates (workFromDate to workToDate). Assign them to any slot if minStaff is met, prioritizing understaffed slots.
+    3. **MISSING ROLES**: If a shift needs a role (e.g., SL), find a staff member with that boolean flag (isShiftLeader=true) who is currently OFF or on a non-critical shift and assign them.
+    4. **REST COMPLIANCE**: Ensure ${constraints.minRestHours} hours rest is maintained for any staff moved.
+    5. **MIN STAFF**: Ensure all shifts meet the minStaff count.
+
+    ### CONTEXT DATA:
+    - Staff Registry: ${JSON.stringify(data.staff.map(s => ({ id: s.id, initials: s.initials, type: s.type, isShiftLeader: s.isShiftLeader, isLoadControl: s.isLoadControl, isRamp: s.isRamp, isOps: s.isOps, isLostFound: s.isLostFound, workFromDate: s.workFromDate, workToDate: s.workToDate })))}
+    - Shift Defs: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, minStaff: s.minStaff, roleCounts: s.roleCounts, pickupTime: s.pickupTime, endTime: s.endTime, day: s.day })))}
+    - Current Programs: ${JSON.stringify(currentPrograms)}
+
+    ### OUTPUT:
+    Return JSON object: { "programs": [ ...updated programs... ] }
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: prompt,
+      config: { 
+        responseMimeType: 'application/json',
+        responseSchema: ROSTER_SCHEMA,
+        thinkingConfig: { thinkingBudget: 32768 }
+      }
+    });
+    const parsed = safeParseJson(response.text);
+    return {
+      programs: parsed.programs || []
+    };
+  } catch (err: any) {
+    throw new Error(err.message || "Repair failed.");
+  }
+};

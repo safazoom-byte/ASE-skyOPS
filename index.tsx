@@ -655,7 +655,23 @@ const App: React.FC = () => {
         {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} onOpenScanner={() => {setScannerTarget('flights'); setIsScannerOpen(true);}} />}
         {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} onOpenScanner={() => {setScannerTarget('staff'); setIsScannerOpen(true);}} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} onOpenScanner={() => {setScannerTarget('shifts'); setIsScannerOpen(true);}} />}
-        {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} minRestHours={minRestHours} />}
+        {activeTab === 'program' && <ProgramDisplay 
+          programs={programs} 
+          flights={flights} 
+          staff={staff} 
+          shifts={shifts} 
+          leaveRequests={leaveRequests} 
+          incomingDuties={incomingDuties} 
+          startDate={startDate} 
+          endDate={endDate} 
+          stationHealth={stationHealth} 
+          alerts={alerts} 
+          minRestHours={minRestHours}
+          onUpdatePrograms={async (updated) => {
+            setPrograms(updated);
+            if (supabase) await db.savePrograms(updated);
+          }}
+        />}
       </main>
 
       <nav className={`xl:hidden fixed bottom-0 left-0 right-0 z-[150] bg-white border-t border-slate-200 px-4 py-3 flex justify-around items-center transition-transform duration-500 pb-safe ${isVisible ? 'translate-y-0' : 'translate-y-full'}`}>
