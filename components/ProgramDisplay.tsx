@@ -67,17 +67,16 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     staff.forEach(s => stats[s.id] = { work: 0, off: 0, rosterPotential: 0, rosterLeave: 0, annualLeave: 0, standby: 0, resting: 0 });
     
     if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
       staff.forEach(s => {
         if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
           const sFrom = new Date(s.workFromDate);
           const sTo = new Date(s.workToDate);
           let potential = 0;
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const current = new Date(d);
-            if (current >= sFrom && current <= sTo) potential++;
-          }
+          filteredPrograms.forEach(p => {
+            if (!p.dateString) return;
+            const pDate = new Date(p.dateString);
+            if (pDate >= sFrom && pDate <= sTo) potential++;
+          });
           stats[s.id].rosterPotential = potential;
         } else {
           stats[s.id].rosterPotential = filteredPrograms.length;
@@ -168,7 +167,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const calculateRest = (staffId: string, currentProgram: DailyProgram, currentShift: ShiftConfig) => {
     const programIndex = filteredPrograms.findIndex(p => p.dateString === currentProgram.dateString);
     if (programIndex < 0) return null;
+    
     let previousShiftEnd: Date | null = null;
+    
+    // 1. Check current program's previous days for duty
     for (let i = programIndex - 1; i >= 0; i--) {
       const prevProg = filteredPrograms[i];
       const prevAss = prevProg.assignments.find(a => a.staffId === staffId);
@@ -182,6 +184,18 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         }
       }
     }
+    
+    // 2. Fallback: check incomingDuties (historical log from dashboard) for pre-program duties
+    if (!previousShiftEnd && currentProgram.dateString) {
+      const historicalDuty = incomingDuties
+        .filter(d => d.staffId === staffId && d.date < currentProgram.dateString!)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime))[0];
+        
+      if (historicalDuty) {
+        previousShiftEnd = new Date(`${historicalDuty.date}T${historicalDuty.shiftEndTime}:00`);
+      }
+    }
+
     if (previousShiftEnd && currentProgram.dateString) {
       const currentStart = new Date(`${currentProgram.dateString}T${currentShift.pickupTime}:00`);
       const diffMs = currentStart.getTime() - previousShiftEnd.getTime();
@@ -272,10 +286,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       bodyStyles: { fontSize: 8, cellPadding: 3 }
     });
 
-    // 4. Matrix View Page (NEW)
+    // 4. Matrix View Page (Polished Grid)
     doc.addPage('l', 'mm', 'a4');
     doc.setFont('helvetica', 'bold').setFontSize(22).text(`Weekly Operations Matrix View`, 14, 20);
-    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Comprehensive Assignment Timeline`, 14, 27);
+    doc.setFontSize(10).setTextColor(120, 120, 120).text(`Comprehensive Assignment Timeline with Rest Tracking`, 14, 27);
     
     const matrixHeader = [
       'S/N', 
@@ -292,7 +306,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const ass = p.assignments.find(a => a.staffId === s.id);
         if (!ass) return '-';
         const sh = getShiftById(ass.shiftId);
-        return sh ? sh.pickupTime : '-';
+        if (!sh) return '-';
+        
+        const rest = calculateRest(s.id, p, sh);
+        if (rest !== null) {
+          // Multi-line cell: [Shift Time]\n([Rest]H REST)
+          return `${sh.pickupTime}\n(${rest.toFixed(1)}H REST)`;
+        }
+        return sh.pickupTime;
       });
       const workCount = utilizationData[s.id].work;
       const potential = utilizationData[s.id].rosterPotential;
@@ -310,19 +331,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       body: matrixBody,
       theme: 'grid',
       headStyles: { fillColor: darkHeader, textColor: 255, fontSize: 8, cellPadding: 3 },
-      bodyStyles: { fontSize: 8, cellPadding: 3 },
+      bodyStyles: { fontSize: 7, cellPadding: 2 },
       columnStyles: {
         0: { cellWidth: 10 },
         1: { cellWidth: 25 },
       },
       didParseCell: function(data) {
         if (data.section === 'body' && data.column.index >= 2 && data.column.index < matrixHeader.length - 1) {
-          if (data.cell.text[0] !== '-') {
-            data.cell.styles.fillColor = [240, 249, 255]; // Professional Blue for work
+          const cellText = String(data.cell.text[0] || '');
+          if (cellText !== '-') {
+            data.cell.styles.fillColor = [240, 249, 255]; // Light blue for duty
             data.cell.styles.textColor = [2, 6, 23];
             data.cell.styles.fontStyle = 'bold';
+            
+            // Highlight fatigue violation in PDF (red text)
+            if (data.cell.text.length > 1) {
+              const restLine = data.cell.text[1];
+              // Extract decimal value from the rest string e.g. "(10.5H REST)"
+              const restVal = parseFloat(restLine.replace(/[^\d.]/g, ''));
+              if (!isNaN(restVal) && restVal < (minRestHours || 12)) {
+                 data.cell.styles.textColor = [190, 18, 60]; // Rose-600
+              }
+            }
           } else {
-            data.cell.styles.textColor = [200, 200, 200]; // Muted Grey for off
+            data.cell.styles.textColor = [200, 200, 200]; // Grey for off
           }
         }
         if (data.section === 'body' && data.column.index === matrixHeader.length - 1) {
