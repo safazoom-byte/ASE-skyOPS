@@ -184,13 +184,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
 
          let category = '';
-         if (restLock) {
-            category = 'RESTING (POST-DUTY)';
-         } else if (leave) {
-            // Respect the user's explicit leave type choice
+         // CRITICAL: Prioritize LEAVE over REST LOCK for display purposes.
+         // If a staff is on Annual Leave, they should be listed as such, even if they have a rest lock from previous duty.
+         if (leave) {
             if (leave.type === 'Day off') category = 'DAYS OFF';
             else if (leave.type === 'Roster leave') category = 'ROSTER LEAVE';
-            else category = 'ANNUAL LEAVE'; // Fallback for Sick, Lieu, Annual
+            else category = 'ANNUAL LEAVE'; // Catch-all for Annual, Sick, Lieu
+         } else if (restLock) {
+            category = 'RESTING (POST-DUTY)';
          } else if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
              category = 'ROSTER LEAVE';
          } else if (s.type === 'Local') {
@@ -206,7 +207,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          else if (category === 'STANDBY (RESERVE)') count = stat.standby;
          
          if (registryGroups[category]) {
-             registryGroups[category].push(`${s.initials} (${count})`);
+             let displayStr = `${s.initials}`;
+             // Only show count for categories where it's relevant context
+             if (category !== 'RESTING (POST-DUTY)') {
+                 displayStr += ` (${count})`;
+             }
+             registryGroups[category].push(displayStr);
          }
       });
       return registryGroups;
