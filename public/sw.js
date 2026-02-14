@@ -1,5 +1,5 @@
 // SkyOPS AI - Production Service Worker
-const CACHE_NAME = 'skyops-v2';
+const CACHE_NAME = 'skyops-v3';
 const OFFLINE_URL = '/index.html';
 
 self.addEventListener('install', (event) => {
@@ -8,8 +8,6 @@ self.addEventListener('install', (event) => {
       return cache.addAll([
         '/',
         '/index.html',
-        '/style.css',
-        '/index.tsx',
         'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap'
       ]);
     })

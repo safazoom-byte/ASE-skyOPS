@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -30,6 +29,7 @@ import {
   Cloud,
   Layers
 } from 'lucide-react';
+import './style.css'; // Import global styles for bundler
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
 import { FlightManager } from './components/FlightManager';

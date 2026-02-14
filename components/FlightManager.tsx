@@ -163,8 +163,8 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
               <input type="text" maxLength={4} placeholder="TO" className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 uppercase outline-none" value={newFlight.to} onChange={e => setNewFlight({ ...newFlight, to: e.target.value })} required />
             </div>
           </div>
-          <div className="flex items-end">
-            <button type="submit" className="w-full py-4 md:py-5 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic text-[8px] md:text-[10px] tracking-[0.1em] md:tracking-[0.2em] transition-all active:scale-95 shadow-lg">
+          <div className="flex flex-col gap-2 justify-end">
+            <button type="submit" className="w-full py-4 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic text-[8px] md:text-[10px] tracking-[0.1em] md:tracking-[0.2em] transition-all active:scale-95 shadow-lg">
               Commit
             </button>
           </div>
@@ -207,8 +207,8 @@ export const FlightManager: React.FC<Props> = ({ flights, startDate, endDate, on
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
                   {dayFlights.map(flight => (
-                    <div key={flight.id} className="bg-white p-6 md:p-8 rounded-2xl md:rounded-[3rem] shadow-sm border border-slate-100 group hover:shadow-xl hover:border-blue-100 transition-all relative overflow-hidden">
-                      <div className="flex justify-between items-start mb-4 md:mb-6">
+                    <div key={flight.id} className="bg-white p-6 md:p-8 rounded-2xl md:rounded-[3rem] shadow-sm border group hover:shadow-xl transition-all relative overflow-hidden border-slate-100 hover:border-blue-100">
+                      <div className="flex justify-between items-start mb-4 md:mb-6 mt-2">
                         <div className="bg-slate-50 px-2 md:px-3 py-1 rounded-lg md:rounded-xl text-[7px] md:text-[10px] font-black text-blue-600 uppercase italic">
                           {flight.type}
                         </div>

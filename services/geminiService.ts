@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty } from "../types";
 
@@ -107,7 +108,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - Iterate through every shift in the period.
     - Fill specialist roles first (SL, LC, etc.) using qualified staff.
     - Fill remaining slots with General staff until \`minStaff\` is reached.
-    - PRIORITIZE: Roster staff (contracts) first, then Local staff.
+    - **CRITICAL**: MANDATORY PRIORITY for Roster (Contract) staff. You MUST assign available Roster staff to general slots BEFORE using Local staff. Roster staff must not sit on Standby if a slot is available.
     - RESTRICTION: Local staff max 5 shifts/week. Roster staff max 7/week (continuous).
 
     **PHASE B: OPTIMIZATION & MOBILIZATION (Target: maxStaff)**
@@ -141,6 +142,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ### STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
+    - FLIGHTS: ${JSON.stringify(data.flights)}
     - PREVIOUS DUTIES (REST LOG): ${JSON.stringify(data.incomingDuties)}
     - LEAVE/ABSENCE (OFF-DUTY REGISTRY): ${JSON.stringify(data.leaveRequests)}
 

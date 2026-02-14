@@ -330,7 +330,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formatRoleLabel = (role: string | undefined) => {
     const r = String(role || '').trim().toUpperCase();
-    if (!r || r === 'NIL' || r === 'GENERAL') return '';
+    if (!r || r === 'NIL' || r === 'GENERAL' || r === 'AGENT') return '';
     return `(${r})`;
   };
 
