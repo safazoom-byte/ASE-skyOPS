@@ -92,47 +92,53 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
     OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### STRATEGIC PROTOCOL: HYBRID EFFICIENCY (HIGHEST PRIORITY)
-    **Goal**: Minimize headcount per shift by utilizing multi-skilled staff.
-    **Rule**: If a shift requires BOTH a Shift Leader (SL) and a Load Controller (LC):
-      1. You MUST first look for a staff member who has BOTH \`isShiftLeader: true\` AND \`isLoadControl: true\`.
-      2. Assign them the role "SL+LC".
-      3. This single assignment satisfies 1 SL count AND 1 LC count.
-      4. ONLY after exhausting hybrid candidates should you assign separate SL and LC staff.
-      
-    *Example*: Shift needs 2 SL and 1 LC.
-    - BAD: Assign Staff A (SL), Staff B (SL), Staff C (LC). Total: 3 pax.
-    - GOOD: Assign Staff A (SL+LC) [Counts as 1 SL, 1 LC], Assign Staff B (SL). Total: 2 pax.
-
-    ### CRITICAL LOGIC REQUIREMENTS (STRICT ENFORCEMENT):
-    1. **QUALIFICATION LOCK**: DO NOT assign roles based on names or initials. Use the boolean flags in the staff data:
-       - Role "LC" ONLY if "isLoadControl" is true.
-       - Role "RMP" ONLY if "isRamp" is true.
-       - Role "SL" ONLY if "isShiftLeader" is true.
-       - Role "OPS" ONLY if "isOps" is true.
-       - Role "LF" ONLY if "isLostFound" is true.
-       - Role "SL+LC" ONLY if "isShiftLeader" AND "isLoadControl" are BOTH true.
-       If a staff member has NO valid flags for a required role, they can only be assigned to a general slot with role "".
-
-    2. **ROSTER STAFF PRIORITY**: Exhaust Roster staff (initials ending in -HMB) first. Use them up to 7 shifts if their contract window allows within this ${config.numDays}-day period. 
+    ### 1. CREDENTIAL VERIFICATION (STRICT QUALIFICATION FIREWALL)
+    You are FORBIDDEN from assigning a specialist role unless the staff member has the specific boolean flag in the database:
+    - Role "SL" (Shift Leader) -> REQUIRED: \`isShiftLeader: true\`
+    - Role "LC" (Load Control) -> REQUIRED: \`isLoadControl: true\`
+    - Role "OPS" (Operations) -> REQUIRED: \`isOps: true\`
+    - Role "LF" (Lost & Found) -> REQUIRED: \`isLostFound: true\`
+    - Role "RMP" (Ramp) -> REQUIRED: \`isRamp: true\`
+    - Role "SL+LC" -> REQUIRED: BOTH \`isShiftLeader: true\` AND \`isLoadControl: true\`
     
-    3. **LOCAL STAFF CAPPING**: Strictly limit Local staff (initials ending in -ATZ) to a maximum of 5 shifts per week.
+    *Violation Check*: If you assign "MK-HMB" to "SL" but their data says \`isShiftLeader: false\`, the roster is ILLEGAL.
+
+    ### 2. EXECUTION STRATEGY: TWO-PHASE FILLING
+    **PHASE A: CRITICAL COVERAGE (Target: minStaff)**
+    - Iterate through every shift in the period.
+    - Fill specialist roles first (SL, LC, etc.) using qualified staff.
+    - Fill remaining slots with General staff until \`minStaff\` is reached.
+    - PRIORITIZE: Roster staff (contracts) first, then Local staff.
+    - RESTRICTION: Local staff max 5 shifts/week. Roster staff max 7/week (continuous).
+
+    **PHASE B: OPTIMIZATION & MOBILIZATION (Target: maxStaff)**
+    - After Phase A is complete for all days, scan the STANDBY pool (staff not assigned).
+    - If a shift is currently below \`maxStaff\`:
+      - Identify available staff who are (a) Off-duty, (b) Legal (rested), (c) Within contract limits.
+      - **ASSIGN THEM IMMEDIATELY** to fill the gap up to \`maxStaff\`.
+      - **DO NOT** leave legal staff on Standby if a shift has empty capacity below \`maxStaff\`. Maximize workforce utilization.
     
-    4. **DAY OFF MAPPING**: If a Local staff member is not required for shift headcount, assign them a "DAY OFF" for that date. 
+    ### 3. LEGALITY & SWAP PROTOCOL (The "No Hole" Rule)
+    - **Scenario**: A Local staff member reaches 6 shifts (Illegal).
+    - **Old Rule**: Delete the shift (Creates understaffing).
+    - **NEW RULE**: **SWAP**. Find a staff member currently on STANDBY or DAY OFF who is legal.
+      - Remove the over-limit staff.
+      - Insert the Standby staff into that slot.
+      - PRESERVE the role if possible (e.g., if removing an SL, swap with another SL).
+    
+    ### 4. UNAVAILABILITY PROTOCOLS
+    - **LEAVE REGISTRY**: Staff in "LEAVE/ABSENCE" are LOCKED OUT. No exceptions.
+    - **REST LOG**: Staff in "PREVIOUS DUTIES" (REST LOG) for a specific date are LOCKED OUT.
+    - **REST COMPLIANCE**: Ensure exactly ${config.minRestHours} hours of rest between consecutive shifts.
 
-    5. **MIN STAFF GAP FILLING**: Ensure every shift reaches "minStaff" headcount. If specialist roles are filled but headcount is low, fill remaining slots with available staff using role "".
-
-    6. **REST COMPLIANCE**: Ensure exactly ${config.minRestHours} hours of rest between consecutive shifts.
-
-    ### FORMATTING RULES:
-    - Roles MUST be one of: "SL", "LC", "SL+LC", "OPS", "LF", "RMP", or "".
-    - Combined roles like "SL+LC" are only allowed if staff has BOTH qualifications.
+    ### 5. HYBRID EFFICIENCY (SL+LC)
+    - If a shift needs 1 SL and 1 LC, try to find *one* person with both flags and assign "SL+LC". This saves 1 headcount.
 
     ### STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
-    - PREVIOUS DUTIES: ${JSON.stringify(data.incomingDuties)}
-    - LEAVE/ABSENCE: ${JSON.stringify(data.leaveRequests)}
+    - PREVIOUS DUTIES (REST LOG): ${JSON.stringify(data.incomingDuties)}
+    - LEAVE/ABSENCE (OFF-DUTY REGISTRY): ${JSON.stringify(data.leaveRequests)}
 
     ### OUTPUT:
     Return JSON matching the ROSTER_SCHEMA. 
@@ -215,42 +221,37 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v2.0
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v3.0 (SMART FILL & SWAP)
     ROLE: Senior Aviation Roster Specialist
-    OBJECTIVE: Resolve specific violations in the roster WITHOUT creating new ones.
+    OBJECTIVE: Resolve specific violations in the roster by SWAPPING staff and FILLING gaps.
 
-    ### THE "DO NO HARM" DOCTRINE:
-    1. **PRESERVE EXISTING**: Do NOT move, remove, or change any staff assignment that is currently valid. Only touch assignments explicitly flagged in the audit report or necessary to fill a gap.
-    2. **LEGALITY OVER COVERAGE**: It is better to leave a shift understaffed than to assign a staff member illegally (e.g. working 6th day for Local, or <${constraints.minRestHours}h rest).
+    ### 1. CREDENTIAL CHECK (STRICT)
+    - **FAKE ROLE VIOLATION**: If a staff member is assigned a role (SL, LC, OPS, etc.) but lacks the boolean flag (\`isShiftLeader\`, etc.), you MUST fix this.
+    - **Fix**: SWAP the unqualified staff with a qualified staff member from Standby/Off-Duty. If none available, remove the role label but keep the staff (if General is okay).
 
-    ### HYBRID STRATEGY (SL+LC):
-    - If a shift is missing BOTH Shift Leader (SL) and Load Control (LC), prioritize assigning a staff with BOTH skills to role "SL+LC".
-    - This satisfies both requirements with 1 person.
+    ### 2. THE "SMART SWAP" MANDATE (Fixing Overwork)
+    - **Scenario**: Local staff working > 5 days (6th day violation).
+    - **Old Action**: Delete assignment (Creates hole).
+    - **NEW ACTION**: **SWAP**.
+      1. Identify a replacement staff member from STANDBY who is (a) Qualified, (b) Rested, (c) Legal.
+      2. Remove the overworked staff.
+      3. Insert the replacement staff into the exact same slot.
+
+    ### 3. THE "MOBILIZATION" MANDATE (Fixing Understaffing)
+    - **Scenario**: Shift headcount < minStaff OR (Shift < maxStaff AND Standby available).
+    - **Action**: SCAN the available staff pool (Standby).
+    - **Execute**: Assign legal staff to fill empty slots until maxStaff is reached.
+    - **Priority**: Use Roster staff first, then Local.
+
+    ### 4. REST & LEAVE LOCK
+    - Do NOT assign staff listed in LEAVE/ABSENCE for the specific date.
+    - Do NOT assign staff listed in PREVIOUS DUTIES (REST LOG) for the specific date.
 
     ### CRITICAL AUDIT REPORT (TARGETS):
     ${auditReport}
 
-    ### EXECUTION RULES:
-
-    1. **FIXING "MISSING STAFF" (UNDERSTAFFING)**:
-       - Identify the date and shift time.
-       - **Scan the Staff Registry** for candidates who are:
-         a) **OFF DUTY**: Not currently assigned to any shift on this date.
-         b) **RESTED**: Have > ${constraints.minRestHours} hours gap from their previous shift (check previous day).
-         c) **LEGAL (Local)**: Have NOT reached 5 days of work in this block.
-         d) **LEGAL (Roster)**: Are within their 'workFromDate' and 'workToDate'.
-       - **Action**: Assign the first available candidate who meets ALL criteria. If no one fits, leave it empty.
-
-    2. **FIXING "CONTRACT ERROR" (OVERWORK)**:
-       - If a Local staff is working > 5 days, REMOVE them from the shift that causes the least operational impact (e.g. a shift where they are extra, or a general role).
-       - If a Roster staff is working outside contract dates, REMOVE them immediately.
-
-    3. **FIXING "ROLE ERROR" (MISSING SPECIALIST)**:
-       - If a shift needs a Shift Leader (SL) and has none, find an existing staff on that shift who has 'isShiftLeader=true' and upgrade their role to 'SL'.
-       - If no one on shift matches, SWAP a non-specialist staff member with an available Shift Leader from the registry (following rest/legal rules).
-
     ### DATA SOURCES:
-    - **Staff Attributes**: ${JSON.stringify(data.staff.map(s => ({ 
+    - Staff Attributes: ${JSON.stringify(data.staff.map(s => ({ 
         id: s.id, 
         initials: s.initials, 
         type: s.type, 
@@ -261,10 +262,12 @@ export const repairProgramWithAI = async (
           OPS: s.isOps, 
           LF: s.isLostFound
         },
-        dates: { from: s.workFromDate, to: s.workToDate }
+        maxShifts: s.maxShiftsPerWeek
       })))}
-    - **Shift Definitions**: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, min: s.minStaff, reqRoles: s.roleCounts, start: s.pickupTime, end: s.endTime })))}
-    - **Current Roster State**: ${JSON.stringify(currentPrograms)}
+    - Shift Definitions: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, min: s.minStaff, max: s.maxStaff, reqRoles: s.roleCounts, start: s.pickupTime, end: s.endTime })))}
+    - Current Roster: ${JSON.stringify(currentPrograms)}
+    - Leaves: ${JSON.stringify(data.leaveRequests)}
+    - Rest Logs: ${JSON.stringify(data.incomingDuties)}
 
     ### OUTPUT FORMAT:
     Return a JSON object containing the FULL updated 'programs' array. 

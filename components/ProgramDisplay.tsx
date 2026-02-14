@@ -184,11 +184,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
 
          let category = '';
-         if (restLock) category = 'RESTING (POST-DUTY)';
-         else if (leave) category = 'ANNUAL LEAVE';
-         else if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) category = 'ROSTER LEAVE';
-         else if (s.type === 'Local') category = 'DAYS OFF';
-         else category = 'STANDBY (RESERVE)';
+         if (restLock) {
+            category = 'RESTING (POST-DUTY)';
+         } else if (leave) {
+            // Respect the user's explicit leave type choice
+            if (leave.type === 'Day off') category = 'DAYS OFF';
+            else if (leave.type === 'Roster leave') category = 'ROSTER LEAVE';
+            else category = 'ANNUAL LEAVE'; // Fallback for Sick, Lieu, Annual
+         } else if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) {
+             category = 'ROSTER LEAVE';
+         } else if (s.type === 'Local') {
+             category = 'DAYS OFF';
+         } else {
+             category = 'STANDBY (RESERVE)';
+         }
 
          let count = 0;
          if (category === 'DAYS OFF') count = stat.off;
