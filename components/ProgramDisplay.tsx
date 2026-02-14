@@ -51,7 +51,6 @@ interface Props {
 }
 
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, onUpdatePrograms, stationHealth = 100, alerts = [], minRestHours = 12 }) => {
-  const [viewMode, setViewMode] = useState<'detailed' | 'matrix'>('detailed');
   const [isRepairing, setIsRepairing] = useState(false);
   
   const filteredPrograms = useMemo(() => {
@@ -72,255 +71,252 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const getFlightById = (id: string) => flights.find(f => f.id === id);
   const getShiftById = (id?: string) => shifts.find(s => s.id === id);
 
-  const calculateRest = (staffId: string, currentProgram: DailyProgram, currentShift: ShiftConfig) => {
-    const programIndex = filteredPrograms.findIndex(p => p.dateString === currentProgram.dateString);
-    if (programIndex < 0) return null;
+  // Helper to calculate previous shift end time for rest calculation
+  const getPreviousShiftEnd = (staffId: string, currentProgramDate: string): Date | null => {
+    const currentIdx = filteredPrograms.findIndex(p => p.dateString === currentProgramDate);
     
-    let previousShiftEnd: Date | null = null;
-    
-    // 1. Check current program's previous days for duty
-    for (let i = programIndex - 1; i >= 0; i--) {
-      const prevProg = filteredPrograms[i];
-      const prevAss = prevProg.assignments.find(a => a.staffId === staffId);
-      if (prevAss) {
-        const prevShift = getShiftById(prevAss.shiftId);
-        if (prevShift && prevProg.dateString) {
-          const endDateStr = prevShift.endDate || prevProg.dateString;
-          const endTimeStr = prevShift.endTime || '00:00';
-          previousShiftEnd = new Date(`${endDateStr}T${endTimeStr}:00`);
-          break;
+    for (let i = currentIdx - 1; i >= 0; i--) {
+        const p = filteredPrograms[i];
+        const assign = p.assignments.find(a => a.staffId === staffId);
+        if (assign) {
+            const sh = getShiftById(assign.shiftId);
+            if (sh) {
+                let baseDate = new Date(p.dateString!);
+                const [ph, pm] = sh.pickupTime.split(':').map(Number);
+                const [eh, em] = sh.endTime.split(':').map(Number);
+                if (eh < ph) {
+                    baseDate.setDate(baseDate.getDate() + 1);
+                }
+                const endStr = baseDate.toISOString().split('T')[0];
+                return new Date(`${endStr}T${sh.endTime}:00`);
+            }
         }
-      }
-    }
-    
-    // 2. Fallback: check incomingDuties (historical log from dashboard) for pre-program duties
-    if (!previousShiftEnd && currentProgram.dateString) {
-      const historicalDuty = incomingDuties
-        .filter(d => d.staffId === staffId && d.date < currentProgram.dateString!)
-        .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime))[0];
-        
-      if (historicalDuty) {
-        previousShiftEnd = new Date(`${historicalDuty.date}T${historicalDuty.shiftEndTime}:00`);
-      }
     }
 
-    if (previousShiftEnd && currentProgram.dateString) {
-      const currentStart = new Date(`${currentProgram.dateString}T${currentShift.pickupTime}:00`);
-      const diffMs = currentStart.getTime() - previousShiftEnd.getTime();
-      return diffMs / (1000 * 60 * 60);
+    const history = incomingDuties
+      .filter(d => d.staffId === staffId && d.date < currentProgramDate)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime));
+    
+    if (history.length > 0) {
+      return new Date(`${history[0].date}T${history[0].shiftEndTime}:00`);
     }
+
     return null;
   };
 
-  const runAudit = () => {
-    const errors: string[] = [];
-    const staffWorkCounts: Record<string, number> = {};
-    staff.forEach(s => staffWorkCounts[s.id] = 0);
-
-    // 1. Scan Shifts for Requirements
-    filteredPrograms.forEach(p => {
-        // Group assignments by shift
-        const shiftsMap: Record<string, Assignment[]> = {};
-        p.assignments.forEach(a => {
-            if (!shiftsMap[a.shiftId]) shiftsMap[a.shiftId] = [];
-            shiftsMap[a.shiftId].push(a);
-        });
-
-        shifts.forEach(s => {
-             const assigned = shiftsMap[s.id] || [];
-             
-             // Check Min Staff
-             if (assigned.length < s.minStaff) {
-                 errors.push(`SHIFT ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${s.minStaff - assigned.length} staff (Has ${assigned.length}, Need ${s.minStaff})`);
-             }
-
-             // Check Roles
-             if (s.roleCounts) {
-                 Object.entries(s.roleCounts).forEach(([role, requiredCount]) => {
-                     const count = assigned.filter(a => {
-                         const staffMember = getStaffById(a.staffId);
-                         if (role === 'Shift Leader' && staffMember?.isShiftLeader) return true;
-                         if (role === 'Load Control' && staffMember?.isLoadControl) return true;
-                         if (role === 'Ramp' && staffMember?.isRamp) return true;
-                         if (role === 'Operations' && staffMember?.isOps) return true;
-                         if (role === 'Lost and Found' && staffMember?.isLostFound) return true;
-                         return false;
-                     }).length;
-                     
-                     if (count < (requiredCount as number)) {
-                         errors.push(`ROLE ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${(requiredCount as number) - count} ${role} (Has ${count}, Need ${requiredCount})`);
-                     }
-                 });
-             }
-        });
-
-        // 2. Track Work Counts & Rest per Assignment
-        p.assignments.forEach(a => {
-            if (staffWorkCounts[a.staffId] !== undefined) staffWorkCounts[a.staffId]++;
-            
-            // Check Rest
-            const s = getStaffById(a.staffId);
-            const sh = getShiftById(a.shiftId);
-            if (s && sh) {
-                const rest = calculateRest(a.staffId, p, sh);
-                if (rest !== null && rest < (minRestHours || 12)) {
-                    errors.push(`REST VIOLATION: ${s.initials} on ${p.dateString} has only ${rest.toFixed(1)}h rest.`);
-                }
-            }
-
-            // Check Contract Dates for Roster
-            if (s?.type === 'Roster' && s.workFromDate && s.workToDate) {
-                 if (p.dateString! < s.workFromDate || p.dateString! > s.workToDate) {
-                     errors.push(`CONTRACT VIOLATION: ${s.initials} assigned on ${p.dateString} outside contract.`);
-                 }
-            }
-        });
-    });
-
-    // 3. Check Staff Utilization Caps
-    staff.forEach(s => {
-        if (s.type === 'Local') {
-            // Strict 5 days for Local
-            if (staffWorkCounts[s.id] !== 5) {
-                errors.push(`UTILIZATION ERROR: Local staff ${s.initials} has ${staffWorkCounts[s.id]} shifts (Required: 5).`);
-            }
-        } else if (s.type === 'Roster') {
-             // Check if they are available in this period and under-utilized
-             if (s.workFromDate && s.workToDate && startDate && endDate) {
-                 const availableDays = filteredPrograms.filter(p => p.dateString! >= s.workFromDate! && p.dateString! <= s.workToDate!).length;
-                 // Strict utilization check for Roster staff "no more no less"
-                 if (availableDays > 0 && staffWorkCounts[s.id] !== availableDays) {
-                    errors.push(`UTILIZATION ERROR: Roster staff ${s.initials} has ${staffWorkCounts[s.id]} shifts (Required: ${availableDays} per contract window).`);
-                 }
-             }
-        }
-    });
-
-    return errors;
+  const calculateRestHours = (staffId: string, dateStr: string, pickupTime: string): number | null => {
+    const prevEnd = getPreviousShiftEnd(staffId, dateStr);
+    if (!prevEnd) return null;
+    
+    const currentStart = new Date(`${dateStr}T${pickupTime}:00`);
+    const diffMs = currentStart.getTime() - prevEnd.getTime();
+    return diffMs / (1000 * 60 * 60);
   };
 
-  const handleAutoRepair = async () => {
-    setIsRepairing(true);
-    try {
-      const report = runAudit();
-      if (report.length === 0) {
-        alert("System Audit Passed: No critical violations found.");
-        setIsRepairing(false);
-        return;
-      }
-      
-      const confirmMsg = `Found ${report.length} violations:\n\n${report.slice(0, 5).join('\n')}${report.length > 5 ? '\n...' : ''}\n\nProceed with AI Surgical Repair?`;
-      if (!window.confirm(confirmMsg)) {
-        setIsRepairing(false);
-        return;
-      }
-
-      const result = await repairProgramWithAI(
-          filteredPrograms, 
-          report.join('\n'), 
-          { flights, staff, shifts, programs: filteredPrograms }, 
-          { minRestHours: minRestHours || 12 }
-      );
-      
-      if (result.programs && onUpdatePrograms) {
-        onUpdatePrograms(result.programs);
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert("Repair failed: " + e.message);
-    } finally {
-      setIsRepairing(false);
-    }
-  };
-
-  const utilizationData = useMemo(() => {
-    const stats: Record<string, { work: number, off: number, rosterPotential: number, rosterLeave: number, annualLeave: number, standby: number, resting: number }> = {};
-    staff.forEach(s => stats[s.id] = { work: 0, off: 0, rosterPotential: 0, rosterLeave: 0, annualLeave: 0, standby: 0, resting: 0 });
+  const staffStats = useMemo(() => {
+    const stats: Record<string, { work: number, off: number, rosterPotential: number, rosterLeave: number, annualLeave: number, standby: number }> = {};
+    staff.forEach(s => stats[s.id] = { work: 0, off: 0, rosterPotential: 0, rosterLeave: 0, annualLeave: 0, standby: 0 });
     
     if (startDate && endDate) {
       staff.forEach(s => {
         if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-          const sFrom = new Date(s.workFromDate);
-          const sTo = new Date(s.workToDate);
-          let potential = 0;
-          filteredPrograms.forEach(p => {
-            if (!p.dateString) return;
-            const pDate = new Date(p.dateString);
-            if (pDate >= sFrom && pDate <= sTo) potential++;
-          });
-          stats[s.id].rosterPotential = potential;
+           let potential = 0;
+           let curr = new Date(startDate);
+           const end = new Date(endDate);
+           const sFrom = new Date(s.workFromDate);
+           const sTo = new Date(s.workToDate);
+           
+           while (curr <= end) {
+             if (curr >= sFrom && curr <= sTo) potential++;
+             curr.setDate(curr.getDate() + 1);
+           }
+           stats[s.id].rosterPotential = potential;
         } else {
-          stats[s.id].rosterPotential = filteredPrograms.length;
+           stats[s.id].rosterPotential = filteredPrograms.length;
         }
       });
     }
 
     filteredPrograms.forEach(program => {
-      const dateStr = program.dateString || '';
-      const assignedIds = new Set(program.assignments.map(a => a.staffId));
-      staff.forEach(s => {
-        if (assignedIds.has(s.id)) {
-          stats[s.id].work++;
-        } else {
-          const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
-          if (restLock) {
-            stats[s.id].resting++;
-            return;
+       const dStr = program.dateString!;
+       const workingIds = new Set(program.assignments.map(a => a.staffId));
+
+       staff.forEach(s => {
+          if (workingIds.has(s.id)) {
+            stats[s.id].work++;
+          } else {
+             const leave = leaveRequests.find(r => r.staffId === s.id && dStr >= r.startDate && dStr <= r.endDate);
+             if (leave) {
+                stats[s.id].annualLeave++;
+             } else if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate)) {
+                stats[s.id].rosterLeave++;
+             } else if (s.type === 'Local') {
+                stats[s.id].off++;
+             } else {
+                stats[s.id].standby++;
+             }
           }
-          const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
-          if (leave) {
-            stats[s.id].annualLeave++;
-            return;
-          }
-          if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-            if (dateStr < s.workFromDate || dateStr > s.workToDate) {
-              stats[s.id].rosterLeave++;
-              return;
-            }
-          }
-          if (s.type === 'Local') stats[s.id].off++;
-          else stats[s.id].standby++;
-        }
-      });
+       });
     });
+
     return stats;
-  }, [filteredPrograms, staff, startDate, endDate, leaveRequests, incomingDuties]);
+  }, [filteredPrograms, staff, leaveRequests, startDate, endDate]);
+
+  const getFullRegistryForDay = (program: DailyProgram): Record<string, string[]> => {
+      const dateStr = program.dateString;
+      if (!dateStr) return {};
+
+      const assignedIds = new Set(program.assignments.map(a => a.staffId));
+      
+      const registryGroups: Record<string, string[]> = {
+         'RESTING (POST-DUTY)': [],
+         'DAYS OFF': [],
+         'ROSTER LEAVE': [],
+         'ANNUAL LEAVE': [],
+         'STANDBY (RESERVE)': []
+      };
+
+      staff.forEach(s => {
+         if (assignedIds.has(s.id)) return;
+         
+         const stat = staffStats[s.id];
+         const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
+         const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
+
+         let category = '';
+         if (restLock) category = 'RESTING (POST-DUTY)';
+         else if (leave) category = 'ANNUAL LEAVE';
+         else if (s.type === 'Roster' && s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate)) category = 'ROSTER LEAVE';
+         else if (s.type === 'Local') category = 'DAYS OFF';
+         else category = 'STANDBY (RESERVE)';
+
+         let count = 0;
+         if (category === 'DAYS OFF') count = stat.off;
+         else if (category === 'ROSTER LEAVE') count = 7; 
+         else if (category === 'ANNUAL LEAVE') count = stat.annualLeave;
+         else if (category === 'STANDBY (RESERVE)') count = stat.standby;
+         
+         if (registryGroups[category]) {
+             registryGroups[category].push(`${s.initials} (${count})`);
+         }
+      });
+      return registryGroups;
+  };
+
+  const handleAutoRepair = async () => {
+    if (isRepairing) return;
+    
+    // Perform Deep Audit
+    const violations: string[] = [];
+    
+    // 1. Check Shift Headcounts & Roles
+    filteredPrograms.forEach(p => {
+       const shiftsMap: Record<string, Assignment[]> = {};
+       p.assignments.forEach(a => {
+         if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
+         shiftsMap[a.shiftId || ''].push(a);
+       });
+
+       shifts.forEach(s => {
+          if (p.day !== s.day) return; 
+          
+          const assigned = shiftsMap[s.id] || [];
+          
+          const requiredStaff: number = Number(s.minStaff) || 0;
+          // Headcount check
+          if (assigned.length < requiredStaff) {
+             violations.push(`SHIFT ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${requiredStaff - assigned.length} staff (Has ${assigned.length}, Need ${requiredStaff})`);
+          }
+
+          // Role check
+          if (s.roleCounts) {
+             Object.entries(s.roleCounts).forEach(([reqRole, value]) => {
+                const count = Number(value);
+                if (!count) return;
+
+                // Map requirement name (long) to role code (short)
+                let targetCode = '';
+                if (reqRole === 'Shift Leader') targetCode = 'SL';
+                else if (reqRole === 'Load Control') targetCode = 'LC';
+                else if (reqRole === 'Ramp') targetCode = 'RMP';
+                else if (reqRole === 'Operations') targetCode = 'OPS';
+                else if (reqRole === 'Lost and Found') targetCode = 'LF';
+
+                // Count how many assigned staff satisfy this role
+                const hasRole = assigned.filter(a => {
+                    const r = (a.role || '').toUpperCase();
+                    // Direct match or Hybrid match
+                    if (r === targetCode) return true;
+                    if (r === 'SL+LC' && (targetCode === 'SL' || targetCode === 'LC')) return true;
+                    // Fallback for full strings if AI outputted them
+                    if (targetCode && r.includes(targetCode)) return true;
+                    return false;
+                }).length;
+
+                if (hasRole < count) {
+                   violations.push(`ROLE ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${count - hasRole} ${reqRole} (Has ${hasRole}, Need ${count})`);
+                }
+             });
+          }
+       });
+    });
+
+    // 2. Check Contract & Utilization
+    staff.forEach(s => {
+       const st = staffStats[s.id];
+       if (s.type === 'Local') {
+          // Strict 5/2 check for Local
+          if (st.work !== 5) {
+             violations.push(`CONTRACT ERROR: ${s.initials} (Local) is working ${st.work} days. MUST work exactly 5 days.`);
+          }
+       } else if (s.type === 'Roster') {
+          // Strict Contract Window check
+          if (st.work !== st.rosterPotential) {
+             violations.push(`CONTRACT ERROR: ${s.initials} (Roster) is working ${st.work} days. MUST work ${st.rosterPotential} days based on contract dates.`);
+          }
+       }
+    });
+
+    // 3. Rest Checks
+    filteredPrograms.forEach(p => {
+       p.assignments.forEach(a => {
+          const sh = getShiftById(a.shiftId);
+          if (sh) {
+             const rest = calculateRestHours(a.staffId, p.dateString!, sh.pickupTime);
+             if (rest !== null && rest < minRestHours) {
+                violations.push(`REST ERROR: ${p.dateString} - Staff ${a.staffId} has only ${rest.toFixed(1)}h rest (Min ${minRestHours}h).`);
+             }
+          }
+       });
+    });
+
+    if (violations.length === 0) {
+       alert("Logic Audit Passed: No violations detected.");
+       return;
+    }
+
+    if (!confirm(`Found ${violations.length} violations:\n\n${violations.slice(0, 5).join('\n')}\n...\n\nProceed with AI Surgical Repair?`)) return;
+
+    setIsRepairing(true);
+    try {
+        const result = await repairProgramWithAI(
+          filteredPrograms, 
+          violations.join('\n'), 
+          { flights, staff, shifts, programs: filteredPrograms, leaveRequests, incomingDuties },
+          { minRestHours }
+        );
+        if (onUpdatePrograms) onUpdatePrograms(result.programs);
+    } catch (e: any) {
+        alert("Repair Failed: " + e.message);
+    } finally {
+        setIsRepairing(false);
+    }
+  };
 
   const formatRoleLabel = (role: string | undefined) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r || r === 'NIL' || r === 'GENERAL') return '';
     return `(${r})`;
-  };
-
-  const getFullRegistryForDay = (program: DailyProgram) => {
-    const dateStr = program.dateString || '';
-    const assignedStaffIds = new Set((program.assignments || []).map(a => a.staffId));
-    const registry: Record<string, string[]> = {
-      'RESTING (POST-DUTY)': [], 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'STANDBY (RESERVE)': []
-    };
-    staff.forEach(s => {
-      if (assignedStaffIds.has(s.id)) return;
-      const stats = utilizationData[s.id];
-      const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
-      if (restLock) {
-        registry['RESTING (POST-DUTY)'].push(`${s.initials} (${stats.resting})`);
-        return;
-      }
-      const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
-      if (leave) {
-        registry['ANNUAL LEAVE'].push(`${s.initials} (${stats.annualLeave})`);
-        return;
-      }
-      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-        if (dateStr < s.workFromDate || dateStr > s.workToDate) {
-          registry['ROSTER LEAVE'].push(`${s.initials} (${stats.rosterLeave})`);
-          return;
-        }
-      }
-      if (s.type === 'Local') registry['DAYS OFF'].push(`${s.initials} (${stats.off})`);
-      else registry['STANDBY (RESERVE)'].push(`${s.initials} (${stats.standby})`);
-    });
-    return registry;
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -331,66 +327,210 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return `DAY ${program.day + 1}`;
   };
 
+  // --- PDF GENERATION LOGIC ---
   const exportPDF = () => {
     if (filteredPrograms.length === 0) return;
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
-    const darkHeader = [2, 6, 23];
-    const greyHeader = [71, 85, 105];
-    const orangeHeader = [217, 119, 6];
     
-    // 1. Daily Program Pages
+    // --- COLOR PALETTE AS REQUESTED ---
+    const headerBlack = [0, 0, 0] as [number, number, number];
+    const auditBlue = [2, 6, 23] as [number, number, number]; // Deep Slate Blue for Util Audits
+    const matrixOrange = [217, 119, 6] as [number, number, number]; // Amber/Orange for Matrix
+
+    // 1. Daily Program Pages (Header: Black)
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
-      doc.setFont('helvetica', 'bold').setFontSize(22).text(`SkyOPS Station Handling Program`, 14, 20);
-      doc.setFontSize(10).setTextColor(120, 120, 120).text(`Target Period: ${startDate} to ${endDate}`, 14, 27);
-      doc.setFontSize(16).setTextColor(0, 0, 0).text(getDayLabel(program), 14, 40);
       
+      doc.setFont('helvetica', 'bold').setFontSize(20).text(`SkyOPS Station Handling Program`, 14, 15);
+      doc.setFontSize(10).setFont('helvetica', 'normal').setTextColor(100).text(`Target Period: ${startDate} to ${endDate}`, 14, 22);
+      doc.setFontSize(14).setFont('helvetica', 'bold').setTextColor(0).text(getDayLabel(program), 14, 32);
+
       const shiftsMap: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
         if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
         shiftsMap[a.shiftId || ''].push(a);
       });
 
-      const tableData = Object.entries(shiftsMap).map(([shiftId, group], i) => {
+      const sortedShiftIds = Object.keys(shiftsMap).sort((a,b) => {
+         const sA = getShiftById(a);
+         const sB = getShiftById(b);
+         return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
+      });
+
+      const tableData = sortedShiftIds.map((shiftId, i) => {
         const sh = getShiftById(shiftId);
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
-        const personnelStr = group.map(a => {
+        const personnelStr = shiftsMap[shiftId].map(a => {
           const st = getStaffById(a.staffId);
           const roleLabel = formatRoleLabel(a.role);
-          return `${st?.initials || '??'}${roleLabel ? ` ${roleLabel}` : ''}`;
+          return `${st?.initials || '??'} ${roleLabel}`;
         }).join(' | ');
-        return [(i+1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${group.length} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
+        return [
+          (i+1).toString(), 
+          sh?.pickupTime || '--:--', 
+          sh?.endTime || '--:--', 
+          fls, 
+          `${shiftsMap[shiftId].length} / ${sh?.maxStaff || sh?.minStaff || '0'}`, 
+          personnelStr
+        ];
       });
 
       autoTable(doc, {
-        startY: 48, head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']], body: tableData,
-        theme: 'grid', headStyles: { fillColor: darkHeader, textColor: 255, fontSize: 10, cellPadding: 3 }, bodyStyles: { fontSize: 7, cellPadding: 3 },
-        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 40 }, 4: { cellWidth: 20 }, 5: { cellWidth: 'auto' } }
+        startY: 36,
+        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: headerBlack, textColor: 255, fontSize: 9, fontStyle: 'bold', cellPadding: 3 },
+        bodyStyles: { fontSize: 8, cellPadding: 3, textColor: 50 },
+        columnStyles: { 
+          0: { cellWidth: 10 }, 
+          1: { cellWidth: 20 }, 
+          2: { cellWidth: 20 }, 
+          3: { cellWidth: 30 }, 
+          4: { cellWidth: 20 },
+          5: { cellWidth: 'auto' }
+        },
+        styles: { lineColor: [220, 220, 220], lineWidth: 0.1 }
       });
 
-      const registry = getFullRegistryForDay(program);
-      const registryData = Object.entries(registry).map(([cat, agents]) => [cat, agents.length > 0 ? agents.join(', ') : 'NONE']);
-      doc.setFontSize(14).setFont('helvetica', 'bold').text("ABSENCE AND REST REGISTRY", 14, (doc as any).lastAutoTable.finalY + 15);
+      const currentY = (doc as any).lastAutoTable.finalY + 12;
+      doc.setFontSize(12).setFont('helvetica', 'bold').text("ABSENCE AND REST REGISTRY", 14, currentY);
+      const registryGroups = getFullRegistryForDay(program);
+      const registryBody = [
+         ['RESTING (POST-DUTY)', registryGroups['RESTING (POST-DUTY)'].join(', ') || 'NONE'],
+         ['DAYS OFF', registryGroups['DAYS OFF'].join(', ') || 'NONE'],
+         ['ROSTER LEAVE', registryGroups['ROSTER LEAVE'].join(', ') || 'NONE'],
+         ['ANNUAL LEAVE', registryGroups['ANNUAL LEAVE'].join(', ') || 'NONE'],
+         ['STANDBY (RESERVE)', registryGroups['STANDBY (RESERVE)'].join(', ') || 'NONE'],
+      ];
       autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 20, head: [['CATEGORY', 'PERSONNEL LIST']], body: registryData,
-        theme: 'grid', headStyles: { fillColor: greyHeader, textColor: 255, fontSize: 10 }, bodyStyles: { fontSize: 8 },
-        columnStyles: { 0: { cellWidth: 60, fontStyle: 'bold' } }
+        startY: currentY + 3,
+        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
+        body: registryBody,
+        theme: 'grid',
+        headStyles: { fillColor: [60, 70, 80], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' } }
       });
     });
 
-    // 2. Staff Utilization Matrix
+    // 2. Weekly Personnel Utilization Audit - Local (Header: Blue)
     doc.addPage('l', 'mm', 'a4');
-    doc.setFont('helvetica', 'bold').setFontSize(22).text(`Staff Utilization Matrix`, 14, 20);
-    const utilizationRows = staff.map(s => {
-      const u = utilizationData[s.id];
-      return [s.initials, s.name, s.type, u.work.toString(), u.off.toString(), u.annualLeave.toString(), u.rosterLeave.toString(), `${Math.round((u.work / (u.rosterPotential || 1)) * 100)}%`];
+    doc.setFontSize(20).setTextColor(0).text("Weekly Personnel Utilization Audit (Local)", 14, 20);
+    const localStaff = staff.filter(s => s.type === 'Local');
+    const localAuditRows = localStaff.map((s, i) => {
+       const st = staffStats[s.id];
+       const isMatch = st.work === 5 && st.off === 2;
+       return [
+         (i+1).toString(),
+         s.name,
+         s.initials,
+         st.work.toString(),
+         st.off.toString(),
+         isMatch ? 'MATCH' : 'CHECK'
+       ];
     });
     autoTable(doc, {
-      startY: 30, head: [['INITIALS', 'NAME', 'TYPE', 'WORK DAYS', 'OFF DAYS', 'ANNUAL LEAVE', 'ROSTER LEAVE', 'UTILIZATION %']], body: utilizationRows,
-      theme: 'striped', headStyles: { fillColor: orangeHeader, textColor: 255, fontSize: 9 }, bodyStyles: { fontSize: 8 }
+      startY: 25,
+      head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']],
+      body: localAuditRows,
+      theme: 'grid',
+      headStyles: { fillColor: auditBlue, textColor: 255, fontSize: 9, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 8, cellPadding: 3 },
+      columnStyles: { 0: { cellWidth: 15 }, 2: { cellWidth: 20 }, 5: { fontStyle: 'bold' } }
     });
 
-    doc.save(`SkyOPS_Program_${startDate}_${endDate}.pdf`);
+    // 3. Weekly Personnel Utilization Audit - Roster (Header: Blue)
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFontSize(20).setTextColor(0).text("Weekly Personnel Utilization Audit (Roster)", 14, 20);
+    const rosterStaff = staff.filter(s => s.type === 'Roster');
+    const rosterAuditRows = rosterStaff.map((s, i) => {
+       const st = staffStats[s.id];
+       const isMatch = st.work === st.rosterPotential;
+       return [
+         (i+1).toString(),
+         s.name,
+         s.initials,
+         s.workFromDate || '?',
+         s.workToDate || '?',
+         st.rosterPotential.toString(),
+         st.work.toString(),
+         isMatch ? 'MATCH' : 'CHECK'
+       ];
+    });
+    autoTable(doc, {
+      startY: 25,
+      head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']],
+      body: rosterAuditRows,
+      theme: 'grid',
+      headStyles: { fillColor: auditBlue, textColor: 255, fontSize: 9, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 8, cellPadding: 3 },
+      columnStyles: { 
+         0: { cellWidth: 15 }, 
+         2: { cellWidth: 15 },
+         7: { fontStyle: 'bold' }
+      }
+    });
+
+    // 4. Weekly Operations Matrix View (Header: Orange)
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFontSize(20).setTextColor(0).text("Weekly Operations Matrix View", 14, 20);
+    doc.setFontSize(10).setTextColor(100).text("Comprehensive Assignment Timeline with Rest Tracking", 14, 26);
+
+    const dates = filteredPrograms.map(p => {
+       const d = new Date(p.dateString!);
+       return `${d.getDate()}/${d.getMonth()+1}`;
+    });
+    const matrixHead = [['S/N', 'AGENT', ...dates, 'AUDIT']];
+
+    const matrixRows = staff.map((s, i) => {
+       const row = [(i+1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
+       filteredPrograms.forEach(p => {
+          const assign = p.assignments.find(a => a.staffId === s.id);
+          if (assign) {
+             const sh = getShiftById(assign.shiftId);
+             if (sh) {
+                const rest = calculateRestHours(s.id, p.dateString!, sh.pickupTime);
+                const restStr = rest !== null ? `(${rest.toFixed(1)}H REST)` : '';
+                row.push(`${sh.pickupTime}\n${restStr}`);
+             } else {
+                row.push('ERROR');
+             }
+          } else {
+             row.push('-');
+          }
+       });
+       const st = staffStats[s.id];
+       const target = s.type === 'Local' ? 5 : st.rosterPotential;
+       row.push(`${st.work}/${target}`);
+       return row;
+    });
+
+    autoTable(doc, {
+      startY: 30,
+      head: matrixHead,
+      body: matrixRows,
+      theme: 'grid',
+      headStyles: { fillColor: matrixOrange, textColor: 255, fontSize: 8, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 7, cellPadding: 2, halign: 'center', valign: 'middle' },
+      columnStyles: { 
+         0: { cellWidth: 10 }, 
+         1: { cellWidth: 25, halign: 'left', fontStyle: 'bold' },
+         [dates.length + 2]: { cellWidth: 15, fontStyle: 'bold' } 
+      },
+      didParseCell: (data) => {
+         if (data.section === 'body' && data.column.index > 1 && data.column.index < dates.length + 2) {
+            const text = data.cell.raw as string;
+            if (text.includes('-')) {
+               // Off day styling
+            } else {
+               data.cell.styles.fontStyle = 'bold';
+            }
+         }
+      }
+    });
+
+    doc.save(`SkyOPS_Master_Report_${startDate}.pdf`);
   };
 
   return (
@@ -414,7 +554,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
            </button>
            <button onClick={exportPDF} className="flex-1 px-8 py-5 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg">
              <Printer size={18} />
-             <span className="text-[10px] font-black uppercase tracking-widest italic">Print PDF</span>
+             <span className="text-[10px] font-black uppercase tracking-widest italic">Print Master PDF</span>
            </button>
         </div>
       </div>
