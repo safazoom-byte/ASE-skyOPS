@@ -328,10 +328,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     }
   };
 
-  const formatRoleLabel = (role: string | undefined) => {
+  const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r || r === 'NIL' || r === 'GENERAL' || r === 'AGENT') return '';
-    return `(${r})`;
+    if (r.includes('SHIFT LEADER')) return 'SL';
+    if (r.includes('LOAD CONTROL')) return 'LC';
+    if (r.includes('RAMP')) return 'RMP';
+    if (r.includes('OPERATIONS') || r === 'OPS') return 'OPS';
+    if (r.includes('LOST')) return 'LF';
+    return r;
+  };
+
+  const formatRoleLabel = (role: string | undefined) => {
+    const code = formatRoleCode(role || '');
+    return code ? `(${code})` : '';
   };
 
   const getDayLabel = (program: DailyProgram) => {
@@ -626,11 +636,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                 <div className="flex-1 flex flex-wrap gap-2">
                                    {group.map(a => {
                                       const st = getStaffById(a.staffId);
-                                      const isSpecialist = a.role && a.role !== 'General' && a.role !== 'NIL';
+                                      const roleCode = formatRoleCode(a.role || '');
+                                      const isSpecialist = roleCode && roleCode !== 'NIL' && roleCode !== 'GENERAL';
+                                      
                                       return (
                                         <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 ${isSpecialist ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-100 border-transparent text-slate-500'}`}>
                                            <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials}</span>
-                                           {isSpecialist && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{a.role}</span>}
+                                           {isSpecialist && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{roleCode}</span>}
                                         </div>
                                       )
                                    })}

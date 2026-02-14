@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -687,7 +688,35 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
            <div className="bg-white rounded-2xl md:rounded-[3rem] w-full max-w-5xl h-[90vh] relative shadow-2xl overflow-hidden flex flex-col">
               <button onClick={() => setIsScannerOpen(false)} className="absolute top-4 right-4 p-3 bg-slate-100 rounded-xl z-10 hover:bg-rose-50 hover:text-rose-500 transition-colors"><X size={20} /></button>
-              <div className="flex-1 overflow-auto"><ProgramScanner onDataExtracted={data => { if(data.flights) setFlights(p => [...p, ...data.flights]); if(data.staff) setStaff(p => [...p, ...data.staff]); if(data.shifts) setShifts(p => [...p, ...data.shifts]); setIsScannerOpen(false); }} startDate={startDate} initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} /></div>
+              <div className="flex-1 overflow-auto">
+                <ProgramScanner 
+                  onDataExtracted={async (data) => { 
+                    if(data.flights) {
+                      setFlights(p => [...p, ...data.flights]);
+                      data.flights.forEach(f => db.upsertFlight(f));
+                    }
+                    if(data.staff) {
+                      setStaff(p => [...p, ...data.staff]);
+                      data.staff.forEach(s => db.upsertStaff(s));
+                    }
+                    if(data.shifts) {
+                      setShifts(p => [...p, ...data.shifts]);
+                      data.shifts.forEach(s => db.upsertShift(s));
+                    }
+                    if(data.leaveRequests) {
+                      setLeaveRequests(p => [...p, ...data.leaveRequests!]);
+                      await db.upsertLeaves(data.leaveRequests!);
+                    }
+                    if(data.incomingDuties) {
+                      setIncomingDuties(p => [...p, ...data.incomingDuties!]);
+                      await db.upsertIncomingDuties(data.incomingDuties!);
+                    }
+                    setIsScannerOpen(false); 
+                  }} 
+                  startDate={startDate} 
+                  initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} 
+                />
+              </div>
            </div>
         </div>
       )}

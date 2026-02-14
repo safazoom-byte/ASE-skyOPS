@@ -1,31 +1,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { extractDataFromContent, ExtractionMedia } from '../services/geminiService';
-import { Flight, Staff, ShiftConfig, DailyProgram, Skill } from '../types';
+import { Flight, Staff, ShiftConfig, DailyProgram, Skill, LeaveRequest, IncomingDuty } from '../types';
 import * as XLSX from 'xlsx';
 import { 
-  FileUp, 
-  AlertCircle, 
-  Activity, 
-  Sparkles, 
-  Check, 
-  Plane, 
-  Clock,
-  Zap, 
-  ArrowRight,
-  X,
-  Table,
-  CheckCircle2,
-  Layers,
-  Users,
-  Eye,
-  Trash2,
-  ShieldCheck,
-  Settings
+  FileUp, AlertCircle, Activity, Sparkles, Check, Plane, Clock, Zap, ArrowRight, X, Table, CheckCircle2, Layers, Users, Eye, Trash2, ShieldCheck, Settings, CalendarX, Moon
 } from 'lucide-react';
 
 interface Props {
-  onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[] }) => void;
+  onDataExtracted: (data: { flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs?: DailyProgram[], leaveRequests?: LeaveRequest[], incomingDuties?: IncomingDuty[] }) => void;
   startDate?: string;
   numDays?: number;
   initialTarget?: 'flights' | 'staff' | 'shifts';
@@ -70,7 +53,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
-  const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[] } | null>(null);
+  const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[], leaveRequests: LeaveRequest[], incomingDuties: IncomingDuty[] } | null>(null);
   const [scanError, setScanError] = useState<ScanError | null>(null);
   const [importMode, setImportMode] = useState<'upload' | 'paste'>(initialTarget ? 'paste' : 'upload');
   const [pasteTarget, setPasteTarget] = useState<PasteTarget>(initialTarget || 'all');
@@ -248,7 +231,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       }
     });
 
-    setExtractedData({ flights, staff, shifts, programs: [] });
+    setExtractedData({ flights, staff, shifts, programs: [], leaveRequests: [], incomingDuties: [] });
     setIsScanning(false);
   };
 
@@ -309,7 +292,14 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     setIsScanning(true);
     try {
       const data = await extractDataFromContent({ textData, media: mediaParts, startDate, targetType: target });
-      if (data) setExtractedData(data);
+      if (data) setExtractedData({
+        flights: data.flights || [],
+        staff: data.staff || [],
+        shifts: data.shifts || [],
+        programs: [],
+        leaveRequests: data.leaveRequests || [],
+        incomingDuties: data.incomingDuties || []
+      });
     } catch (error: any) {
       setScanError({ title: "AI Sync Error", message: error.message });
     } finally {
@@ -380,7 +370,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
               <div className="absolute inset-0 flex items-center justify-center"><Activity className="text-blue-600 animate-pulse" /></div>
             </div>
             <div>
-              <h4 className="text-2xl font-black italic uppercase text-slate-950 tracking-tighter">{phases[scanPhase]}</h4>
+              <h4 className="text-2xl font-black italic uppercase text-slate-900 tracking-tighter">{phases[scanPhase]}</h4>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 animate-pulse">Running Local Heuristics</p>
             </div>
           </div>
@@ -390,10 +380,10 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           <div className="space-y-10 animate-in zoom-in-95 duration-500">
              <div className="bg-white p-10 rounded-[3.5rem] shadow-sm border border-slate-100">
                 <div className="flex justify-between items-center mb-10">
-                   <h4 className="text-xl font-black italic uppercase text-slate-950 flex items-center gap-4"><CheckCircle2 className="text-emerald-500" /> Registry Review</h4>
+                   <h4 className="text-xl font-black italic uppercase text-slate-900 flex items-center gap-4"><CheckCircle2 className="text-emerald-500" /> Registry Review</h4>
                    <button onClick={finalizeImport} className="px-10 py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic text-[10px] tracking-widest hover:bg-blue-600 transition-all shadow-xl shadow-blue-600/10">Authorize Import</button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                    <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
                       <Plane size={24} className="mx-auto text-blue-500 mb-3" />
                       <h5 className="text-2xl font-black italic text-slate-900">{extractedData.flights.length}</h5>
@@ -408,6 +398,16 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                       <Clock size={24} className="mx-auto text-amber-500 mb-3" />
                       <h5 className="text-2xl font-black italic text-slate-900">{extractedData.shifts.length}</h5>
                       <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Shifts</p>
+                   </div>
+                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
+                      <CalendarX size={24} className="mx-auto text-rose-500 mb-3" />
+                      <h5 className="text-2xl font-black italic text-slate-900">{extractedData.leaveRequests.length}</h5>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Leave Entries</p>
+                   </div>
+                   <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-center">
+                      <Moon size={24} className="mx-auto text-purple-500 mb-3" />
+                      <h5 className="text-2xl font-black italic text-slate-900">{extractedData.incomingDuties.length}</h5>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Rest Logs</p>
                    </div>
                 </div>
              </div>
