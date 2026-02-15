@@ -102,7 +102,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     
     ### 2. ABBREVIATION PROTOCOL (MANDATORY)
     - NEVER use full words like "Shift Leader".
-    - YOU MUST USE THESE CODES ONLY: "SL", "LC", "RMP", "OPS", "LF", "SL+LC".
+    - YOU MUST USE THESE CODES ONLY: "SL", "LC", "RMP", "OPS", "LF", "SL+LC", "LC+OPS".
     
     ### 3. UNAVAILABILITY PROTOCOLS (ZERO TOLERANCE)
     - **CONTRACT DATES**: If staff.type == 'Roster', you MUST CHECK \`workFromDate\` and \`workToDate\`. 
@@ -111,20 +111,20 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - **REST LOG**: Check 'PREVIOUS DUTIES'. Staff are **LOCKED** until they complete **${config.minRestHours} hours of rest** after their last shift end.
       - Formula: \`SafeStartTime = LastShiftEnd + ${config.minRestHours} hours\`.
     
-    ### 4. EXECUTION STRATEGY
-    **PHASE A: COVERAGE**
-    - Fill specialist roles (SL, LC) first.
-    - Fill remaining with General staff up to \`minStaff\`.
-    - **PRIORITY**: Use available Roster staff BEFORE Local staff to save costs.
+    ### 4. EXECUTION STRATEGY (AGGRESSIVE STAFFING)
+    **PRIORITY 1: SECURE THE FLOOR (MIN STAFF)**
+    - You MUST fill every shift to at least \`minStaff\`.
+    - Use Specialist roles (SL, LC) first, then fill with General agents.
 
-    **PHASE B: OPTIMIZATION**
-    - If a shift is below \`maxStaff\`, scan STANDBY pool.
-    - Assign available, legal staff to fill the gap.
-    - Maximize workforce utilization.
-
-    ### 5. LEGALITY & SWAP
-    - Local Staff: Max 5 shifts/week. Roster Staff: Max 7 shifts/week (continuous).
-    - If a staff member hits their limit, **SWAP** them with a qualified Standby staff member. Do not leave the slot empty.
+    **PRIORITY 2: EMPTY THE STANDBY POOL (MAX STAFF)**
+    - **CRITICAL RULE**: DO NOT leave staff in "Standby" if a shift is below \`maxStaff\`.
+    - If you have available legal staff (Local or Roster), you **MUST** assign them to a shift until the shift reaches \`maxStaff\`.
+    - **NO STANDBY ALLOWED**: If a staff member is legal to work, they MUST work. Do not leave them idle at home.
+    
+    **PRIORITY 3: WORKLOAD DISTRIBUTION**
+    - Local Staff: Target exactly 5 days/week.
+    - Roster Staff: Target maximum legal days (up to 7) within their contract window.
+    - **FORCE UTILIZATION**: If a Local staff member has < 5 days, FIND THEM A SHIFT. Do not accept 0 days.
 
     ### STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
@@ -221,31 +221,24 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v5.0
-    OBJECTIVE: Fix the specific violations in the roster below.
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v6.0 (AGGRESSIVE FILL)
+    OBJECTIVE: Fix the specific violations in the roster below AND FILL EMPTY SLOTS.
 
-    ### 1. CREDENTIAL CHECK (ZERO TOLERANCE)
+    ### 1. CREDENTIAL & LEGALITY CHECK (ZERO TOLERANCE)
     - **FAKE ROLE VIOLATION**: If staff assigned "SL", "LC", etc. lacks the boolean flag, **SWAP** them out immediately.
-    
-    ### 2. EXCLUSION ZONE (LEAVE & REST & DATES)
-    - **CONTRACT DATES (CRITICAL)**: Roster staff MUST NOT be assigned if the date is outside their \`workFromDate\` - \`workToDate\`. Remove and replace.
-    - **LEAVE REGISTRY**: Staff in 'LEAVE REGISTRY' are **INVISIBLE**. Remove if assigned.
-    - **REST LOG**: Staff in 'REST LOG' are **LOCKED** until ${constraints.minRestHours}h after shift end.
-      - Action: If assigned during rest period, **REMOVE AND SWAP**.
+    - **CONTRACT DATES**: Remove Roster staff assigned outside their contract dates.
+    - **LEAVE/REST**: Remove staff working during leave or rest periods.
 
-    ### 3. ABBREVIATION PROTOCOL (STRICT)
-    - **MUST USE**: "SL", "LC", "RMP", "OPS", "LF".
-    - **DO NOT** use full words. Rename all roles to codes.
+    ### 2. THE "NO STANDBY" MANDATE (CRITICAL)
+    - **Scenario**: Shift is between \`minStaff\` and \`maxStaff\`.
+    - **Action**: Look at the Standby list. If legal staff are available, **ASSIGN THEM**.
+    - **GOAL**: Push shift headcount towards \`maxStaff\`. Do not leave it at minimum if people are sitting at home.
+    - **FORCE UTILIZATION**: Ensure Local staff get 5 days. Ensure Roster staff get max days.
 
-    ### 4. THE "SMART SWAP" MANDATE
-    - **Scenario**: Staff over max shifts (Local > 5, Roster > 7).
-    - **Action**: **SWAP**. Find a legal Standby staff member and replace the overworked staff. Preserve the role.
+    ### 3. ABBREVIATION PROTOCOL
+    - **MUST USE**: "SL", "LC", "RMP", "OPS", "LF", "SL+LC", "LC+OPS".
 
-    ### 5. MOBILIZATION
-    - **Scenario**: Shift < maxStaff.
-    - **Action**: Assign legal Standby staff to fill empty slots.
-
-    ### AUDIT REPORT:
+    ### AUDIT REPORT (Fix these specific errors):
     ${auditReport}
 
     ### DATA SOURCES:
@@ -258,6 +251,8 @@ export const repairProgramWithAI = async (
       })))}
     - **LEAVE REGISTRY**: ${JSON.stringify(data.leaveRequests)}
     - **REST LOG**: ${JSON.stringify(data.incomingDuties)}
+    - **SHIFTS CONFIG**: ${JSON.stringify(data.shifts)}
+    - **FLIGHTS**: ${JSON.stringify(data.flights)}
     - Current Roster: ${JSON.stringify(currentPrograms)}
 
     ### OUTPUT FORMAT:

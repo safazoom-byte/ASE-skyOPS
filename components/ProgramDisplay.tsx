@@ -270,6 +270,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     // Direct match or Hybrid match
                     if (r === targetCode) return true;
                     if (r === 'SL+LC' && (targetCode === 'SL' || targetCode === 'LC')) return true;
+                    // Add LC+OPS support
+                    if (r === 'LC+OPS' && (targetCode === 'LC' || targetCode === 'OPS')) return true;
+                    
                     // Fallback for full strings if AI outputted them
                     if (targetCode && r.includes(targetCode)) return true;
                     return false;
@@ -306,7 +309,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           if (sh) {
              const rest = calculateRestHours(a.staffId, p.dateString!, sh.pickupTime);
              if (rest !== null && rest < minRestHours) {
-                violations.push(`REST ERROR: ${p.dateString} - Staff ${a.staffId} has only ${rest.toFixed(1)}h rest (Min ${minRestHours}h).`);
+                // FIXED: Use initials instead of ID
+                const st = getStaffById(a.staffId);
+                const name = st ? st.initials : 'Unknown';
+                violations.push(`REST ERROR: ${p.dateString} - Staff ${name} has only ${rest.toFixed(1)}h rest (Min ${minRestHours}h).`);
              }
           }
        });
