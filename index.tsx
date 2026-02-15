@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -270,8 +269,12 @@ const App: React.FC = () => {
       }
       
       setActiveTab('program'); 
-    } catch (err: any) { 
-      setError(err.message); 
+    } catch (err: unknown) { 
+      if (err instanceof Error) {
+        setError(err.message); 
+      } else {
+        setError("An unexpected error occurred during program generation.");
+      }
     } finally { 
       setIsGenerating(false); 
     }
@@ -307,6 +310,46 @@ const App: React.FC = () => {
   const handleIncomingDutyDelete = async (id: string) => {
     setIncomingDuties(p => p.filter(d => d.id !== id));
     if (supabase) await db.deleteIncomingDuty(id);
+  };
+
+  const handleIncomingSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    
+    // Auto-map logic for pasted lists like "MS-Atz ML-atz FT-atz"
+    // Triggers if dash, space, or comma is detected
+    if (val.includes('-') || val.includes(' ') || val.includes(',')) {
+      const tokens = val.split(/[\s,]+/);
+      const staffMap = new Map(staff.map(s => [s.initials.toUpperCase(), s.id]));
+      const idsToAdd: string[] = [];
+      
+      let matchedCount = 0;
+
+      tokens.forEach(token => {
+        if (!token) return;
+        // Handle format: INT-Suffix or just INT
+        // We split by '-' and take the first part
+        const cleanInitials = token.split('-')[0].toUpperCase();
+        
+        // Check if this is a valid staff
+        if (staffMap.has(cleanInitials)) {
+          idsToAdd.push(staffMap.get(cleanInitials)!);
+          matchedCount++;
+        }
+      });
+
+      // Only auto-add and clear if we actually found matches
+      if (matchedCount > 0) {
+        setIncomingSelectedStaffIds(prev => {
+          const next = new Set(prev);
+          idsToAdd.forEach(id => next.add(id));
+          return Array.from(next);
+        });
+        setIncomingSearchTerm('');
+        return;
+      }
+    }
+    
+    setIncomingSearchTerm(val);
   };
 
   const addIncomingDuties = async () => {
@@ -459,9 +502,9 @@ const App: React.FC = () => {
                                   <input 
                                       type="text" 
                                       className="flex-1 bg-transparent text-sm font-bold outline-none py-1 min-w-[120px]"
-                                      placeholder="Search initials or name..."
+                                      placeholder="Search initials or paste 'MS-Atz'..."
                                       value={incomingSearchTerm}
-                                      onChange={e => setIncomingSearchTerm(e.target.value)}
+                                      onChange={handleIncomingSearchChange}
                                       onFocus={() => setIncomingSearchFocus(true)}
                                       onBlur={() => setTimeout(() => setIncomingSearchFocus(false), 200)}
                                   />
@@ -469,7 +512,7 @@ const App: React.FC = () => {
                               {incomingSearchFocus && (
                                   <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl max-h-[180px] overflow-y-auto p-2 z-[200] animate-in slide-in-from-top-2">
                                       {filteredStaff.map(s => (
-                                          <button key={s.id} onMouseDown={(e) => { e.preventDefault(); setIncomingSelectedStaffIds(p => p.includes(s.id) ? p.filter(x => x !== s.id) : [...p, s.id]); }} className={`w-full text-left p-2.5 rounded-lg text-[10px] font-black uppercase transition-colors ${incomingSelectedStaffIds.includes(s.id) ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-600'}`}>
+                                          <button key={s.id} onMouseDown={(e) => { e.preventDefault(); setIncomingSelectedStaffIds(p => p.includes(s.id) ? p.filter(x => x !== s.id) : [...p, s.id]); setIncomingSearchTerm(''); }} className={`w-full text-left p-2.5 rounded-lg text-[10px] font-black uppercase transition-colors ${incomingSelectedStaffIds.includes(s.id) ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-600'}`}>
                                               {s.initials} — {s.name}
                                           </button>
                                       ))}
