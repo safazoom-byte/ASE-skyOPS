@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
@@ -89,55 +88,28 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER
+    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER v8.0
     OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### 1. CREDENTIAL VERIFICATION (STRICT QUALIFICATION FIREWALL)
-    You are FORBIDDEN from assigning a specialist role unless the staff member has the specific boolean flag in the database:
-    - Role "SL" (Shift Leader) -> REQUIRED: \`isShiftLeader: true\`
-    - Role "LC" (Load Control) -> REQUIRED: \`isLoadControl: true\`
-    - Role "OPS" (Operations) -> REQUIRED: \`isOps: true\`
-    - Role "LF" (Lost & Found) -> REQUIRED: \`isLostFound: true\`
-    - Role "RMP" (Ramp) -> REQUIRED: \`isRamp: true\`
-    
-    ### 2. ABBREVIATION PROTOCOL (MANDATORY)
-    - NEVER use full words like "Shift Leader".
-    - YOU MUST USE THESE CODES ONLY: "SL", "LC", "RMP", "OPS", "LF", "SL+LC", "LC+OPS".
-    
-    ### 3. UNAVAILABILITY PROTOCOLS (ZERO TOLERANCE)
-    - **CONTRACT DATES**: If staff.type == 'Roster', you MUST CHECK \`workFromDate\` and \`workToDate\`. 
-      - If the Program Date is < workFromDate OR > workToDate, the staff member **DOES NOT EXIST**. DO NOT ASSIGN THEM.
-    - **LEAVE REGISTRY**: Staff in "LEAVE/ABSENCE" are LOCKED OUT for the specific dates. No exceptions.
-    - **FATIGUE LOCK (REST LOG) - CRITICAL SAFETY RULE**: 
-      - Check 'PREVIOUS DUTIES' list for every staff member.
-      - If a staff member appears in 'PREVIOUS DUTIES', calculate their **EarliestSafeStart**: \`DutyEndDate + ${config.minRestHours} hours\`.
-      - **DO NOT** assign them to any shift that starts before their EarliestSafeStart.
-      - This is a hard safety constraint. No exceptions.
-    
-    ### 4. EXECUTION STRATEGY (AGGRESSIVE STAFFING)
-    **PRIORITY 1: SECURE THE FLOOR (MIN STAFF)**
-    - You MUST fill every shift to at least \`minStaff\`.
-    - Use Specialist roles (SL, LC) first, then fill with General agents.
+    ### 1. ASSIGNMENT ROLE PROTOCOL
+    - **SPECIALIST ROLES**: You MUST first fill the requested roles for "Shift Leader", "Load Control", "Ramp", "Operations", "Lost and Found" using the staff skills.
+    - **GENERAL HEADCOUNT**: If specialist requirements are met but the shift still needs more people (up to minStaff/maxStaff), assign additional staff using the role: "GENERAL".
+    - **FORMATTING**: Use codes "SL", "LC", "RMP", "OPS", "LF" for specialists. Combined skills like "SL+LC" are encouraged for efficiency.
+    - **CRITICAL**: Staff labeled "GENERAL" will display initials only. Staff with specialist codes will show roles.
 
-    **PRIORITY 2: EMPTY THE STANDBY POOL (MAX STAFF)**
-    - **CRITICAL RULE**: DO NOT leave staff in "Standby" if a shift is below \`maxStaff\`.
-    - If you have available legal staff (Local or Roster), you **MUST** assign them to a shift until the shift reaches \`maxStaff\`.
-    - **NO STANDBY ALLOWED**: If a staff member is legal to work, they MUST work. Do not leave them idle at home.
-    
-    **PRIORITY 3: WORKLOAD DISTRIBUTION**
-    - Local Staff: Target exactly 5 days/week.
-    - Roster Staff: Target maximum legal days (up to 7) within their contract window.
-    - **FORCE UTILIZATION**: If a Local staff member has < 5 days, FIND THEM A SHIFT. Do not accept 0 days.
+    ### 2. STAFFING LIMITS & CONTRACTS
+    - **LOCAL STAFF**: Mandatory 5 days work / 2 days off pattern.
+    - **ROSTER STAFF**: Strictly check 'workFromDate' and 'workToDate'. Do NOT assign them if the current date is outside their period.
+    - **REST**: Minimum ${config.minRestHours}h between release and next pickup.
 
-    ### STATION DATA:
+    STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
     - FLIGHTS: ${JSON.stringify(data.flights)}
-    - PREVIOUS DUTIES (REST LOG): ${JSON.stringify(data.incomingDuties)}
-    - LEAVE/ABSENCE (OFF-DUTY REGISTRY): ${JSON.stringify(data.leaveRequests)}
+    - PREVIOUS DUTIES: ${JSON.stringify(data.incomingDuties)}
+    - ABSENCE: ${JSON.stringify(data.leaveRequests)}
 
-    ### OUTPUT:
-    Return JSON matching the ROSTER_SCHEMA. 
+    OUTPUT: JSON matching ROSTER_SCHEMA.
   `;
 
   try {
@@ -182,10 +154,10 @@ export const extractDataFromContent = async (params: {
 
     INSTRUCTIONS:
     1. EXTRACT FLIGHTS: Look for flight numbers, sectors, times.
-    2. EXTRACT STAFF: Look for names, initials, roles. CRITICAL: For 'Roster' or 'Contract' staff, look for date ranges (Start/End dates) and capture them as workFromDate/workToDate.
+    2. EXTRACT STAFF: Look for names, initials, roles. Look for date ranges (Start/End dates) and capture them as workFromDate/workToDate.
     3. EXTRACT SHIFTS: Look for duty start/end times.
-    4. EXTRACT LEAVE/ABSENCE: Look for "Leave Registry", "Absence", "Days Off". Return as 'leaveRequests' array with { staffId (or initials), startDate, endDate, type }.
-    5. EXTRACT REST/FATIGUE: Look for "Rest Log", "Previous Duties", "Fatigue Audit". Return as 'incomingDuties' array with { staffId (or initials), date, shiftEndTime }.
+    4. EXTRACT LEAVE/ABSENCE: Look for "Leave Registry", "Absence", "Days Off". Return as 'leaveRequests' array.
+    5. EXTRACT REST/FATIGUE: Look for "Rest Log", "Previous Duties", "Fatigue Audit". Return as 'incomingDuties' array.
   `;
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
@@ -224,43 +196,24 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v6.0 (AGGRESSIVE FILL)
-    OBJECTIVE: Fix the specific violations in the roster below AND FILL EMPTY SLOTS.
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v8.0
+    OBJECTIVE: Fix violations in the roster below.
 
-    ### 1. CREDENTIAL & LEGALITY CHECK (ZERO TOLERANCE)
-    - **FAKE ROLE VIOLATION**: If staff assigned "SL", "LC", etc. lacks the boolean flag, **SWAP** them out immediately.
-    - **CONTRACT DATES**: Remove Roster staff assigned outside their contract dates.
-    - **LEAVE/REST**: Remove staff working during leave or rest periods (FATIGUE LOCK applies).
+    ### CRITICAL RULES:
+    1. **LOCAL 5-DAY LIMIT**: If a Local staff member already has 5 work assignments in the week, they MUST be off for the remaining days.
+    2. **ROSTER CONTRACTS**: Remove Roster staff assigned outside their 'workFromDate' / 'workToDate'.
+    3. **SPECIALIST QUALS**: If staff assigned "SL", "LC", etc. lacks the flag, use "GENERAL" or swap them.
+    4. **REST HOURS**: Ensure exactly ${constraints.minRestHours}h between shifts. 
 
-    ### 2. THE "NO STANDBY" MANDATE (CRITICAL)
-    - **Scenario**: Shift is between \`minStaff\` and \`maxStaff\`.
-    - **Action**: Look at the Standby list. If legal staff are available, **ASSIGN THEM**.
-    - **GOAL**: Push shift headcount towards \`maxStaff\`. Do not leave it at minimum if people are sitting at home.
-    - **FORCE UTILIZATION**: Ensure Local staff get 5 days. Ensure Roster staff get max days.
-
-    ### 3. ABBREVIATION PROTOCOL
-    - **MUST USE**: "SL", "LC", "RMP", "OPS", "LF", "SL+LC", "LC+OPS".
-
-    ### AUDIT REPORT (Fix these specific errors):
+    ### AUDIT REPORT:
     ${auditReport}
 
     ### DATA SOURCES:
-    - Staff Attributes: ${JSON.stringify(data.staff.map(s => ({ 
-        id: s.id, 
-        initials: s.initials, 
-        type: s.type, 
-        contract: s.type === 'Roster' ? { from: s.workFromDate, to: s.workToDate } : 'PERM',
-        quals: { SL: s.isShiftLeader, LC: s.isLoadControl, RMP: s.isRamp, OPS: s.isOps, LF: s.isLostFound }
-      })))}
-    - **LEAVE REGISTRY**: ${JSON.stringify(data.leaveRequests)}
-    - **REST LOG**: ${JSON.stringify(data.incomingDuties)}
-    - **SHIFTS CONFIG**: ${JSON.stringify(data.shifts)}
-    - **FLIGHTS**: ${JSON.stringify(data.flights)}
+    - Staff: ${JSON.stringify(data.staff)}
     - Current Roster: ${JSON.stringify(currentPrograms)}
 
     ### OUTPUT FORMAT:
-    Return a JSON object containing the FULL updated 'programs' array. 
-    Matches standard ROSTER_SCHEMA.
+    Return a JSON object containing the FULL updated 'programs' array.
   `;
 
   try {
