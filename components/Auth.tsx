@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { auth, supabase } from '../services/supabaseService';
 import { Mail, ChevronRight, Loader2, ShieldCheck, AlertCircle, Settings, Shield } from 'lucide-react';
-import { SkyOpsLogo } from '../index';
+import { SkyOpsLogo } from './Logo';
 
 export const Auth: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
