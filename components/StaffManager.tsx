@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useMemo } from 'react';
 import { Staff, Skill, StaffCategory } from '../types';
 import { AVAILABLE_SKILLS } from '../constants';
 import * as XLSX from 'xlsx';
@@ -15,7 +16,8 @@ import {
   Briefcase,
   Shield,
   CalendarRange,
-  Zap
+  Zap,
+  Search
 } from 'lucide-react';
 
 interface Props {
@@ -30,6 +32,7 @@ interface Props {
 export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, onClearAll, defaultMaxShifts, onOpenScanner }) => {
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [newStaff, setNewStaff] = useState<Partial<Staff>>({
     name: '',
@@ -67,6 +70,16 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
            (date.getUTCMonth() + 1).toString().padStart(2, '0') + '/' + 
            date.getUTCFullYear();
   };
+
+  const filteredStaff = useMemo(() => {
+    if (!searchTerm) return staff;
+    const lower = searchTerm.toLowerCase();
+    return staff.filter(s => 
+      s.name.toLowerCase().includes(lower) || 
+      s.initials.toLowerCase().includes(lower) ||
+      s.type.toLowerCase().includes(lower)
+    );
+  }, [staff, searchTerm]);
 
   const handleNewStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -295,14 +308,32 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
         </div>
       </div>
 
+      <div className="flex items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20">
+        <Search className="text-slate-400 ml-2" size={20} />
+        <input 
+          type="text" 
+          placeholder="Search personnel by name, initials, or type..." 
+          className="flex-1 bg-transparent font-bold text-sm text-slate-900 outline-none placeholder:text-slate-300 placeholder:font-medium"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        {searchTerm && (
+          <button onClick={() => setSearchTerm('')} className="p-2 text-slate-400 hover:text-rose-500 transition-colors">
+            <Trash2 size={16} />
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-8">
-        {staff.length === 0 ? (
+        {filteredStaff.length === 0 ? (
           <div className="col-span-full py-20 md:py-32 text-center bg-slate-100/50 rounded-3xl md:rounded-[4rem] border-2 border-dashed border-slate-200">
             <Users size={48} className="mx-auto text-slate-200 mb-4" />
-            <h4 className="text-lg font-black uppercase italic text-slate-300">Station Ranks Empty</h4>
+            <h4 className="text-lg font-black uppercase italic text-slate-300">
+              {searchTerm ? 'No Matching Personnel' : 'Station Ranks Empty'}
+            </h4>
           </div>
         ) : (
-          staff.map((member) => {
+          filteredStaff.map((member) => {
             const power = member.powerRate || 75;
             const isRoster = member.type === 'Roster';
             return (

@@ -108,8 +108,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - **CONTRACT DATES**: If staff.type == 'Roster', you MUST CHECK \`workFromDate\` and \`workToDate\`. 
       - If the Program Date is < workFromDate OR > workToDate, the staff member **DOES NOT EXIST**. DO NOT ASSIGN THEM.
     - **LEAVE REGISTRY**: Staff in "LEAVE/ABSENCE" are LOCKED OUT for the specific dates. No exceptions.
-    - **REST LOG**: Check 'PREVIOUS DUTIES'. Staff are **LOCKED** until they complete **${config.minRestHours} hours of rest** after their last shift end.
-      - Formula: \`SafeStartTime = LastShiftEnd + ${config.minRestHours} hours\`.
+    - **FATIGUE LOCK (REST LOG) - CRITICAL SAFETY RULE**: 
+      - Check 'PREVIOUS DUTIES' list for every staff member.
+      - If a staff member appears in 'PREVIOUS DUTIES', calculate their **EarliestSafeStart**: \`DutyEndDate + ${config.minRestHours} hours\`.
+      - **DO NOT** assign them to any shift that starts before their EarliestSafeStart.
+      - This is a hard safety constraint. No exceptions.
     
     ### 4. EXECUTION STRATEGY (AGGRESSIVE STAFFING)
     **PRIORITY 1: SECURE THE FLOOR (MIN STAFF)**
@@ -227,7 +230,7 @@ export const repairProgramWithAI = async (
     ### 1. CREDENTIAL & LEGALITY CHECK (ZERO TOLERANCE)
     - **FAKE ROLE VIOLATION**: If staff assigned "SL", "LC", etc. lacks the boolean flag, **SWAP** them out immediately.
     - **CONTRACT DATES**: Remove Roster staff assigned outside their contract dates.
-    - **LEAVE/REST**: Remove staff working during leave or rest periods.
+    - **LEAVE/REST**: Remove staff working during leave or rest periods (FATIGUE LOCK applies).
 
     ### 2. THE "NO STANDBY" MANDATE (CRITICAL)
     - **Scenario**: Shift is between \`minStaff\` and \`maxStaff\`.
