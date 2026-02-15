@@ -12,27 +12,32 @@ export const supabase = isConfigured
 
 export const auth = {
   async signUp(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Cloud Uplink Not Configured") };
-    return await supabase.auth.signUp({ email, password: pass });
+    const client = supabase;
+    if (!client) return { error: new Error("Cloud Uplink Not Configured") };
+    return await client.auth.signUp({ email, password: pass });
   },
   async signIn(email: string, pass: string) {
-    if (!supabase) return { error: new Error("Cloud Uplink Not Configured") };
-    return await supabase.auth.signInWithPassword({ email, password: pass });
+    const client = supabase;
+    if (!client) return { error: new Error("Cloud Uplink Not Configured") };
+    return await client.auth.signInWithPassword({ email, password: pass });
   },
   async signOut() {
-    if (!supabase) return;
-    return await supabase.auth.signOut();
+    const client = supabase;
+    if (!client) return;
+    return await client.auth.signOut();
   },
   async getSession(): Promise<any> {
-    if (!supabase) return null;
+    const client = supabase;
+    if (!client) return null;
     try {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await client.auth.getSession();
       return data.session;
     } catch { return null; }
   },
   onAuthStateChange(callback: (session: any) => void) {
-    if (!supabase) return () => {};
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const client = supabase;
+    if (!client) return () => {};
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
       callback(session);
     });
     return () => subscription.unsubscribe();
@@ -41,22 +46,23 @@ export const auth = {
 
 export const db = {
   async fetchAll() {
-    if (!supabase) return null;
+    const client = supabase;
+    if (!client) return null;
     try {
       const session = await auth.getSession();
       if (!session) return null;
 
       const [fRes, sRes, shRes, pRes, lRes, iRes] = await Promise.all([
-        supabase.from('flights').select('*'),
-        supabase.from('staff').select('*'),
-        supabase.from('shifts').select('*'),
-        supabase.from('programs').select('*'),
-        supabase.from('leave_requests').select('*'),
-        supabase.from('incoming_duties').select('*')
+        client.from('flights').select('*'),
+        client.from('staff').select('*'),
+        client.from('shifts').select('*'),
+        client.from('programs').select('*'),
+        client.from('leave_requests').select('*'),
+        client.from('incoming_duties').select('*')
       ]);
 
       return {
-        flights: (fRes.data || []).map(f => ({
+        flights: (fRes.data || []).map((f: any) => ({
           id: f.id,
           flightNumber: f.flight_number,
           from: f.origin,
@@ -68,7 +74,7 @@ export const db = {
           day: f.day || 0,
           priority: 'Standard'
         })),
-        staff: (sRes.data || []).map(s => ({
+        staff: (sRes.data || []).map((s: any) => ({
           id: s.id,
           name: s.name,
           initials: s.initials,
@@ -84,7 +90,7 @@ export const db = {
           workFromDate: s.work_from_date,
           workToDate: s.work_to_date
         })),
-        shifts: (shRes.data || []).map(s => ({
+        shifts: (shRes.data || []).map((s: any) => ({
           id: s.id,
           day: s.day || 0,
           pickupDate: s.pickup_date,
@@ -96,20 +102,20 @@ export const db = {
           roleCounts: s.role_counts || {}, 
           flightIds: s.flight_ids || []
         })),
-        programs: (pRes.data || []).map(p => ({
+        programs: (pRes.data || []).map((p: any) => ({
           day: p.day,
           dateString: p.date_string,
           assignments: p.assignments || [],
           offDuty: p.off_duty || []
         })),
-        leaveRequests: (lRes.data || []).map(l => ({
+        leaveRequests: (lRes.data || []).map((l: any) => ({
           id: l.id,
           staffId: l.staff_id,
           startDate: l.start_date,
           endDate: l.end_date,
           type: l.leave_type
         })),
-        incomingDuties: (iRes.data || []).map(i => ({
+        incomingDuties: (iRes.data || []).map((i: any) => ({
           id: i.id,
           staffId: i.staff_id,
           date: i.date,
@@ -123,10 +129,11 @@ export const db = {
   },
 
   async upsertFlight(f: Flight) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('flights').upsert({
+    await client.from('flights').upsert({
       id: f.id, 
       user_id: session.user.id, 
       flight_number: f.flightNumber, 
@@ -141,10 +148,11 @@ export const db = {
   },
 
   async upsertStaff(s: Staff) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('staff').upsert({
+    await client.from('staff').upsert({
       id: s.id, 
       user_id: session.user.id, 
       name: s.name, 
@@ -164,10 +172,11 @@ export const db = {
   },
 
   async upsertShift(s: ShiftConfig) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('shifts').upsert({
+    await client.from('shifts').upsert({
       id: s.id, 
       user_id: session.user.id, 
       day: s.day, 
@@ -183,10 +192,11 @@ export const db = {
   },
 
   async upsertLeave(l: LeaveRequest) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('leave_requests').upsert({
+    await client.from('leave_requests').upsert({
       id: l.id,
       user_id: session.user.id,
       staff_id: l.staffId,
@@ -197,10 +207,11 @@ export const db = {
   },
 
   async upsertLeaves(leaves: LeaveRequest[]) {
-    if (!supabase || leaves.length === 0) return;
+    const client = supabase;
+    if (!client || leaves.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('leave_requests').upsert(
+    await client.from('leave_requests').upsert(
       leaves.map(l => ({
         id: l.id,
         user_id: session.user.id,
@@ -213,10 +224,11 @@ export const db = {
   },
 
   async upsertIncomingDuty(d: IncomingDuty) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('incoming_duties').upsert({
+    await client.from('incoming_duties').upsert({
       id: d.id,
       user_id: session.user.id,
       staff_id: d.staffId,
@@ -226,10 +238,11 @@ export const db = {
   },
 
   async upsertIncomingDuties(duties: IncomingDuty[]) {
-    if (!supabase || duties.length === 0) return;
+    const client = supabase;
+    if (!client || duties.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
-    await supabase.from('incoming_duties').upsert(
+    await client.from('incoming_duties').upsert(
       duties.map(d => ({
         id: d.id,
         user_id: session.user.id,
@@ -241,20 +254,21 @@ export const db = {
   },
 
   async savePrograms(programs: DailyProgram[]) {
-    if (!supabase || programs.length === 0) return;
+    const client = supabase;
+    if (!client || programs.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
 
     const datesToOverwrite = programs.map(p => p.dateString).filter(Boolean);
     
     if (datesToOverwrite.length > 0) {
-      await supabase.from('programs')
+      await client.from('programs')
         .delete()
         .eq('user_id', session.user.id)
         .in('date_string', datesToOverwrite);
     }
 
-    await supabase.from('programs').insert(
+    await client.from('programs').insert(
       programs.map(p => ({
         user_id: session.user.id, 
         day: p.day, 
@@ -265,9 +279,9 @@ export const db = {
     );
   },
 
-  async deleteFlight(id: string) { if (supabase) await supabase.from('flights').delete().eq('id', id); },
-  async deleteStaff(id: string) { if (supabase) await supabase.from('staff').delete().eq('id', id); },
-  async deleteShift(id: string) { if (supabase) await supabase.from('shifts').delete().eq('id', id); },
-  async deleteLeave(id: string) { if (supabase) await supabase.from('leave_requests').delete().eq('id', id); },
-  async deleteIncomingDuty(id: string) { if (supabase) await supabase.from('incoming_duties').delete().eq('id', id); }
+  async deleteFlight(id: string) { const client = supabase; if (client) await client.from('flights').delete().eq('id', id); },
+  async deleteStaff(id: string) { const client = supabase; if (client) await client.from('staff').delete().eq('id', id); },
+  async deleteShift(id: string) { const client = supabase; if (client) await client.from('shifts').delete().eq('id', id); },
+  async deleteLeave(id: string) { const client = supabase; if (client) await client.from('leave_requests').delete().eq('id', id); },
+  async deleteIncomingDuty(id: string) { const client = supabase; if (client) await client.from('incoming_duties').delete().eq('id', id); }
 };

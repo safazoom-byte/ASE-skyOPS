@@ -14,9 +14,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      'process.env.API_KEY': JSON.stringify(apiKey),
-      'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey)
+      'process.env.API_KEY': JSON.stringify(apiKey || ''),
+      'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl || ''),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey || '')
     },
     build: {
       target: 'esnext',
@@ -28,7 +28,6 @@ export default defineConfig(({ mode }) => {
         output: {
           entryFileNames: `assets/[name].[hash]-${Date.now()}.js`,
           chunkFileNames: `assets/[name].[hash]-${Date.now()}.js`,
-          // Fix: removed typo 'Mont' and ensured proper placeholder string for assets
           assetFileNames: `assets/[name].[hash]-${Date.now()}.[ext]`,
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
