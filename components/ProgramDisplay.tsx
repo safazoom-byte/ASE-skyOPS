@@ -98,7 +98,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     }
     const history = incomingDuties
       .filter(d => d.staffId === staffId && d.date < currentProgramDate)
-      .sort((a, b) => b.date.localeCompare(a.date) || b.shiftEndTime.localeCompare(a.shiftEndTime));
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.shiftEndTime || '').localeCompare(a.shiftEndTime || ''));
     if (history.length > 0) return new Date(`${history[0].date}T${history[0].shiftEndTime}:00`);
     return null;
   };
@@ -184,7 +184,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          if (category === 'DAYS OFF') count = stat.off;
          else if (category === 'ROSTER LEAVE') count = 7; 
          else if (category === 'ANNUAL LEAVE') count = stat.annualLeave;
-         else if (category === 'STANDBY (RESERVE)') count = stat.standby || 7;
+         else if (category === 'STANDBY (RESERVE)') count = stat.standby;
          if (registryGroups[category]) {
              let displayStr = s.initials;
              if (category !== 'RESTING (POST-DUTY)') displayStr += ` (${count})`;
@@ -197,11 +197,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r || r === 'NIL' || r === 'GENERAL' || r === 'AGENT') return '';
-    if (r.includes('SHIFT LEADER')) return 'SL';
-    if (r.includes('LOAD CONTROL')) return 'LC';
-    if (r.includes('RAMP')) return 'RMP';
-    if (r.includes('OPERATIONS') || r === 'OPS') return 'OPS';
-    if (r.includes('LOST')) return 'LF';
+    if (r === 'SHIFT LEADER') return 'SL';
+    if (r === 'LOAD CONTROL') return 'LC';
+    if (r === 'RAMP') return 'RMP';
+    if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
+    if (r === 'LOST AND FOUND') return 'LF';
     return r;
   };
 
@@ -237,7 +237,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const personnelStr = shiftsMap[shiftId].map(a => {
           const st = getStaffById(a.staffId);
           const roleLabel = formatRoleLabel(a.role);
-          return `${st?.initials || '??'}${roleLabel ? ' ' + roleLabel : ''}`;
+          const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
+          const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
+          return `${st?.initials || '??'}${roleLabel ? ' ' + roleLabel : ''}${restStr}`;
         }).join(' | ');
         return [(i+1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${shiftsMap[shiftId].length} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
       });
@@ -313,74 +315,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return `DAY ${program.day + 1}`;
   };
 
-  const runAuditAnalysis = () => {
-    const violations: string[] = [];
-    filteredPrograms.forEach(p => {
-       const shiftsMap: Record<string, Assignment[]> = {};
-       p.assignments.forEach(a => {
-         if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
-         shiftsMap[a.shiftId || ''].push(a);
-       });
-       shifts.forEach(s => {
-          if (p.day !== s.day) return; 
-          const assigned = shiftsMap[s.id] || [];
-          const requiredStaff: number = Number(s.minStaff) || 0;
-          if (assigned.length < requiredStaff) violations.push(`SHIFT ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${requiredStaff - assigned.length} staff (Has ${assigned.length}, Need ${requiredStaff})`);
-          if (s.roleCounts) {
-             Object.entries(s.roleCounts).forEach(([reqRole, value]) => {
-                const count = Number(value); if (!count) return;
-                let targetCode = '';
-                if (reqRole === 'Shift Leader') targetCode = 'SL';
-                else if (reqRole === 'Load Control') targetCode = 'LC';
-                else if (reqRole === 'Ramp') targetCode = 'RMP';
-                else if (reqRole === 'Operations') targetCode = 'OPS';
-                else if (reqRole === 'Lost and Found') targetCode = 'LF';
-                const hasRole = assigned.filter(a => {
-                    const r = (a.role || '').toUpperCase();
-                    return r === targetCode || (r === 'SL+LC' && (targetCode === 'SL' || targetCode === 'LC')) || (r === 'LC+OPS' && (targetCode === 'LC' || targetCode === 'OPS')) || (targetCode && r.includes(targetCode));
-                }).length;
-                if (hasRole < count) violations.push(`ROLE ERROR: ${p.dateString} @ ${s.pickupTime} - Missing ${count - hasRole} ${reqRole} (Has ${hasRole}, Need ${count})`);
-             });
-          }
-       });
-    });
-    staff.forEach(s => {
-       const st = staffStats[s.id];
-       if (s.type === 'Local' && st.work > 5) violations.push(`CONTRACT ERROR: ${s.initials} (Local) working ${st.work} days. MAX limit is 5 days.`);
-       else if (s.type === 'Roster' && st.work > st.rosterPotential) violations.push(`CONTRACT ERROR: ${s.initials} (Roster) working ${st.work} days. Contract limits allow only ${st.rosterPotential} days.`);
-    });
-    filteredPrograms.forEach(p => {
-       p.assignments.forEach(a => {
-          const sh = getShiftById(a.shiftId);
-          if (sh) {
-             const rest = calculateRestHours(a.staffId, p.dateString!, sh.pickupTime);
-             if (rest !== null && rest < minRestHours) {
-                const st = getStaffById(a.staffId);
-                violations.push(`REST ERROR: ${p.dateString} - ${st ? st.initials : 'Unknown'} has only ${rest.toFixed(1)}h rest (Min required: ${minRestHours}h).`);
-             }
-          }
-       });
-    });
-    return violations;
-  };
-
-  const handleOpenAudit = () => {
-    const v = runAuditAnalysis();
-    if (v.length === 0) { alert("Logic Audit Passed: No violations detected."); return; }
-    setAuditViolations(v); setSelectedViolationIndices(new Set(v.map((_, i) => i))); setAuditModalOpen(true);
-  };
-
-  const handleExecuteRepair = async () => {
-    if (isRepairing) return;
-    const violationsToFix = auditViolations.filter((_, i) => selectedViolationIndices.has(i));
-    if (violationsToFix.length === 0) { setAuditModalOpen(false); return; }
-    setAuditModalOpen(false); setIsRepairing(true);
-    try {
-        const result = await repairProgramWithAI(filteredPrograms, violationsToFix.join('\n'), { flights, staff, shifts, programs: filteredPrograms, leaveRequests, incomingDuties }, { minRestHours });
-        if (onUpdatePrograms) onUpdatePrograms(result.programs);
-    } catch (e: any) { alert("Repair Failed: " + e.message); } finally { setIsRepairing(false); }
-  };
-
   return (
     <div className="space-y-8 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col xl:flex-row items-center justify-between gap-8 relative overflow-hidden">
@@ -396,9 +330,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
-           <button onClick={handleOpenAudit} disabled={isRepairing} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group disabled:opacity-50 disabled:cursor-not-allowed">
+           <button onClick={() => setIsRepairing(true)} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group">
              {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} className="group-hover:animate-pulse" />}
-             <span className="text-[10px] font-black uppercase tracking-widest italic">{isRepairing ? 'Running AI Audit...' : 'Start Audit'}</span>
+             <span className="text-[10px] font-black uppercase tracking-widest italic">Start Audit</span>
            </button>
            <button onClick={exportPDF} className="flex-1 px-8 py-5 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg">
              <Printer size={18} />
@@ -454,10 +388,17 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                    {group.map(a => {
                                       const st = getStaffById(a.staffId);
                                       const roleCode = formatRoleCode(a.role || '');
+                                      const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
+                                      const restViolated = rest !== null && rest < (minRestHours || 12);
                                       return (
-                                        <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 ${roleCode ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-100 border-transparent text-slate-500'}`}>
+                                        <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 transition-all hover:scale-105 ${roleCode ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
                                            <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials}</span>
                                            {roleCode && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{roleCode}</span>}
+                                           {rest !== null && (
+                                              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[7px] font-black ${restViolated ? 'bg-rose-100 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                                                <Timer size={8} /> {rest.toFixed(1)}H
+                                              </div>
+                                           )}
                                         </div>
                                       )
                                    })}
@@ -469,12 +410,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                  </div>
 
                  <div className="mt-4 pt-6 border-t border-slate-100">
-                    <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absence & Rest Registry</h5>
-                    <div className="flex flex-wrap gap-4">
+                    <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><CircleAlert size={12} className="text-slate-300"/> Absence & Rest Registry</h5>
+                    <div className="flex flex-wrap gap-8">
                        {Object.entries(getFullRegistryForDay(program)).map(([cat, agents]) => (
                           agents.length > 0 && (
                             <div key={cat} className="space-y-1">
-                               <span className="text-[8px] font-bold text-slate-300 uppercase block">{cat}</span>
+                               <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter block">{cat}</span>
                                <div className="text-[10px] font-black text-slate-600 uppercase leading-relaxed max-w-xs">{agents.join(', ')}</div>
                             </div>
                           )

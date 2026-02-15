@@ -27,16 +27,16 @@ import {
   Shield,
   Settings,
   Cloud,
-  Layers
+  Layers,
+  Timer
 } from 'lucide-react';
-import './style.css'; // Import global styles for bundler
+import './style.css'; 
 
 import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
 import { FlightManager } from './components/FlightManager';
 import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
 import { ProgramDisplay } from './components/ProgramDisplay';
-import { ProgramScanner } from './components/ProgramScanner';
 import { ProgramChat } from './components/ProgramChat';
 import { GithubSync } from './components/GithubSync';
 import { Auth } from './components/Auth';
@@ -50,41 +50,15 @@ const UI_PREF_KEYS = {
   DURATION: 'skyops_pref_duration',
 };
 
-// High-fidelity SVG Logo mirroring the user-provided eagle/shield design
 export const SkyOpsLogo: React.FC<{ size?: number; className?: string }> = ({ size = 40, className = "" }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 100 100" 
-    className={className} 
-    fill="none" 
-    xmlns="http://www.w3.org/2000/svg"
-  >
+  <svg width={size} height={size} viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <linearGradient id="shieldGrad" x1="0" x2="100">
-        <stop offset="0%" stopColor="#0a192f" />
-        <stop offset="100%" stopColor="#020617" />
-      </linearGradient>
-      <linearGradient id="eagleGrad" x1="20" y1="20" x2="80" y2="80">
-        <stop offset="0%" stopColor="#ffffff" />
-        <stop offset="50%" stopColor="#3b82f6" />
-        <stop offset="100%" stopColor="#1d4ed8" />
-      </linearGradient>
+      <linearGradient id="shieldGrad" x1="0" x2="100"><stop offset="0%" stopColor="#0a192f" /><stop offset="100%" stopColor="#020617" /></linearGradient>
+      <linearGradient id="eagleGrad" x1="20" y1="20" x2="80" y2="80"><stop offset="0%" stopColor="#ffffff" /><stop offset="50%" stopColor="#3b82f6" /><stop offset="100%" stopColor="#1d4ed8" /></linearGradient>
     </defs>
-    <path 
-      d="M50 5C30 5 15 15 15 40C15 65 35 85 50 95C65 85 85 65 85 40C85 15 70 5 50 5Z" 
-      fill="url(#shieldGrad)" 
-      stroke="#3b82f6" 
-      strokeWidth="2"
-    />
-    <path 
-      d="M30 45C30 45 40 30 65 25C75 23 85 28 80 40C70 55 50 70 25 80C20 82 15 78 18 73L30 45Z" 
-      fill="url(#eagleGrad)" 
-    />
+    <path d="M50 5C30 5 15 15 15 40C15 65 35 85 50 95C65 85 85 65 85 40C85 15 70 5 50 5Z" fill="url(#shieldGrad)" stroke="#3b82f6" strokeWidth="2"/>
+    <path d="M30 45C30 45 40 30 65 25C75 23 85 28 80 40C70 55 50 70 25 80C20 82 15 78 18 73L30 45Z" fill="url(#eagleGrad)" />
     <path d="M40 38H55M42 45H60M44 52H52" stroke="#020617" strokeWidth="1.5" strokeLinecap="round" />
-    <circle cx="55" cy="38" r="1.5" fill="#3b82f6" />
-    <circle cx="60" cy="45" r="1.5" fill="#3b82f6" />
-    <circle cx="52" cy="52" r="1.5" fill="#3b82f6" />
   </svg>
 );
 
@@ -94,19 +68,10 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program'>('dashboard');
   const [cloudStatus, setCloudStatus] = useState<'connected' | 'offline' | 'unconfigured' | 'error'>('unconfigured');
   
-  const [startDate, setStartDate] = useState<string>(() => 
-    localStorage.getItem(UI_PREF_KEYS.START_DATE) || new Date().toISOString().split('T')[0]
-  );
-  const [programDuration, setProgramDuration] = useState<number>(() => 
-    parseInt(localStorage.getItem(UI_PREF_KEYS.DURATION) || '7')
-  );
-  const [endDate, setEndDate] = useState<string>(() => {
-    const saved = localStorage.getItem(UI_PREF_KEYS.END_DATE);
-    if (saved) return saved;
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().split('T')[0];
-  });
+  const [startDate, setStartDate] = useState<string>(() => localStorage.getItem(UI_PREF_KEYS.START_DATE) || new Date().toISOString().split('T')[0]);
+  const [programDuration, setProgramDuration] = useState<number>(() => parseInt(localStorage.getItem(UI_PREF_KEYS.DURATION) || '7'));
+  const [endDate, setEndDate] = useState<string>(() => localStorage.getItem(UI_PREF_KEYS.END_DATE) || new Date().toISOString().split('T')[0]);
+  const [minRestHours, setMinRestHours] = useState<number>(() => parseInt(localStorage.getItem(UI_PREF_KEYS.REST_HOURS) || '12'));
 
   const [flights, setFlights] = useState<Flight[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -117,53 +82,20 @@ const App: React.FC = () => {
   
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning', message: string }[]>([]);
-  const [minRestHours, setMinRestHours] = useState<number>(() => 
-    parseInt(localStorage.getItem(UI_PREF_KEYS.REST_HOURS) || '12')
-  );
-
   const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
 
+  // Incoming Duties Logic (Rest Log)
   const [incomingSelectedStaffIds, setIncomingSelectedStaffIds] = useState<string[]>([]);
   const [incomingHour, setIncomingHour] = useState('06');
   const [incomingMin, setIncomingMin] = useState('00');
   const [incomingDate, setIncomingDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [incomingSearchTerm, setIncomingSearchTerm] = useState('');
-  const [incomingSearchFocus, setIncomingSearchFocus] = useState(false);
 
+  // Leave Registry Logic (Off-Duty)
   const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
   const [quickLeaveDate, setQuickLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState('');
-  const [quickLeaveSearchFocus, setQuickLeaveSearchFocus] = useState(false);
-
-  const [isVisible, setIsVisible] = useState(true);
-  const lastScrollY = useRef(0);
-
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(error => {
-          console.error('Service Worker registration failed:', error);
-        });
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY < 100) setIsVisible(true);
-      else if (currentScrollY > lastScrollY.current) setIsVisible(false);
-      else setIsVisible(true);
-      lastScrollY.current = currentScrollY;
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   useEffect(() => {
     const start = new Date(startDate);
@@ -192,7 +124,7 @@ const App: React.FC = () => {
           setPrograms(cloudData.programs || []); setLeaveRequests(cloudData.leaveRequests || []);
           setIncomingDuties(cloudData.incomingDuties || []); setCloudStatus('connected');
         }
-      } catch (e) { if (mounted) setCloudStatus('error'); }
+      } catch (e: any) { if (mounted) setCloudStatus('error'); }
     };
     const checkAuth = async () => {
       if (!supabase) { setIsInitializing(false); setCloudStatus('unconfigured'); return; }
@@ -204,126 +136,158 @@ const App: React.FC = () => {
           else setCloudStatus('offline');
           setIsInitializing(false);
         }
-      } catch (e) { if (mounted) { setCloudStatus('error'); setIsInitializing(false); } }
+      } catch (e: any) { if (mounted) { setCloudStatus('error'); setIsInitializing(false); } }
     };
     checkAuth();
-    const unsubscribe = auth.onAuthStateChange((s) => {
-      if (mounted) {
-        setSession(s);
-        if (s) syncCloudData();
-        else {
-          setFlights([]); setStaff([]); setShifts([]); setPrograms([]); setLeaveRequests([]); setIncomingDuties([]);
-          setCloudStatus('offline');
-        }
-      }
-    });
-    return () => { mounted = false; unsubscribe(); };
+    return () => { mounted = false; };
   }, []);
 
   const confirmGenerateProgram = async () => {
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
-    const activeFlights = flights.filter(f => f.date >= startDate && f.date <= endDate);
     const eligibleStaff = staff.filter(s => {
       if (s.type === 'Local') return true;
-      if (!s.workFromDate || !s.workToDate) return true;
-      return (s.workFromDate <= endDate && s.workToDate >= startDate);
+      return (!s.workFromDate || !s.workToDate) || (s.workFromDate <= endDate && s.workToDate >= startDate);
     });
-    if (activeShifts.length === 0) { setError(`No shifts found for period.`); setShowConfirmDialog(false); return; }
-    setShowConfirmDialog(false); setIsGenerating(true); setError(null);
+    if (activeShifts.length === 0) { alert(`No shifts found for period.`); return; }
+    setIsGenerating(true);
     try {
-      const result = await generateAIProgram(
-        { flights: activeFlights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, 
-        "", { numDays: programDuration, minRestHours, startDate }
-      );
+      const result = await generateAIProgram({ flights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, "", { numDays: programDuration, minRestHours, startDate });
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs); 
       setActiveTab('program'); 
-    } catch (err: any) { setError(err.message || "Engine failure."); } finally { setIsGenerating(false); }
+    } catch (err: any) { alert(err.message || "Engine failure."); } finally { setIsGenerating(false); }
   };
 
+  // Improved Group Feed Logic for Rest Log
   const handleIncomingSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    if (val.includes(' ') || val.includes(',')) {
-      const tokens = val.split(/[\s,]+/);
+    // Check if user is typing or pasting a space-delimited list
+    if (val.includes(' ') || val.includes(',') || val.includes('\n')) {
+      const tokens = val.split(/[\s,\n]+/);
       const staffMap = new Map<string, string>(staff.map(s => [s.initials.toUpperCase(), s.id]));
       const idsToAdd: string[] = [];
-      const unmatched: string[] = [];
+      const remaining: string[] = [];
+      
       tokens.forEach(token => {
         if (!token) return;
+        // Parse "MS-Atz" format: take "MS"
         const initials = token.split('-')[0].trim().toUpperCase();
         const mid = staffMap.get(initials);
-        if (mid) idsToAdd.push(mid); else unmatched.push(token);
+        if (mid) {
+          idsToAdd.push(mid);
+        } else {
+          remaining.push(token);
+        }
       });
+      
       if (idsToAdd.length > 0) {
         setIncomingSelectedStaffIds(prev => Array.from(new Set([...prev, ...idsToAdd])));
-        setIncomingSearchTerm(unmatched.join(' '));
+        setIncomingSearchTerm(remaining.join(' '));
         return;
       }
     }
     setIncomingSearchTerm(val);
   };
 
-  const addIncomingDuties = async () => {
-    const finalTime = `${incomingHour}:${incomingMin}`;
-    if (incomingSelectedStaffIds.length === 0 || !incomingDate) return;
-    const newDuties: IncomingDuty[] = incomingSelectedStaffIds.map(sid => ({
-      id: Math.random().toString(36).substr(2, 9),
-      staffId: sid, date: incomingDate, shiftEndTime: finalTime
-    }));
-    const current = [...incomingDuties];
-    newDuties.forEach(nd => {
-      const idx = current.findIndex(cd => cd.staffId === nd.staffId && cd.date === nd.date);
-      if (idx !== -1) current[idx] = nd; else current.push(nd);
-    });
-    setIncomingDuties(current);
-    if (supabase) await db.upsertIncomingDuties(newDuties);
-    setIncomingSelectedStaffIds([]); setIncomingSearchTerm('');
+  // Improved Group Feed Logic for Off-Duty Registry
+  const handleQuickLeaveSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (val.includes(' ') || val.includes(',') || val.includes('\n')) {
+      const tokens = val.split(/[\s,\n]+/);
+      const staffMap = new Map<string, string>(staff.map(s => [s.initials.toUpperCase(), s.id]));
+      const idsToAdd: string[] = [];
+      const remaining: string[] = [];
+      
+      tokens.forEach(token => {
+        if (!token) return;
+        const initials = token.split('-')[0].trim().toUpperCase();
+        const mid = staffMap.get(initials);
+        if (mid) {
+          idsToAdd.push(mid);
+        } else {
+          remaining.push(token);
+        }
+      });
+      
+      if (idsToAdd.length > 0) {
+        setQuickLeaveStaffIds(prev => Array.from(new Set([...prev, ...idsToAdd])));
+        setQuickLeaveSearchTerm(remaining.join(' '));
+        return;
+      }
+    }
+    setQuickLeaveSearchTerm(val);
   };
 
-  const navigationTabs = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { id: 'flights', icon: Activity, label: 'Flights' },
-    { id: 'staff', icon: Users, label: 'Personnel' },
-    { id: 'shifts', icon: Clock, label: 'Shifts' },
-    { id: 'program', icon: CalendarDays, label: 'Program' },
-  ];
+  const addIncomingDuties = async () => {
+    const finalTime = `${incomingHour}:${incomingMin}`;
+    if (incomingSelectedStaffIds.length === 0) return;
+    
+    // Create new duty objects for each selected staff ID
+    const newDuties: IncomingDuty[] = incomingSelectedStaffIds.map(sid => ({ 
+      id: Math.random().toString(36).substr(2, 9), 
+      staffId: sid, 
+      date: incomingDate, 
+      shiftEndTime: finalTime 
+    }));
+    
+    setIncomingDuties([...incomingDuties, ...newDuties]);
+    if (supabase) await db.upsertIncomingDuties(newDuties);
+    
+    setIncomingSelectedStaffIds([]);
+    setIncomingSearchTerm('');
+  };
+
+  const addQuickLeave = async () => {
+    if (quickLeaveStaffIds.length === 0) return;
+    
+    const newLeaves: LeaveRequest[] = quickLeaveStaffIds.map(sid => ({ 
+      id: Math.random().toString(36).substr(2, 9), 
+      staffId: sid, 
+      startDate: quickLeaveDate, 
+      endDate: quickLeaveDate, 
+      type: quickLeaveType 
+    }));
+    
+    setLeaveRequests([...leaveRequests, ...newLeaves]);
+    if (supabase) await db.upsertLeaves(newLeaves);
+    
+    setQuickLeaveStaffIds([]);
+    setQuickLeaveSearchTerm('');
+  };
 
   if (isInitializing) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="text-blue-500 animate-spin" size={64} /></div>;
   if (!session && supabase) return <Auth />;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className={`sticky top-0 z-[100] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between transition-transform duration-500 ${isVisible ? 'translate-y-0' : '-translate-y-full'}`}>
+      <header className="sticky top-0 z-[100] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-4">
-           <div className="relative"><div className="absolute inset-0 bg-blue-500/20 blur-lg rounded-xl"></div><SkyOpsLogo size={42} className="relative z-10" /></div>
+           <SkyOpsLogo size={42} />
            <div>
              <h1 className="text-base md:text-lg font-black italic text-slate-900 uppercase leading-none">SkyOPS <span className="text-blue-600 font-light">AI</span></h1>
-             <div className="flex items-center gap-2 mt-1.5">
-               <div className={`w-2 h-2 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
-               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{cloudStatus === 'connected' ? 'AI Sync Active' : 'Offline Engine'}</span>
-             </div>
+             <div className="flex items-center gap-2 mt-1.5"><div className={`w-2 h-2 rounded-full ${cloudStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div><span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">{cloudStatus === 'connected' ? 'AI Sync Active' : 'Offline Mode'}</span></div>
            </div>
         </div>
         <div className="flex items-center gap-4">
-          <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
-            {navigationTabs.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab.id ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab.label}</button>
-            ))}
-          </nav>
-          <GithubSync data={{ flights, staff, shifts, programs, leaveRequests }} />
-          {supabase && session && <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>}
+           <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
+              {['dashboard', 'flights', 'staff', 'shifts', 'program'].map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab}</button>
+              ))}
+           </nav>
+           <GithubSync data={{ flights, staff, shifts, programs, leaveRequests }} />
+           {supabase && <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>}
         </div>
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
         {activeTab === 'dashboard' && (
-          <div className="space-y-6 md:space-y-8">
+          <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500">
              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
                  {[
                    { label: 'Air Traffic', val: flights.length, icon: Plane, color: 'text-blue-600', bg: 'bg-blue-50' },
                    { label: 'Personnel', val: staff.length, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50' },
                    { label: 'Duty Slots', val: shifts.length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-50' },
-                   { label: 'AI Efficiency', val: `${stationHealth}%`, icon: Zap, color: 'text-blue-400', bg: 'bg-slate-900' }
+                   { label: 'AI Health', val: `${stationHealth}%`, icon: Zap, color: 'text-blue-400', bg: 'bg-slate-900' }
                  ].map((stat, i) => (
                    <div key={i} className={`bg-white p-4 md:p-8 rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 md:h-40 ${stat.bg === 'bg-slate-900' ? 'bg-slate-900 text-white' : ''}`}>
                       <div className={`w-8 h-8 md:w-10 md:h-10 ${stat.bg} rounded-lg md:rounded-xl flex items-center justify-center ${stat.color}`}><stat.icon size={16} /></div>
@@ -331,76 +295,118 @@ const App: React.FC = () => {
                    </div>
                  ))}
              </div>
+
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 <div className="lg:col-span-2 space-y-6 md:space-y-8">
-                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm overflow-visible">
-                      <div className="flex items-center gap-4 mb-6 md:mb-8">
-                          <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-50 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-500"><Moon size={20} /></div>
-                          <div><h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Staff Rest Log</h4><p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Fatigue Prevention Engine</p></div>
+                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
+                      <div className="flex items-center gap-4 mb-8">
+                          <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-500"><Moon size={24} /></div>
+                          <div><h4 className="text-xl font-black italic uppercase text-slate-900 leading-none">Staff Rest Log</h4><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Fatigue Prevention Engine</p></div>
                       </div>
-                      <div className="flex flex-col gap-6">
-                          <div className="relative group">
-                              <label className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2 block ml-1 flex justify-between items-center">
-                                <span>Personnel Selection</span>
-                                {incomingSelectedStaffIds.length > 0 && <button onClick={() => setIncomingSelectedStaffIds([])} className="text-[7px] text-slate-400 hover:text-rose-500 flex items-center gap-1"><Eraser size={8}/> Clear Selection</button>}
+                      <div className="space-y-6">
+                          <div className="relative">
+                              <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-2">
+                                <Zap size={10} className="text-blue-500"/> Group Personnel Feed (Paste List)
                               </label>
-                              <div className={`w-full min-h-[56px] px-4 py-3 bg-white rounded-xl md:rounded-2xl border-2 flex flex-wrap items-center gap-2 transition-colors ${incomingSearchFocus ? 'border-blue-600' : 'border-slate-100'}`}>
-                                  <Search size={18} className="text-slate-300" />
+                              <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center">
                                   {incomingSelectedStaffIds.map(id => (
-                                      <span key={id} className="px-2 py-1 bg-slate-950 text-white rounded-lg text-[9px] font-black uppercase flex items-center gap-2 border border-white/10 animate-in zoom-in-95">
+                                      <span key={id} className="px-2 py-1 bg-slate-950 text-white rounded-lg text-[9px] font-black uppercase flex items-center gap-2">
                                           {staff.find(st => st.id === id)?.initials}
-                                          <button onClick={() => setIncomingSelectedStaffIds(p => p.filter(x => x !== id))} className="hover:text-rose-500"><X size={12}/></button>
+                                          <button onClick={() => setIncomingSelectedStaffIds(prev => prev.filter(x => x !== id))}><X size={12}/></button>
                                       </span>
                                   ))}
-                                  <input type="text" className="flex-1 bg-transparent text-sm font-bold outline-none py-1 min-w-[120px]" placeholder="Search initials or paste 'MS-Atz'..." value={incomingSearchTerm} onChange={handleIncomingSearchChange} onFocus={() => setIncomingSearchFocus(true)} onBlur={() => setTimeout(() => setIncomingSearchFocus(false), 200)} />
+                                  <input 
+                                    type="text" 
+                                    className="flex-1 bg-transparent text-sm font-bold outline-none" 
+                                    placeholder="Paste initials like: MS-Atz ML-atz..." 
+                                    value={incomingSearchTerm} 
+                                    onChange={handleIncomingSearchChange} 
+                                  />
                               </div>
                           </div>
-                          <div className="flex flex-col sm:flex-row gap-4">
-                               <div className="flex-1 space-y-2">
-                                  <label className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em] ml-1">Release Date</label>
-                                  <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm outline-none focus:border-blue-600 transition-colors" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                               <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
+                               <div className="flex gap-2">
+                                  <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-2" value={incomingHour} onChange={e => setIncomingHour(e.target.value)}>
+                                      {Array.from({length: 24}).map((_, i) => <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}</option>)}
+                                  </select>
+                                  <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-2" value={incomingMin} onChange={e => setIncomingMin(e.target.value)}>
+                                      {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
                                </div>
-                               <div className="flex-[0.5] space-y-2">
-                                  <label className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em] ml-1">Release Time</label>
-                                  <div className="flex gap-2">
-                                      <select className="h-[56px] w-full bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm px-2 outline-none appearance-none text-center" value={incomingHour} onChange={e => setIncomingHour(e.target.value)}>
-                                          {Array.from({length: 24}).map((_, i) => <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}</option>)}
-                                      </select>
-                                      <select className="h-[56px] w-full bg-slate-50 border-2 border-slate-100 rounded-xl font-black text-sm px-2 outline-none appearance-none text-center" value={incomingMin} onChange={e => setIncomingMin(e.target.value)}>
-                                          {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
-                                      </select>
-                                  </div>
-                               </div>
-                               <div className="flex items-end"><button onClick={() => addIncomingDuties()} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] w-full sm:px-10 bg-slate-950 text-white rounded-xl font-black uppercase italic tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg active:scale-95"><Lock size={16}/> Lock Log</button></div>
+                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2"><Lock size={16}/> Bulk Lock Registry</button>
                           </div>
                       </div>
                   </div>
-                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm overflow-visible">
-                     <div className="flex items-center gap-4 mb-6 md:mb-8"><div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-50 rounded-xl md:rounded-2xl flex items-center justify-center text-indigo-500"><Briefcase size={20} /></div><div><h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">Off-Duty Registry</h4><p className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Manual Absence Registry</p></div></div>
-                     {/* ...form content... */}
+
+                  <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
+                     <div className="flex items-center gap-4 mb-8">
+                        <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-500"><Briefcase size={24} /></div>
+                        <div><h4 className="text-xl font-black italic uppercase text-slate-900 leading-none">Off-Duty Registry</h4><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Manual Absence Registry</p></div>
+                     </div>
+                     <div className="space-y-6">
+                        <div className="relative">
+                            <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-2">
+                               <Zap size={10} className="text-indigo-500"/> Group Personnel Feed
+                            </label>
+                            <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center">
+                                {quickLeaveStaffIds.map(id => (
+                                    <span key={id} className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase flex items-center gap-2">
+                                        {staff.find(st => st.id === id)?.initials}
+                                        <button onClick={() => setQuickLeaveStaffIds(prev => prev.filter(x => x !== id))}><X size={12}/></button>
+                                    </span>
+                                ))}
+                                <input 
+                                  type="text" 
+                                  className="flex-1 bg-transparent text-sm font-bold outline-none" 
+                                  placeholder="Search or paste group initials..." 
+                                  value={quickLeaveSearchTerm} 
+                                  onChange={handleQuickLeaveSearchChange} 
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                           <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)}/>
+                           <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-4 outline-none" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
+                              <option value="Day off">Day off</option>
+                              <option value="Annual leave">Annual leave</option>
+                              <option value="Sick leave">Sick leave</option>
+                              <option value="Roster leave">Roster leave</option>
+                           </select>
+                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2"><Plus size={16}/> Add Group Log</button>
+                        </div>
+                     </div>
                   </div>
                 </div>
-                <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-8 md:gap-10">
-                   <div className="flex items-center gap-4"><div className="w-10 h-10 md:w-12 md:h-12 bg-slate-950 rounded-xl md:rounded-2xl flex items-center justify-center text-blue-500 shadow-xl"><Terminal size={20} /></div><h4 className="text-lg md:text-xl font-black italic uppercase text-slate-900 leading-none">AI Command Control</h4></div>
-                   <div className="space-y-6 md:space-y-8">
+
+                <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-10">
+                   <div className="flex items-center gap-4"><div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-blue-500 shadow-xl"><Terminal size={24} /></div><h4 className="text-xl font-black italic uppercase text-slate-900 leading-none">AI Command Control</h4></div>
+                   <div className="space-y-8">
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
-                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] block">Program Commencement</label>
-                        <div className="relative group"><CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-600" size={20} /><input type="date" className="w-full pl-12 pr-4 py-4 bg-white border-2 border-slate-100 rounded-xl font-black text-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 transition-all shadow-sm" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+                        <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest block">Program Commencement</label>
+                        <input type="date" className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:border-blue-600 transition-all" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center italic mt-2">Target Period: {startDate} > {endDate}</div>
                      </div>
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                        <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] mb-4 block">Period Duration</label>
+                        <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block">Period Duration</label>
                         <input type="range" min="1" max="31" value={programDuration} onChange={(e) => setProgramDuration(parseInt(e.target.value))} className="w-full accent-blue-600 h-1.5" /><p className="text-center font-black mt-3 text-blue-600 text-sm italic tracking-widest">{programDuration} DAYS</p>
                      </div>
+                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                        <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block flex items-center gap-2"><Timer size={14} className="text-indigo-500"/> Rest Threshold</label>
+                        <input type="range" min="8" max="24" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value))} className="w-full accent-indigo-600 h-1.5" /><p className="text-center font-black mt-3 text-indigo-600 text-sm italic tracking-widest">{minRestHours}H</p>
+                     </div>
                    </div>
-                   <button onClick={() => setShowConfirmDialog(true)} className="w-full py-7 md:py-10 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-3"><Sparkles size={22} className="text-blue-400" /> Build AI Program</button>
-                   {isGenerating && <div className="flex flex-col items-center gap-2 mt-4"><Loader2 className="animate-spin text-blue-600"/><span className="text-[8px] font-black uppercase tracking-widest text-blue-600">AI Thinking Budget: 32768...</span></div>}
+                   <button onClick={confirmGenerateProgram} disabled={isGenerating} className="w-full py-8 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
+                     {isGenerating ? <Loader2 size={24} className="animate-spin" /> : <Sparkles size={24} className="text-blue-400" />}
+                     {isGenerating ? 'AI Analysis...' : 'Build AI Program'}
+                   </button>
                 </div>
              </div>
           </div>
         )}
-        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} onOpenScanner={() => {setScannerTarget('flights'); setIsScannerOpen(true);}} />}
-        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} onClearAll={async () => { for (const s of staff) { await db.deleteStaff(s.id); } setStaff([]); }} defaultMaxShifts={5} onOpenScanner={() => {setScannerTarget('staff'); setIsScannerOpen(true);}} />}
-        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} onOpenScanner={() => {setScannerTarget('shifts'); setIsScannerOpen(true);}} />}
+        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} />}
+        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} />}
+        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} />}
         {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} minRestHours={minRestHours} onUpdatePrograms={async (updated) => { setPrograms(updated); if (supabase) await db.savePrograms(updated); }} />}
       </main>
       <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={setPrograms} />

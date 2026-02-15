@@ -88,26 +88,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER v8.0
+    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER v8.1
     OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### 1. ASSIGNMENT ROLE PROTOCOL
-    - **SPECIALIST ROLES**: You MUST first fill the requested roles for "Shift Leader", "Load Control", "Ramp", "Operations", "Lost and Found" using the staff skills.
-    - **GENERAL HEADCOUNT**: If specialist requirements are met but the shift still needs more people (up to minStaff/maxStaff), assign additional staff using the role: "GENERAL".
-    - **FORMATTING**: Use codes "SL", "LC", "RMP", "OPS", "LF" for specialists. Combined skills like "SL+LC" are encouraged for efficiency.
-    - **CRITICAL**: Staff labeled "GENERAL" will display initials only. Staff with specialist codes will show roles.
+    ### 1. ASSIGNMENT PROTOCOL
+    - **SPECIALISTS**: Fill requested roles for "SL", "LC", "RMP", "OPS", "LF" first. Use codes like "SL", "LC" or "SL+LC".
+    - **HEADCOUNT**: Fill remaining staff requirements up to minStaff/maxStaff using role: "GENERAL". 
+    - **IMPORTANT**: Staff assigned as "GENERAL" will be listed by initials only. Specialists show roles.
 
-    ### 2. STAFFING LIMITS & CONTRACTS
-    - **LOCAL STAFF**: Mandatory 5 days work / 2 days off pattern.
-    - **ROSTER STAFF**: Strictly check 'workFromDate' and 'workToDate'. Do NOT assign them if the current date is outside their period.
-    - **REST**: Minimum ${config.minRestHours}h between release and next pickup.
+    ### 2. CONSTRAINTS
+    - **LOCAL STAFF**: Max 5 days work / 2 days off.
+    - **ROSTER STAFF**: MUST ONLY work within their contract dates ('workFromDate' to 'workToDate').
+    - **REST**: Min ${config.minRestHours}h between duties.
 
     STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
     - SHIFTS: ${JSON.stringify(data.shifts)}
     - FLIGHTS: ${JSON.stringify(data.flights)}
-    - PREVIOUS DUTIES: ${JSON.stringify(data.incomingDuties)}
-    - ABSENCE: ${JSON.stringify(data.leaveRequests)}
+    - REST LOG: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
     OUTPUT: JSON matching ROSTER_SCHEMA.
   `;
@@ -196,7 +195,7 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v8.0
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v8.1
     OBJECTIVE: Fix violations in the roster below.
 
     ### CRITICAL RULES:
