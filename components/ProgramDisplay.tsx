@@ -31,7 +31,13 @@ import {
   Timer,
   Zap,
   Loader2,
-  Clock
+  Clock,
+  X,
+  AlertTriangle,
+  Hammer,
+  CheckSquare,
+  Square,
+  AlertCircle
 } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
@@ -52,6 +58,9 @@ interface Props {
 
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, onUpdatePrograms, stationHealth = 100, alerts = [], minRestHours = 12 }) => {
   const [isRepairing, setIsRepairing] = useState(false);
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [auditViolations, setAuditViolations] = useState<string[]>([]);
+  const [selectedViolationIndices, setSelectedViolationIndices] = useState<Set<number>>(new Set());
   
   const filteredPrograms = useMemo(() => {
     if (!Array.isArray(programs)) return [];
@@ -218,9 +227,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       return registryGroups;
   };
 
-  const handleAutoRepair = async () => {
-    if (isRepairing) return;
-    
+  const runAuditAnalysis = () => {
     // Perform Deep Audit
     const violations: string[] = [];
     
@@ -305,18 +312,48 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
        });
     });
 
-    if (violations.length === 0) {
-       alert("Logic Audit Passed: No violations detected.");
-       return;
+    return violations;
+  };
+
+  const handleOpenAudit = () => {
+    const v = runAuditAnalysis();
+    if (v.length === 0) {
+      alert("Logic Audit Passed: No violations detected.");
+      return;
+    }
+    setAuditViolations(v);
+    // Select all by default
+    setSelectedViolationIndices(new Set(v.map((_, i) => i)));
+    setAuditModalOpen(true);
+  };
+
+  const toggleViolationSelection = (index: number) => {
+    const newSet = new Set(selectedViolationIndices);
+    if (newSet.has(index)) {
+        newSet.delete(index);
+    } else {
+        newSet.add(index);
+    }
+    setSelectedViolationIndices(newSet);
+  };
+
+  const handleExecuteRepair = async () => {
+    if (isRepairing) return;
+    
+    // Filter violations based on user selection
+    const violationsToFix = auditViolations.filter((_, i) => selectedViolationIndices.has(i));
+    
+    if (violationsToFix.length === 0) {
+        setAuditModalOpen(false);
+        return;
     }
 
-    if (!confirm(`Found ${violations.length} violations:\n\n${violations.slice(0, 5).join('\n')}\n...\n\nProceed with AI Surgical Repair?`)) return;
-
+    setAuditModalOpen(false);
     setIsRepairing(true);
     try {
         const result = await repairProgramWithAI(
           filteredPrograms, 
-          violations.join('\n'), 
+          violationsToFix.join('\n'), 
           { flights, staff, shifts, programs: filteredPrograms, leaveRequests, incomingDuties },
           { minRestHours }
         );
@@ -573,9 +610,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
-           <button onClick={handleAutoRepair} disabled={isRepairing} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group disabled:opacity-50 disabled:cursor-not-allowed">
+           <button onClick={handleOpenAudit} disabled={isRepairing} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group disabled:opacity-50 disabled:cursor-not-allowed">
              {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} className="group-hover:animate-pulse" />}
-             <span className="text-[10px] font-black uppercase tracking-widest italic">{isRepairing ? 'Running AI Audit...' : 'Full Repair (100%)'}</span>
+             <span className="text-[10px] font-black uppercase tracking-widest italic">{isRepairing ? 'Running AI Audit...' : 'Start Audit'}</span>
            </button>
            <button onClick={exportPDF} className="flex-1 px-8 py-5 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg">
              <Printer size={18} />
@@ -583,6 +620,87 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
            </button>
         </div>
       </div>
+
+      {auditModalOpen && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-[2.5rem] w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden relative">
+              <div className="p-8 bg-slate-900 flex justify-between items-center shrink-0">
+                 <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-rose-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-rose-500/20">
+                       <AlertTriangle size={24} />
+                    </div>
+                    <div>
+                       <h3 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Logic Audit Report</h3>
+                       <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest mt-1">{auditViolations.length} Violations Detected</p>
+                    </div>
+                 </div>
+                 <button onClick={() => setAuditModalOpen(false)} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors"><X size={20}/></button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-8 space-y-3 bg-slate-50">
+                 <div className="flex justify-between items-center mb-4 px-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detected Issues</span>
+                    <button 
+                      onClick={() => {
+                        if (selectedViolationIndices.size === auditViolations.length) setSelectedViolationIndices(new Set());
+                        else setSelectedViolationIndices(new Set(auditViolations.map((_, i) => i)));
+                      }} 
+                      className="text-[10px] font-bold text-blue-600 hover:underline uppercase"
+                    >
+                      {selectedViolationIndices.size === auditViolations.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                 </div>
+                 
+                 {auditViolations.map((v, i) => {
+                    let type = 'generic';
+                    let color = 'bg-slate-200 border-slate-300 text-slate-700';
+                    let icon = <AlertCircle size={16} />;
+                    
+                    if (v.includes('SHIFT ERROR')) { 
+                        type = 'critical'; color = 'bg-rose-50 border-rose-200 text-rose-700'; icon = <Users size={16} />;
+                    } else if (v.includes('CONTRACT ERROR')) {
+                        type = 'contract'; color = 'bg-amber-50 border-amber-200 text-amber-700'; icon = <Briefcase size={16} />;
+                    } else if (v.includes('REST ERROR')) {
+                        type = 'safety'; color = 'bg-yellow-50 border-yellow-200 text-yellow-700'; icon = <Moon size={16} />;
+                    } else if (v.includes('ROLE ERROR')) {
+                        type = 'role'; color = 'bg-blue-50 border-blue-200 text-blue-700'; icon = <ShieldAlert size={16} />;
+                    }
+
+                    const isSelected = selectedViolationIndices.has(i);
+
+                    return (
+                      <div 
+                        key={i} 
+                        onClick={() => toggleViolationSelection(i)}
+                        className={`p-4 rounded-2xl border-2 flex items-start gap-4 cursor-pointer transition-all ${
+                            isSelected ? 'border-blue-500 shadow-md transform scale-[1.01]' : 'border-transparent opacity-60 hover:opacity-100'
+                        } ${color}`}
+                      >
+                         <div className={`mt-0.5 ${isSelected ? 'text-blue-600' : 'text-slate-400'}`}>
+                            {isSelected ? <CheckSquare size={20} /> : <Square size={20} />}
+                         </div>
+                         <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                               {icon}
+                               <span className="text-[9px] font-black uppercase tracking-widest opacity-70">{type} Violation</span>
+                            </div>
+                            <p className="text-xs font-bold leading-relaxed">{v}</p>
+                         </div>
+                      </div>
+                    );
+                 })}
+              </div>
+
+              <div className="p-6 bg-white border-t border-slate-100 flex gap-4 shrink-0">
+                 <button onClick={() => setAuditModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-colors">Cancel</button>
+                 <button onClick={handleExecuteRepair} disabled={selectedViolationIndices.size === 0} className="flex-[2] py-4 bg-slate-950 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-xl shadow-slate-950/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <Hammer size={16} />
+                    Repair {selectedViolationIndices.size} Selected Issues
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
 
       <div className="space-y-8">
         {filteredPrograms.length === 0 ? (
