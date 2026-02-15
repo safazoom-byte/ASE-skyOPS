@@ -210,6 +210,95 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return code ? `(${code})` : '';
   };
 
+  // --- Audit Logic ---
+  const runAudit = () => {
+    setIsRepairing(true);
+    setTimeout(() => {
+      const violations: string[] = [];
+
+      // 1. Max Shifts Check (Local Staff)
+      staff.forEach(s => {
+        if (s.type === 'Local') {
+           const count = staffStats[s.id]?.work || 0;
+           if (count > 5) {
+             violations.push(`MAX SHIFTS: ${s.name} is assigned ${count} shifts (Limit: 5).`);
+           }
+        }
+      });
+      
+      // 2. Roster Contract Dates
+      staff.forEach(s => {
+        if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+          filteredPrograms.forEach(p => {
+            if (p.assignments.some(a => a.staffId === s.id)) {
+              if (p.dateString! < s.workFromDate! || p.dateString! > s.workToDate!) {
+                violations.push(`CONTRACT DATE: ${s.initials} working on ${p.dateString} (Outside ${s.workFromDate} - ${s.workToDate}).`);
+              }
+            }
+          });
+        }
+      });
+
+      // 3. Rest & Qualifications
+      filteredPrograms.forEach(p => {
+        p.assignments.forEach(a => {
+          const s = getStaffById(a.staffId);
+          if (!s) return;
+          
+          // Qualification Checks
+          const roleCode = formatRoleCode(a.role || '');
+          if (roleCode === 'SL' && !s.isShiftLeader) violations.push(`QUALIFICATION: ${s.initials} assigned SL on ${p.dateString} but lacks qualification.`);
+          if (roleCode === 'LC' && !s.isLoadControl) violations.push(`QUALIFICATION: ${s.initials} assigned LC on ${p.dateString} but lacks qualification.`);
+          
+          // Rest Checks
+          const sh = getShiftById(a.shiftId);
+          if (sh) {
+            const rest = calculateRestHours(a.staffId, p.dateString!, sh.pickupTime);
+            if (rest !== null && rest < minRestHours) {
+              violations.push(`FATIGUE RISK: ${s.initials} has only ${rest.toFixed(1)}h rest before ${p.dateString} (Min: ${minRestHours}h).`);
+            }
+          }
+        });
+      });
+
+      if (violations.length === 0) {
+        alert("Audit Complete: No critical violations found.");
+        setIsRepairing(false);
+      } else {
+        setAuditViolations(violations);
+        setSelectedViolationIndices(new Set(violations.map((_, i) => i)));
+        setAuditModalOpen(true);
+        setIsRepairing(false);
+      }
+    }, 100);
+  };
+
+  const handleRepairConfirm = async () => {
+     if (selectedViolationIndices.size === 0) return;
+     setIsRepairing(true);
+     setAuditModalOpen(false);
+     
+     const report = auditViolations.filter((_, i) => selectedViolationIndices.has(i)).join('\n');
+     
+     try {
+       const result = await repairProgramWithAI(programs, report, { flights, staff, shifts, programs: [], leaveRequests, incomingDuties }, { minRestHours });
+       if (onUpdatePrograms && result.programs) {
+         onUpdatePrograms(result.programs);
+       }
+     } catch (e: any) {
+       alert("Repair failed: " + e.message);
+     } finally {
+       setIsRepairing(false);
+     }
+  };
+
+  const toggleViolation = (index: number) => {
+    const next = new Set(selectedViolationIndices);
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+    setSelectedViolationIndices(next);
+  };
+
   const exportPDF = () => {
     if (filteredPrograms.length === 0) return;
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
@@ -330,7 +419,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
-           <button onClick={() => setIsRepairing(true)} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group">
+           <button onClick={runAudit} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group">
              {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} className="group-hover:animate-pulse" />}
              <span className="text-[10px] font-black uppercase tracking-widest italic">Start Audit</span>
            </button>
@@ -426,6 +515,48 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           ))
         )}
       </div>
+
+      {auditModalOpen && (
+         <div className="fixed inset-0 z-[1600] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+            <div className="bg-white rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95">
+               <div className="p-8 bg-slate-50 border-b border-slate-100 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-4">
+                     <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500">
+                        <AlertTriangle size={24} />
+                     </div>
+                     <div>
+                        <h4 className="text-xl font-black italic uppercase text-slate-900 leading-none">Compliance Audit</h4>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                           {auditViolations.length} Issues Detected
+                        </p>
+                     </div>
+                  </div>
+                  <button onClick={() => setAuditModalOpen(false)} className="p-2 bg-white rounded-full hover:bg-slate-200"><X size={20}/></button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto p-8 space-y-4">
+                  {auditViolations.map((violation, i) => {
+                     const isSelected = selectedViolationIndices.has(i);
+                     return (
+                        <div key={i} onClick={() => toggleViolation(i)} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-start gap-4 ${isSelected ? 'border-amber-400 bg-amber-50' : 'border-slate-100 hover:border-slate-200'}`}>
+                           <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${isSelected ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200'}`}>
+                              {isSelected && <Check size={14} />}
+                           </div>
+                           <p className="text-xs font-bold text-slate-700 leading-relaxed uppercase">{violation}</p>
+                        </div>
+                     );
+                  })}
+               </div>
+
+               <div className="p-6 border-t border-slate-100 flex gap-4 shrink-0 bg-white">
+                  <button onClick={() => setAuditModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-2xl">Dismiss</button>
+                  <button onClick={handleRepairConfirm} disabled={selectedViolationIndices.size === 0} className="flex-[2] py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-amber-500 hover:text-slate-900 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                     <Hammer size={16} /> Auto-Repair Selected
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
     </div>
   );
 };

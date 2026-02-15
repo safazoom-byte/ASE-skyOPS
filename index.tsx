@@ -28,7 +28,8 @@ import {
   Settings,
   Cloud,
   Layers,
-  Timer
+  Timer,
+  CheckCircle2
 } from 'lucide-react';
 import './style.css'; 
 
@@ -73,6 +74,7 @@ const App: React.FC = () => {
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning', message: string }[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
   // Incoming Duties Logic (Rest Log)
   const [incomingSelectedStaffIds, setIncomingSelectedStaffIds] = useState<string[]>([]);
@@ -102,6 +104,13 @@ const App: React.FC = () => {
     localStorage.setItem(UI_PREF_KEYS.REST_HOURS, minRestHours.toString());
     localStorage.setItem(UI_PREF_KEYS.DURATION, programDuration.toString());
   }, [startDate, endDate, minRestHours, programDuration]);
+
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     let mounted = true;
@@ -219,11 +228,12 @@ const App: React.FC = () => {
       shiftEndTime: finalTime 
     }));
     
-    setIncomingDuties([...incomingDuties, ...newDuties]);
+    setIncomingDuties(prev => [...prev, ...newDuties]);
     if (supabase) await db.upsertIncomingDuties(newDuties);
     
     setIncomingSelectedStaffIds([]);
     setIncomingSearchTerm('');
+    setNotification(`${newDuties.length} Rest Log Entries Added`);
   };
 
   const addQuickLeave = async () => {
@@ -237,11 +247,22 @@ const App: React.FC = () => {
       type: quickLeaveType 
     }));
     
-    setLeaveRequests([...leaveRequests, ...newLeaves]);
+    setLeaveRequests(prev => [...prev, ...newLeaves]);
     if (supabase) await db.upsertLeaves(newLeaves);
     
     setQuickLeaveStaffIds([]);
     setQuickLeaveSearchTerm('');
+    setNotification(`${newLeaves.length} Absence Entries Added`);
+  };
+
+  const deleteIncomingDuty = async (id: string) => {
+    setIncomingDuties(prev => prev.filter(d => d.id !== id));
+    if (supabase) await db.deleteIncomingDuty(id);
+  };
+
+  const deleteLeaveRequest = async (id: string) => {
+    setLeaveRequests(prev => prev.filter(l => l.id !== id));
+    if (supabase) await db.deleteLeave(id);
   };
 
   if (isInitializing) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="text-blue-500 animate-spin" size={64} /></div>;
@@ -249,6 +270,13 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {notification && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
+          <CheckCircle2 size={16} className="text-emerald-400" />
+          <span className="text-xs font-black uppercase tracking-widest">{notification}</span>
+        </div>
+      )}
+
       <header className="sticky top-0 z-[100] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-4">
            <SkyOpsLogo size={42} />
@@ -258,6 +286,7 @@ const App: React.FC = () => {
            </div>
         </div>
         <div className="flex items-center gap-4">
+           {/* Desktop Nav */}
            <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
               {['dashboard', 'flights', 'staff', 'shifts', 'program'].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab}</button>
@@ -297,7 +326,7 @@ const App: React.FC = () => {
                               <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-2">
                                 <Zap size={10} className="text-blue-500"/> Group Personnel Feed (Paste List)
                               </label>
-                              <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center">
+                              <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
                                   {incomingSelectedStaffIds.map(id => (
                                       <span key={id} className="px-2 py-1 bg-slate-950 text-white rounded-lg text-[9px] font-black uppercase flex items-center gap-2">
                                           {staff.find(st => st.id === id)?.initials}
@@ -307,11 +336,13 @@ const App: React.FC = () => {
                                   <input 
                                     type="text" 
                                     className="flex-1 bg-transparent text-sm font-bold outline-none" 
-                                    placeholder="Paste initials like: MS-Atz ML-atz..." 
+                                    placeholder={staff.length === 0 ? "No staff registered yet..." : "Paste initials like: MS-Atz ML-atz..."}
                                     value={incomingSearchTerm} 
                                     onChange={handleIncomingSearchChange} 
+                                    disabled={staff.length === 0}
                                   />
                               </div>
+                              {staff.length === 0 && <p className="text-[9px] font-bold text-rose-500 mt-2 ml-1">Warning: Register personnel in 'Staff' tab first.</p>}
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
@@ -323,7 +354,22 @@ const App: React.FC = () => {
                                       {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
                                   </select>
                                </div>
-                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2"><Lock size={16}/> Bulk Lock Registry</button>
+                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Bulk Lock Registry</button>
+                          </div>
+                          
+                          {/* Feedback List */}
+                          <div className="pt-4 border-t border-slate-50">
+                             <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Registered for {incomingDate}</h5>
+                             <div className="flex flex-wrap gap-2">
+                               {incomingDuties.filter(d => d.date === incomingDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
+                               {incomingDuties.filter(d => d.date === incomingDate).map(d => (
+                                 <div key={d.id} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in">
+                                    <span className="text-[10px] font-black text-amber-700 uppercase">{staff.find(s => s.id === d.staffId)?.initials}</span>
+                                    <span className="text-[10px] font-bold text-amber-600">{d.shiftEndTime}</span>
+                                    <button onClick={() => deleteIncomingDuty(d.id)} className="text-amber-400 hover:text-amber-600"><X size={10}/></button>
+                                 </div>
+                               ))}
+                             </div>
                           </div>
                       </div>
                   </div>
@@ -338,7 +384,7 @@ const App: React.FC = () => {
                             <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-2">
                                <Zap size={10} className="text-indigo-500"/> Group Personnel Feed
                             </label>
-                            <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center">
+                            <div className="w-full min-h-[56px] px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-wrap gap-2 items-center focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
                                 {quickLeaveStaffIds.map(id => (
                                     <span key={id} className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase flex items-center gap-2">
                                         {staff.find(st => st.id === id)?.initials}
@@ -348,9 +394,10 @@ const App: React.FC = () => {
                                 <input 
                                   type="text" 
                                   className="flex-1 bg-transparent text-sm font-bold outline-none" 
-                                  placeholder="Search or paste group initials..." 
+                                  placeholder={staff.length === 0 ? "No staff registered yet..." : "Search or paste group initials..."}
                                   value={quickLeaveSearchTerm} 
                                   onChange={handleQuickLeaveSearchChange} 
+                                  disabled={staff.length === 0}
                                 />
                             </div>
                         </div>
@@ -362,7 +409,22 @@ const App: React.FC = () => {
                               <option value="Sick leave">Sick leave</option>
                               <option value="Roster leave">Roster leave</option>
                            </select>
-                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2"><Plus size={16}/> Add Group Log</button>
+                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
+                        </div>
+
+                        {/* Feedback List */}
+                        <div className="pt-4 border-t border-slate-50">
+                           <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absences for {quickLeaveDate}</h5>
+                           <div className="flex flex-wrap gap-2">
+                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
+                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).map(l => (
+                               <div key={l.id} className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in">
+                                  <span className="text-[10px] font-black text-indigo-700 uppercase">{staff.find(s => s.id === l.staffId)?.initials}</span>
+                                  <span className="text-[10px] font-bold text-indigo-500">{l.type}</span>
+                                  <button onClick={() => deleteLeaveRequest(l.id)} className="text-indigo-400 hover:text-indigo-600"><X size={10}/></button>
+                               </div>
+                             ))}
+                           </div>
                         </div>
                      </div>
                   </div>
@@ -374,7 +436,7 @@ const App: React.FC = () => {
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest block">Program Commencement</label>
                         <input type="date" className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:border-blue-600 transition-all" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center italic mt-2">Target Period: {startDate} &gt; {endDate}</div>
+                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center italic mt-2">Target Period: {startDate} > {endDate}</div>
                      </div>
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block">Period Duration</label>
@@ -398,6 +460,31 @@ const App: React.FC = () => {
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} />}
         {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} minRestHours={minRestHours} onUpdatePrograms={async (updated) => { setPrograms(updated); if (supabase) await db.savePrograms(updated); }} />}
       </main>
+      
+      {/* Mobile Footer Navigation */}
+      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
+         {[
+           { id: 'dashboard', icon: LayoutDashboard, label: 'Dash' },
+           { id: 'flights', icon: Plane, label: 'Flights' },
+           { id: 'staff', icon: Users, label: 'Staff' },
+           { id: 'shifts', icon: Clock, label: 'Shifts' },
+           { id: 'program', icon: CalendarDays, label: 'Roster' },
+         ].map(item => (
+           <button 
+             key={item.id}
+             onClick={() => setActiveTab(item.id as any)}
+             className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all w-16 ${
+               activeTab === item.id 
+                 ? 'text-blue-600 bg-blue-50 scale-110' 
+                 : 'text-slate-400 hover:bg-slate-50'
+             }`}
+           >
+             <item.icon size={20} strokeWidth={activeTab === item.id ? 2.5 : 2} />
+             <span className="text-[9px] font-black uppercase tracking-tight">{item.label}</span>
+           </button>
+         ))}
+      </nav>
+
       <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={setPrograms} />
     </div>
   );

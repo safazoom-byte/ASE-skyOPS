@@ -88,18 +88,26 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER v8.1
+    COMMAND: STATION OPERATIONS COMMAND - MASTER PROGRAM BUILDER v9.0 (STRICT ENFORCEMENT)
     OBJECTIVE: Build a ${config.numDays}-day program starting ${config.startDate}.
 
-    ### 1. ASSIGNMENT PROTOCOL
+    ### 1. CRITICAL STAFFING HIERARCHY (MUST FOLLOW)
+    - **STEP 1: UTILIZE ROSTER STAFF**: Before assigning Local staff, you **MUST** check if a Roster staff member is available and within their contract dates ('workFromDate' to 'workToDate'). 
+      - **GOAL**: Ensure Roster staff work their full potential days. Do not leave them on Standby if there are open slots.
+    - **STEP 2: ASSIGN LOCAL STAFF**: Only use Local staff to fill gaps after eligible Roster staff are utilized.
+
+    ### 2. ABSOLUTE RULES (VIOLATION = FAILURE)
+    - **LOCAL STAFF LIMIT**: Local staff have a **HARD CAP of 5 working days** per 7-day period. 
+      - You **MUST** assign at least 2 Days Off per week for every Local staff member.
+      - **IT IS FORBIDDEN** to assign a 6th or 7th day to a Local staff member.
+    - **REST VIOLENCE**: Calculate exact hours between previous shift end and next shift start. 
+      - The gap MUST be >= ${config.minRestHours} hours. 
+      - Check 'REST LOG' for duties prior to Day 1.
+
+    ### 3. ASSIGNMENT PROTOCOL
     - **SPECIALISTS**: Fill requested roles for "SL", "LC", "RMP", "OPS", "LF" first. Use codes like "SL", "LC" or "SL+LC".
     - **HEADCOUNT**: Fill remaining staff requirements up to minStaff/maxStaff using role: "GENERAL". 
     - **IMPORTANT**: Staff assigned as "GENERAL" will be listed by initials only. Specialists show roles.
-
-    ### 2. CONSTRAINTS
-    - **LOCAL STAFF**: Max 5 days work / 2 days off.
-    - **ROSTER STAFF**: MUST ONLY work within their contract dates ('workFromDate' to 'workToDate').
-    - **REST**: Min ${config.minRestHours}h between duties.
 
     STATION DATA:
     - STAFF: ${JSON.stringify(data.staff)}
@@ -195,17 +203,17 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v8.1
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v9.0 (STRICT MODE)
     OBJECTIVE: Fix violations in the roster below.
 
-    ### CRITICAL RULES:
-    1. **LOCAL 5-DAY LIMIT**: If a Local staff member already has 5 work assignments in the week, they MUST be off for the remaining days.
-    2. **ROSTER CONTRACTS**: Remove Roster staff assigned outside their 'workFromDate' / 'workToDate'.
-    3. **SPECIALIST QUALS**: If staff assigned "SL", "LC", etc. lacks the flag, use "GENERAL" or swap them.
-    4. **REST HOURS**: Ensure exactly ${constraints.minRestHours}h between shifts. 
-
-    ### AUDIT REPORT:
+    ### VIOLATION REPORT:
     ${auditReport}
+
+    ### CRITICAL REPAIR RULES:
+    1. **FIX 7-DAY WORKERS**: If a Local staff member is working >5 days, **REMOVE** them from the excess days. 
+       - **REPLACE** them with a Roster staff member who is currently on Standby and within their contract dates.
+    2. **FIX UNDERUTILIZED ROSTER**: Swap idle Roster staff (on Standby) into shifts currently held by overworked Local staff.
+    3. **FIX FATIGUE**: Ensure exactly ${constraints.minRestHours}h between shifts. If a violation exists, swap the staff member out.
 
     ### DATA SOURCES:
     - Staff: ${JSON.stringify(data.staff)}
