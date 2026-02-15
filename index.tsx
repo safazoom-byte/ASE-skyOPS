@@ -436,7 +436,7 @@ const App: React.FC = () => {
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest block">Program Commencement</label>
                         <input type="date" className="w-full px-4 py-4 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:border-blue-600 transition-all" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center italic mt-2">Target Period: {startDate} > {endDate}</div>
+                        <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center italic mt-2">Target Period: {startDate} &gt; {endDate}</div>
                      </div>
                      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                         <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block">Period Duration</label>
