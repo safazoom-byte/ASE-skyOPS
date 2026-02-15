@@ -161,20 +161,35 @@ const App: React.FC = () => {
     } catch (err: any) { alert(err.message || "Engine failure."); } finally { setIsGenerating(false); }
   };
 
+  // Improved matching logic to handle suffixes (e.g. MS-ATZ)
+  const matchStaffToken = (token: string, staffList: Staff[]) => {
+    const cleanToken = token.trim().toUpperCase();
+    if (!cleanToken) return null;
+    
+    // 1. Exact Match
+    const exact = staffList.find(s => s.initials.toUpperCase() === cleanToken);
+    if (exact) return exact.id;
+
+    // 2. Prefix Match (Handling "MS-Atz" matching "MS-ATZ" or "MS" matching "MS-ATZ")
+    const tokenPrefix = cleanToken.split('-')[0];
+    const prefixMatch = staffList.find(s => s.initials.toUpperCase().split('-')[0] === tokenPrefix);
+    if (prefixMatch) return prefixMatch.id;
+
+    return null;
+  };
+
   const handleIncomingSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     if (val.includes(' ') || val.includes(',') || val.includes('\n')) {
       const tokens = val.split(/[\s,\n]+/);
-      const staffMap = new Map<string, string>(staff.map(s => [s.initials.toUpperCase(), s.id]));
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
       
       tokens.forEach(token => {
         if (!token) return;
-        const initials = token.split('-')[0].trim().toUpperCase();
-        const mid = staffMap.get(initials);
-        if (mid) {
-          idsToAdd.push(mid);
+        const matchedId = matchStaffToken(token, staff);
+        if (matchedId) {
+          idsToAdd.push(matchedId);
         } else {
           remaining.push(token);
         }
@@ -193,16 +208,14 @@ const App: React.FC = () => {
     const val = e.target.value;
     if (val.includes(' ') || val.includes(',') || val.includes('\n')) {
       const tokens = val.split(/[\s,\n]+/);
-      const staffMap = new Map<string, string>(staff.map(s => [s.initials.toUpperCase(), s.id]));
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
       
       tokens.forEach(token => {
         if (!token) return;
-        const initials = token.split('-')[0].trim().toUpperCase();
-        const mid = staffMap.get(initials);
-        if (mid) {
-          idsToAdd.push(mid);
+        const matchedId = matchStaffToken(token, staff);
+        if (matchedId) {
+          idsToAdd.push(matchedId);
         } else {
           remaining.push(token);
         }
@@ -219,9 +232,27 @@ const App: React.FC = () => {
 
   const addIncomingDuties = async () => {
     const finalTime = `${incomingHour}:${incomingMin}`;
-    if (incomingSelectedStaffIds.length === 0) return;
     
-    const newDuties: IncomingDuty[] = incomingSelectedStaffIds.map(sid => ({ 
+    // Process input text on button click
+    let finalIds = [...incomingSelectedStaffIds];
+    if (incomingSearchTerm.trim()) {
+      const tokens = incomingSearchTerm.split(/[\s,\n]+/);
+      const remaining: string[] = [];
+      tokens.forEach(token => {
+        if (!token) return;
+        const matchedId = matchStaffToken(token, staff);
+        if (matchedId) finalIds.push(matchedId);
+        else remaining.push(token);
+      });
+      // Clear processed tokens
+      if (remaining.length === 0) setIncomingSearchTerm('');
+      else setIncomingSearchTerm(remaining.join(' '));
+    }
+    finalIds = Array.from(new Set(finalIds));
+
+    if (finalIds.length === 0) return;
+    
+    const newDuties: IncomingDuty[] = finalIds.map(sid => ({ 
       id: Math.random().toString(36).substr(2, 9), 
       staffId: sid, 
       date: incomingDate, 
@@ -232,14 +263,30 @@ const App: React.FC = () => {
     if (supabase) await db.upsertIncomingDuties(newDuties);
     
     setIncomingSelectedStaffIds([]);
-    setIncomingSearchTerm('');
     setNotification(`${newDuties.length} Rest Log Entries Added`);
   };
 
   const addQuickLeave = async () => {
-    if (quickLeaveStaffIds.length === 0) return;
+    // Process input text on button click
+    let finalIds = [...quickLeaveStaffIds];
+    if (quickLeaveSearchTerm.trim()) {
+      const tokens = quickLeaveSearchTerm.split(/[\s,\n]+/);
+      const remaining: string[] = [];
+      tokens.forEach(token => {
+        if (!token) return;
+        const matchedId = matchStaffToken(token, staff);
+        if (matchedId) finalIds.push(matchedId);
+        else remaining.push(token);
+      });
+      // Clear processed tokens
+      if (remaining.length === 0) setQuickLeaveSearchTerm('');
+      else setQuickLeaveSearchTerm(remaining.join(' '));
+    }
+    finalIds = Array.from(new Set(finalIds));
+
+    if (finalIds.length === 0) return;
     
-    const newLeaves: LeaveRequest[] = quickLeaveStaffIds.map(sid => ({ 
+    const newLeaves: LeaveRequest[] = finalIds.map(sid => ({ 
       id: Math.random().toString(36).substr(2, 9), 
       staffId: sid, 
       startDate: quickLeaveDate, 
@@ -251,7 +298,6 @@ const App: React.FC = () => {
     if (supabase) await db.upsertLeaves(newLeaves);
     
     setQuickLeaveStaffIds([]);
-    setQuickLeaveSearchTerm('');
     setNotification(`${newLeaves.length} Absence Entries Added`);
   };
 
@@ -354,7 +400,7 @@ const App: React.FC = () => {
                                       {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
                                   </select>
                                </div>
-                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Bulk Lock Registry</button>
+                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0 && !incomingSearchTerm.trim()} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Bulk Lock Registry</button>
                           </div>
                           
                           {/* Feedback List */}
@@ -409,7 +455,7 @@ const App: React.FC = () => {
                               <option value="Sick leave">Sick leave</option>
                               <option value="Roster leave">Roster leave</option>
                            </select>
-                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
+                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
                         </div>
 
                         {/* Feedback List */}
