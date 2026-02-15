@@ -23,7 +23,6 @@ export const auth = {
     if (!supabase) return;
     return await supabase.auth.signOut();
   },
-  // Added explicit return type to resolve unknown vs string/any mismatch in App.tsx
   async getSession(): Promise<any> {
     if (!supabase) return null;
     try {
@@ -74,7 +73,7 @@ export const db = {
           name: s.name,
           initials: s.initials,
           type: s.type,
-          work_pattern: s.work_pattern,
+          workPattern: s.work_pattern,
           isRamp: !!s.is_ramp,
           isShiftLeader: !!s.is_shift_leader,
           isOps: !!s.is_operations,
@@ -94,14 +93,14 @@ export const db = {
           endTime: s.end_time,
           minStaff: s.min_staff || 1,
           maxStaff: s.max_staff || 10,
-          role_counts: s.role_counts || {}, 
+          roleCounts: s.role_counts || {}, 
           flightIds: s.flight_ids || []
         })),
         programs: (pRes.data || []).map(p => ({
           day: p.day,
           dateString: p.date_string,
           assignments: p.assignments || [],
-          off_duty: p.off_duty || []
+          offDuty: p.off_duty || []
         })),
         leaveRequests: (lRes.data || []).map(l => ({
           id: l.id,
@@ -114,7 +113,7 @@ export const db = {
           id: i.id,
           staffId: i.staff_id,
           date: i.date,
-          shift_end_time: i.shift_end_time
+          shiftEndTime: i.shift_end_time
         }))
       };
     } catch (e) { 
