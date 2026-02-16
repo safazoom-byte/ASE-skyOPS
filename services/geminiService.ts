@@ -23,28 +23,11 @@ const safeParseJson = (text: string | undefined): any => {
   try {
     return JSON.parse(clean);
   } catch (e) {
-    // Attempt to extract array if parsing failed
-    const firstBracket = clean.indexOf('[');
-    const lastBracket = clean.lastIndexOf(']');
-    
-    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        const arrayStr = clean.substring(firstBracket, lastBracket + 1);
-        return JSON.parse(arrayStr);
-      } catch (e2) {
-         // Attempt to extract object if parsing failed
-         const firstBrace = clean.indexOf('{');
-         const lastBrace = clean.lastIndexOf('}');
-         if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-             try {
-                return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
-             } catch (e3) {
-                console.error("Failed to parse JSON segment:", clean);
-                return null;
-             }
-         }
-         return null;
-      }
+    // Attempt to extract JSON from text if dirty
+    const firstBrace = clean.indexOf('{');
+    const lastBrace = clean.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+       try { return JSON.parse(clean.substring(firstBrace, lastBrace + 1)); } catch (e2) {}
     }
     return null;
   }
@@ -92,69 +75,56 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // 1. Prepare Mappings (Real ID <-> Short ID)
-  // This prevents the AI from hallucinating complex UUIDs and saves tokens.
-  const staffMap = new Map<string, string>(); // Real -> S0
-  const revStaffMap = new Map<string, string>(); // S0 -> Real
-  
-  const shiftMap = new Map<string, string>(); // Real -> H0
-  const revShiftMap = new Map<string, string>(); // H0 -> Real
-
-  data.staff.forEach((s, i) => {
-    const short = `S${i}`;
-    staffMap.set(s.id, short);
-    revStaffMap.set(short, s.id);
-  });
-
-  data.shifts.forEach((s, i) => {
-    const short = `H${i}`;
-    shiftMap.set(s.id, short);
-    revShiftMap.set(short, s.id);
-  });
-
-  // 2. Prepare Staff Data with Short IDs
-  const creditBank: Record<string, number> = {};
-  data.staff.forEach(s => {
-    creditBank[s.id] = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
-  });
-
-  const availableStaffContext = data.staff.map(s => {
+  // 1. Prepare Staff & Shift Index Mappings
+  // We use indices (0, 1, 2) instead of UUIDs in the prompt to save 80% tokens
+  const staffContext = data.staff.map((s, idx) => {
     const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':''].filter(Boolean).join(',');
-    return `${staffMap.get(s.id)}|${s.initials}|${skills}|${creditBank[s.id]}`;
-  });
+    const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
+    return `${idx}|${s.initials}|${skills}|${credits}`;
+  }).join('\n');
 
-  // 3. Prepare Constraints
+  const shiftContext = data.shifts.map((s, idx) => {
+    return `${idx}|${s.pickupTime}-${s.endTime}|${JSON.stringify(s.roleCounts)}`;
+  }).join('\n');
+
+  // 2. Prepare Constraints
   const leaveBlackouts: string[] = [];
   const start = new Date(config.startDate);
   const end = new Date(config.startDate);
   end.setDate(start.getDate() + config.numDays - 1);
 
   (data.leaveRequests || []).forEach(leave => {
-    const s = data.staff.find(st => st.id === leave.staffId);
-    if (!s) return;
+    const sIdx = data.staff.findIndex(st => st.id === leave.staffId);
+    if (sIdx === -1) return;
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     if (lEnd < start || lStart > end) return;
-    leaveBlackouts.push(`- ${staffMap.get(s.id)} (${s.initials}) OFF on ${leave.startDate} to ${leave.endDate}`);
+    leaveBlackouts.push(`Staff Index ${sIdx} OFF: ${leave.startDate} to ${leave.endDate}`);
   });
 
-  // 4. Build Prompt
+  // 3. Compact Matrix Protocol Prompt
   const prompt = `
-    ROLE: Build ${config.numDays}-day roster (${config.startDate}).
-    
-    STAFF [ID|Initials|Skills|Credits]:
-    ${availableStaffContext.join('\n')}
+    ROLE: Aviation Scheduler.
+    TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
 
-    SHIFTS [ID|Time|Requirements]:
-    ${data.shifts.map(s => `${shiftMap.get(s.id)}|${s.pickupTime}-${s.endTime}|${JSON.stringify(s.roleCounts)}`).join('\n')}
+    STAFF LIST (Index|Initials|Skills|Credits):
+    ${staffContext}
+
+    SHIFTS LIST (Index|Time|Needs):
+    ${shiftContext}
 
     CONSTRAINTS:
     ${leaveBlackouts.join('\n')}
-    - Min Rest: ${config.minRestHours}h between shifts.
-    
-    TASK: Assign STAFF to SHIFTS for each day.
-    OUTPUT: JSON Array. Keys: "dt" (YYYY-MM-DD), "s" (StaffID), "sh" (ShiftID), "r" (Role).
-    Format: [{"dt":"2026-02-20","s":"S0","sh":"H0","r":"LC"}, ...]
+    - Min Rest: ${config.minRestHours}h.
+    - Don't exceed Staff Credits.
+
+    OUTPUT FORMAT:
+    Return a single JSON object with a "matrix" property.
+    "matrix" is an array of arrays: [DayOffset, StaffIndex, ShiftIndex, RoleCode].
+    DayOffset: 0 to ${config.numDays - 1}.
+    RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT".
+
+    Example: { "matrix": [[0, 1, 5, "LC"], [0, 2, 5, "RMP"], [1, 1, 6, "LC"]] }
   `;
 
   try {
@@ -168,21 +138,17 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
     });
 
-    const parsedArray = safeParseJson(response.text);
+    const parsed = safeParseJson(response.text);
     
-    // Safety check for empty or invalid data
-    if (!Array.isArray(parsedArray)) {
-        console.error("Invalid Structure:", response.text);
-        throw new Error("AI generated an invalid structure. Please retry.");
-    }
-    
-    if (parsedArray.length === 0 && config.numDays > 0 && data.shifts.length > 0) {
-        console.warn("Empty assignments returned.");
+    if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
+        console.error("Invalid AI Output:", response.text);
+        throw new Error("AI returned malformed data. Please retry.");
     }
 
-    // 5. Reconstruct State
+    // 4. Reconstruct Data from Matrix
     const programs: DailyProgram[] = [];
     
+    // Initialize empty days
     for(let i=0; i<config.numDays; i++) {
         const d = new Date(config.startDate);
         d.setDate(d.getDate() + i);
@@ -194,17 +160,16 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         });
     }
 
-    parsedArray.forEach((item: any) => {
-        const prog = programs.find(p => p.dateString === item.dt);
-        const realStaffId = revStaffMap.get(item.s);
-        const realShiftId = revShiftMap.get(item.sh);
+    // Populate from matrix
+    parsed.matrix.forEach((row: any[]) => {
+        const [dayOff, sIdx, shIdx, role] = row;
         
-        if (prog && realStaffId && realShiftId) {
-            prog.assignments.push({
+        if (programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
+            programs[dayOff].assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
-                staffId: realStaffId,
-                shiftId: realShiftId,
-                role: item.r || 'Agent',
+                staffId: data.staff[sIdx].id,
+                shiftId: data.shifts[shIdx].id,
+                role: role || 'AGT',
                 flightId: '' 
             });
         }
@@ -219,7 +184,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   } catch (err: any) {
     console.error("Gemini Error:", err);
-    throw new Error(`Build Failed: ${err.message}`);
+    throw new Error(`Roster Build Failed: ${err.message}`);
   }
 };
 
