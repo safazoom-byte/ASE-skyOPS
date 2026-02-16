@@ -55,6 +55,14 @@ interface Props {
   minRestHours?: number;
 }
 
+const getOverlapDays = (start1: Date, end1: Date, start2: Date, end2: Date) => {
+  const overlapStart = start1 > start2 ? start1 : start2;
+  const overlapEnd = end1 < end2 ? end1 : end2;
+  if (overlapStart > overlapEnd) return 0;
+  const diffTime = overlapEnd.getTime() - overlapStart.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
+
 export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shifts, leaveRequests = [], incomingDuties = [], startDate, endDate, onUpdatePrograms, stationHealth = 100, alerts = [], minRestHours = 12 }) => {
   const [isRepairing, setIsRepairing] = useState(false);
   const [auditModalOpen, setAuditModalOpen] = useState(false);
@@ -196,13 +204,19 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
-    if (!r || r === 'NIL' || r === 'GENERAL' || r === 'AGENT') return '';
-    if (r === 'SHIFT LEADER') return 'SL';
-    if (r === 'LOAD CONTROL') return 'LC';
-    if (r === 'RAMP') return 'RMP';
+    if (!r) return '';
+    // Normalize and Filter to explicit allowed list
+    if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
+    if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
+    if (r === 'RAMP' || r === 'RMP') return 'RMP';
     if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-    if (r === 'LOST AND FOUND') return 'LF';
-    return r;
+    if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
+    if (r === 'LC/SL' || r === 'SL/LC' || (r.includes('LC') && r.includes('SL'))) return 'LC/SL';
+    
+    // Whitelist specific codes, block everything else (e.g. "General", "Assistant")
+    const allowed = ['LC', 'SL', 'OPS', 'RMP', 'LF', 'LC/SL'];
+    if (allowed.includes(r)) return r;
+    return ''; // Default to no role label (just initials)
   };
 
   const formatRoleLabel = (role: string | undefined) => {
@@ -216,12 +230,28 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     setTimeout(() => {
       const violations: string[] = [];
 
-      // 1. Max Shifts Check (Local Staff)
+      // 1. Max Shifts Check (Local Staff) - DYNAMIC CREDIT LOGIC
       staff.forEach(s => {
         if (s.type === 'Local') {
            const count = staffStats[s.id]?.work || 0;
-           if (count > 5) {
-             violations.push(`MAX SHIFTS: ${s.name} is assigned ${count} shifts (Limit: 5).`);
+           let limit = 5;
+           
+           // Deduct leaves from limit to avoid false negatives
+           if (startDate && endDate) {
+             const progStart = new Date(startDate);
+             const progEnd = new Date(endDate);
+             const sLeaves = leaveRequests.filter(l => l.staffId === s.id);
+             let leaveDays = 0;
+             sLeaves.forEach(l => {
+                 const lStart = new Date(l.startDate);
+                 const lEnd = new Date(l.endDate);
+                 leaveDays += getOverlapDays(progStart, progEnd, lStart, lEnd);
+             });
+             limit = Math.max(0, 5 - leaveDays);
+           }
+           
+           if (count > limit) {
+             violations.push(`MAX SHIFTS: ${s.name} is assigned ${count} shifts (Max allowed: ${limit}, adjusted for leave).`);
            }
         }
       });

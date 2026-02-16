@@ -124,8 +124,6 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
   staffLeaves.forEach(leave => {
     const leaveStart = new Date(leave.startDate);
     const leaveEnd = new Date(leave.endDate);
-    
-    // We only deduct leave that happens strictly within the valid program/contract window
     const overlap = getOverlapDays(progStart, progEnd, leaveStart, leaveEnd);
     leaveDeduction += overlap;
   });
@@ -139,12 +137,30 @@ const generateRestConstraints = (shifts: ShiftConfig[], minRestHours: number) =>
   shifts.forEach(shiftA => {
     shifts.forEach(shiftB => {
       const [endH, endM] = shiftA.endTime.split(':').map(Number);
-      const [startH, startM] = shiftB.pickupTime.split(':').map(Number);
-      const hoursLeftInDay = 24 - (endH + (endM/60));
-      const hoursIntoNextDay = startH + (startM/60);
-      const totalGap = hoursLeftInDay + hoursIntoNextDay;
-      if (totalGap < minRestHours) {
-        constraints.push(`- RULE: If staff works Shift '${shiftA.pickupTime}-${shiftA.endTime}', they are BANNED from next day's '${shiftB.pickupTime}' shift (Gap: ${totalGap.toFixed(1)}h).`);
+      const [startH, startM] = shiftA.pickupTime.split(':').map(Number);
+      const [nextStartH, nextStartM] = shiftB.pickupTime.split(':').map(Number);
+      
+      const shiftAEndVal = endH + endM/60;
+      const shiftAStartVal = startH + startM/60;
+      const shiftBStartVal = nextStartH + nextStartM/60;
+      
+      // Determine if Shift A ends on the next day (Overnight shift)
+      // e.g., 22:00 - 06:00 (ends next day), 16:00 - 00:00 (ends next day at 0/24)
+      const endsOnNextDay = shiftAEndVal < shiftAStartVal;
+      
+      let gap = 0;
+      if (endsOnNextDay) {
+         // Shift A ends on Day N+1. Shift B starts on Day N+1.
+         // Gap is the direct difference in hours.
+         gap = shiftBStartVal - shiftAEndVal;
+      } else {
+         // Shift A ends on Day N. Shift B starts on Day N+1.
+         // Gap = Time left in Day N + Time into Day N+1.
+         gap = (24 - shiftAEndVal) + shiftBStartVal;
+      }
+
+      if (gap < minRestHours) {
+        constraints.push(`- RULE: If staff works Shift '${shiftA.pickupTime}-${shiftA.endTime}', they are BANNED from next day's '${shiftB.pickupTime}' shift (Gap: ${gap.toFixed(1)}h).`);
       }
     });
   });
@@ -166,10 +182,11 @@ const generateContractBlackouts = (staffList: Staff[], startDate: string, durati
   staffList.filter(s => s.type === 'Roster').forEach(s => {
     if (!s.workFromDate || !s.workToDate) return; 
     
+    // Explicitly list dates OUTSIDE contract
     const invalidDates = programDates.filter(date => date < s.workFromDate! || date > s.workToDate!);
     
     if (invalidDates.length > 0) {
-      blackouts.push(`- ${s.initials} (${s.id}) is OFF-CONTRACT on: [${invalidDates.join(', ')}]. DO NOT ASSIGN.`);
+      blackouts.push(`- ${s.initials} (${s.id}) is OFF-CONTRACT (Invalid) on: [${invalidDates.join(', ')}]. DO NOT ASSIGN.`);
     }
   });
   return blackouts;
@@ -186,11 +203,9 @@ const generateLeaveBlackouts = (leaveRequests: LeaveRequest[], staffList: Staff[
     const s = staffList.find(st => st.id === leave.staffId);
     if (!s) return;
 
-    // Expand leave range to individual dates
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     
-    // Check if relevant to this program
     if (lEnd < start || lStart > end) return;
 
     const datesBlocked: string[] = [];
@@ -218,14 +233,13 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const slPool: string[] = [];
   
   data.staff.forEach(s => {
-    // Pass leaveRequests to deduct from credits
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
     creditBank[s.id] = credits;
     if (s.isLoadControl) lcPool.push(`${s.initials} (${s.id})`);
     if (s.isShiftLeader) slPool.push(`${s.initials} (${s.id})`);
   });
 
-  // 2. Filter Staff (Remove 0 credit staff from pool)
+  // 2. Filter Staff
   const availableStaff = data.staff.filter(s => creditBank[s.id] > 0).map(s => ({
     id: s.id,
     initials: s.initials,
@@ -268,7 +282,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     You have a "Wallet" of credits for each staff member.
     - **Local Staff:** Max 5 Credits (Minus any Leave Taken).
     - **Roster Staff:** Contract Days (Minus any Leave Taken).
-    
     **CRITICAL RULE:** Every time you assign a staff member, mentally deduct 1 credit.
     **IF CREDITS == 0, THE STAFF MEMBER IS DEAD. DO NOT ASSIGN THEM AGAIN.**
     
@@ -286,33 +299,35 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     #### STEP 1: LOAD CONTROL (LC) - THE PRIORITY
     - For every shift requiring LC, assign a qualified person from the **LC POOL**.
-    - **CHECK BLACKOUTS:** Ensure the LC person is not Blacklisted for that specific Date.
     - **LC POOL:** [${lcPool.join(', ')}]
-    - **OPTIMIZATION:** If the chosen LC person is *also* a Shift Leader (SL), count them for BOTH roles. (Role output: "LC/SL").
+    - **DUAL ROLE OPTIMIZATION:** If the chosen LC person is *also* a Shift Leader (SL), count them for BOTH roles.
+      - *Output Format:* role: "LC/SL" (This reduces headcount needed for Step 2).
+    - **STRICT ROLE CODES:** Output role MUST be one of: 'LC', 'SL', 'LC/SL'. Do not write 'Load Control'.
 
     #### STEP 2: SHIFT LEADER (SL)
     - Fill remaining SL slots using the **SL POOL**.
     - **SL POOL:** [${slPool.join(', ')}]
-    - Do not assign if Step 1 already covered the SL requirement.
+    - **SKIP** if Step 1 already covered the SL requirement via a Dual Role (LC/SL) assignment.
+    - **STRICT ROLE CODES:** Output role MUST be 'SL'.
 
-    #### STEP 3: GENERAL FILL (RATIO SEQUENCE)
+    #### STEP 3: GENERAL FILL (FAILOVER LOGIC)
     - Fill remaining 'MinStaff' slots.
-    - **Target Ratio:** ${localRatio}% Local / ${100 - localRatio}% Roster.
-    - **EXECUTION LOOP:**
-      1. Pick next candidate from sequence (Local -> Roster -> Local...).
-      2. **VALIDATE:** Does candidate have Credits > 0?
-      3. **VALIDATE:** Is candidate free from Blackouts (Leave/Contract) for this Date?
-      4. **VALIDATE:** Is candidate free from Rest Constraints (Forbidden Transitions)?
-      5. If Valid -> Assign and Deduct 1 Credit.
-      6. If Invalid -> Skip to next candidate in sequence. Do NOT deduct credit (save it for a valid day).
+    - **Preferred Ratio:** ${localRatio}% Local / ${100 - localRatio}% Roster.
+    - **FAILOVER PROTOCOL (CRITICAL):**
+      1. Try to pick a staff member matching the Ratio (e.g., Local).
+      2. **CHECK:** Do they have Credits > 0? Are they free from Blackouts? Are they rested?
+      3. **IF NO LOCAL IS AVAILABLE/VALID:** IMMEDIATELY pick a Roster staff instead (or vice versa).
+      4. **DO NOT LEAVE A SLOT EMPTY ('??') UNLESS EVERY SINGLE STAFF MEMBER IN THE ENTIRE LIST IS UNAVAILABLE.**
+      5. It is better to break the Ratio than to leave a slot empty.
+    - **STRICT ROLE CODES:** For general staff, use 'OPS', 'RMP', or 'LF' ONLY if specific tasking is required. **Otherwise, default to 'Agent'**.
+    - **IMPORTANT:** 'Agent' roles will be displayed as just initials (no label), which is the desired output for general staff.
 
-    ### FORBIDDEN TRANSITIONS (REST LAWS):
+    ### FORBIDDEN TRANSITIONS (REST LAWS - STRICT COMPLIANCE):
     The following shift combinations are ILLEGAL due to <${config.minRestHours}h rest:
     ${restRules.join('\n')}
 
     ### STATION DATA:
     - SHIFTS: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, minStaff: s.minStaff, roles: s.roleCounts })))}
-    - LEAVE REGISTRY (Reference): ${JSON.stringify(data.leaveRequests)}
 
     OUTPUT: Return JSON matching the schema. Ensure 'programs' array covers exactly ${config.numDays} days.
   `;
@@ -421,7 +436,7 @@ export const repairProgramWithAI = async (
   const leaveBlackouts = generateLeaveBlackouts(data.leaveRequests || [], data.staff, startDate, numDays);
 
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (CREDIT & LC PRIORITY)
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (CREDIT & FAILOVER)
     OBJECTIVE: Fix violations in the roster below.
 
     ### CORE LOGIC: THE CREDIT SYSTEM (STRICT)
@@ -441,12 +456,15 @@ export const repairProgramWithAI = async (
     ${auditReport}
 
     ### REPAIR PROTOCOL:
-    1. **STRICT CREDITS:** Enforce the credit limits above. Remove assignments if they exceed credits.
+    1. **FAILOVER:** If a slot needs filling and the preferred person has 0 credits or is blacklisted, **USE ANY AVAILABLE STAFF**. Do not leave it empty.
     2. **LC PRIORITY:** Ensure all shifts with Load Control needs have a qualified LC staff.
-       - LC POOL: [${lcPool.join(', ')}]
-       - Use Dual Role (LC+SL) optimization if possible to save headcount.
-    3. **REST GAPS:** Respect the following forbidden transitions:
+       - Use Dual Role (LC/SL) optimization if possible to save headcount.
+    3. **REST GAPS:** Respect the following forbidden transitions (MANDATORY):
        ${restRules.join('\n')}
+    4. **STRICT ROLE CODES:** 
+       - ALLOWED: 'LC', 'SL', 'OPS', 'RMP', 'LF', 'LC/SL'.
+       - **DEFAULT: 'Agent'** (for general staff, displays as initials only).
+       - FORBIDDEN: 'General', 'Assistant'.
 
     ### DATA SOURCES:
     - Staff Pool: ${JSON.stringify(data.staff.map(s => ({ id: s.id, initials: s.initials, type: s.type, skills: { LC: s.isLoadControl, SL: s.isShiftLeader } })))}
