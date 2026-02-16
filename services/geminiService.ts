@@ -16,10 +16,12 @@ export interface ExtractionMedia {
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  // Aggressively clean markdown blocks to prevent parsing errors
   let cleanText = text.replace(/```json\n?|```/gi, "").trim();
   try {
     return JSON.parse(cleanText);
   } catch (e) {
+    // Fallback: Attempt to find the first array or object if text contains preamble
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
       cleanText.indexOf('{') === -1 && cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
@@ -27,16 +29,22 @@ const safeParseJson = (text: string | undefined): any => {
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
     
-    let stack: string[] = [];
-    for (let i = 0; i < candidate.length; i++) {
-      const char = candidate[i];
-      if (char === '{' || char === '[') stack.push(char);
-      else if (char === '}' || char === ']') {
-        const last = stack.pop();
-        if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
-          if (stack.length === 0) return JSON.parse(candidate.slice(0, i + 1));
+    // Attempt to parse the candidate string
+    try {
+        return JSON.parse(candidate);
+    } catch (e2) {
+        // Simple stack parser for truncated or messy JSON
+        let stack: string[] = [];
+        for (let i = 0; i < candidate.length; i++) {
+          const char = candidate[i];
+          if (char === '{' || char === '[') stack.push(char);
+          else if (char === '}' || char === ']') {
+            const last = stack.pop();
+            if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
+              if (stack.length === 0) return JSON.parse(candidate.slice(0, i + 1));
+            }
+          }
         }
-      }
     }
     return null;
   }
@@ -248,12 +256,16 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     });
   }
 
-  // CALCULATE WORKFORCE RATIO
+  // CALCULATE WORKFORCE RATIO & OFF-QUOTA
   const totalStaffCount = availableStaff.length || 1;
   const localStaffCount = availableStaff.filter(s => s.type === 'Local').length;
   const rosterStaffCount = availableStaff.filter(s => s.type === 'Roster').length;
   const localRatio = Math.round((localStaffCount / totalStaffCount) * 100);
   const rosterRatio = 100 - localRatio;
+
+  // Calculate Daily Off-Quota: Standard 2 days off per 7 days = ~28.5% of local staff must be off daily
+  const targetLocalOffPerDay = Math.ceil(localStaffCount * (2/7));
+  const maxLocalPerDay = Math.max(0, localStaffCount - targetLocalOffPerDay);
 
   const prompt = `
     ROLE: MASTER AVIATION SCHEDULER
@@ -262,26 +274,34 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ### WORKFORCE METRICS:
     - **Local Staff:** ${localRatio}% of workforce.
     - **Roster Staff:** ${rosterRatio}% of workforce.
+    - **Daily Off-Quota (Local):** Approx. ${targetLocalOffPerDay} Local staff must be OFF each day.
+    - **Daily Work Cap (Local):** MAX ${maxLocalPerDay} Local staff can work per day.
 
     ### EXECUTION LOGIC (STRICT SEQUENCE):
+    
+    **GLOBAL CONSTRAINT (CRITICAL - APPLIES BEFORE ANY ALLOCATION):**
+    - The **Daily Work Cap of ${maxLocalPerDay} Local Staff** applies to PHASE 1 (Specialists) and PHASE 2 (General) COMBINED.
+    - You MUST reserve space for days off. Do NOT assign more than ${maxLocalPerDay} Locals in total for any single day.
+    - **IF LIMIT REACHED IN PHASE 1:** You MUST use Roster staff to fill remaining Specialist roles.
 
     **PHASE 1: SPECIALIST ROLES (Mandatory Priority)**
     1. **Assign LOAD CONTROL (LC):** Fill all LC requirements first.
        - *Optimization:* If an assigned LC staff has 'Shift Leader' (SL) skill, deduct 1 from the SL requirement for that shift.
+       - *Constraint:* Monitor the Local Count. If you hit ${maxLocalPerDay}, switch to Roster staff immediately.
     2. **Assign SHIFT LEADER (SL):** Fill remaining SL requirements.
     3. **Assign OTHERS:** Fill RAMP, OPS, and LF requirements.
     
-    **PHASE 2: GENERAL HEADCOUNT (Ratio Distribution)**
-    - Calculate remaining headcount needed to reach 'minStaff' for each shift.
-    - **Distribution Rule:** Apply the station ratio (${rosterRatio}% Roster / ${localRatio}% Local) to the total shift strength.
+    **PHASE 2: GENERAL HEADCOUNT (Ratio & Staggered Off-Days)**
+    - **Distribution Rule:** Apply the station ratio (${rosterRatio}% Roster / ${localRatio}% Local) to the remaining slots.
+    - **Strict Cap:** Do not exceed the remaining availability of Locals (Max ${maxLocalPerDay} minus those used in Phase 1).
     
     **PHASE 3: ALLOCATION PROCESS (One-by-One)**
     1. **Roster Staff Allocation:** 
-       - Fill the Roster quota calculated in Phase 2.
-       - Assign staff **one by one** to balance workload (avoid over/under working).
+       - Fill the Roster quota.
+       - Assign staff **one by one** to balance workload.
        - **CONSTRAINT:** STRICTLY check Contract Dates (workFromDate -> workToDate). If outside dates, CANNOT work.
     2. **Local Staff Allocation:**
-       - Fill the Local quota.
+       - Fill the remaining Local slots up to the cap.
        - Assign staff **one by one** to balance workload.
        - **CONSTRAINT:** Local staff MUST have **2 DAYS OFF** in this ${config.numDays}-day period.
 
@@ -290,7 +310,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     ### ROLE LABELING INSTRUCTION:
     - For Phase 1 (Specialist): Use specific role names ("LC", "SL", "RAMP", "OPS", "LF").
-    - For Phase 2 (General): Use the role name "Agent" or "General". (The report system will hide these labels, showing only initials).
+    - For Phase 2 (General): Use the role name "Agent" or "General".
 
     ### STAFF POOL:
     ${availableStaff.map(s => `- ${s.initials} (${s.type}) [Skills: ${s.skills.LC?'LC ':''}${s.skills.SL?'SL ':''}${s.skills.Ops?'OPS ':''}${s.skills.Ramp?'RMP ':''}${s.skills.LF?'LF':''}]`).join('\n')}
@@ -311,15 +331,17 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview', // Force Flash for speed
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
         responseSchema: ROSTER_SCHEMA,
-        thinkingConfig: { thinkingBudget: 32768 }
+        maxOutputTokens: 8192, // Crucial for preventing JSON truncation on 7-day rosters
       }
     });
     const parsed = safeParseJson(response.text);
+    if (!parsed || !parsed.programs) throw new Error("AI returned malformed or empty data.");
+    
     return {
       programs: parsed.programs || [],
       stationHealth: parsed.stationHealth || 0,
@@ -358,7 +380,7 @@ export const extractDataFromContent = async (params: {
   `;
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3-flash-preview', // Force Flash for speed
     contents: { parts },
     config: { responseMimeType: "application/json" }
   });
@@ -374,11 +396,11 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   ];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview', // Force Flash for speed
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 16000 }
+      maxOutputTokens: 8192
     }
   });
   return safeParseJson(response.text);
@@ -396,11 +418,16 @@ export const repairProgramWithAI = async (
   const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
   const numDays = sortedPrograms.length || 7;
 
-  // CALCULATE WORKFORCE RATIO
+  // CALCULATE WORKFORCE RATIO & OFF-QUOTA
   const totalStaffCount = data.staff.length || 1;
   const localStaffCount = data.staff.filter(s => s.type === 'Local').length;
+  const rosterStaffCount = data.staff.filter(s => s.type === 'Roster').length;
   const localRatio = Math.round((localStaffCount / totalStaffCount) * 100);
   const rosterRatio = 100 - localRatio;
+  
+  // Calculate Daily Off-Quota: Standard 2 days off per 7 days = ~28.5% of local staff must be off daily
+  const targetLocalOffPerDay = Math.ceil(localStaffCount * (2/7));
+  const maxLocalPerDay = Math.max(0, localStaffCount - targetLocalOffPerDay);
 
   const restRules = generateRestConstraints(data.shifts, constraints.minRestHours);
   const contractContext = generateContractContext(data.staff, startDate, numDays);
@@ -411,6 +438,11 @@ export const repairProgramWithAI = async (
     OBJECTIVE: Fix violations in the roster below using STRICT PHASED ALLOCATION.
 
     ### PRIORITY RULES & SEQUENCE:
+    
+    **GLOBAL CONSTRAINT (CRITICAL - APPLIES BEFORE ANY ALLOCATION):**
+    - The **Daily Work Cap of ${maxLocalPerDay} Local Staff** applies to PHASE 1 and PHASE 2 COMBINED.
+    - You MUST reserve space for days off. Do NOT assign more than ${maxLocalPerDay} Locals in total for any single day.
+    - **IF LIMIT REACHED IN PHASE 1:** You MUST use Roster staff to fill remaining Specialist roles.
 
     **PHASE 1: SPECIALIST ROLES (Mandatory)**
     1. **LC First:** Fill Load Control. If LC staff has SL skill, deduct 1 from SL demand.
@@ -418,10 +450,11 @@ export const repairProgramWithAI = async (
     3. **Other Roles:** Fill RAMP, OPS, LF.
     
     **PHASE 2: GENERAL HEADCOUNT (Ratio-Based)**
-    - Target **${rosterRatio}% Roster** and **${localRatio}% Local** for total shift count.
+    - Target **${rosterRatio}% Roster** and **${localRatio}% Local**.
+    - **Daily Work Cap (Local):** Ensure at least **${targetLocalOffPerDay}** Local staff are OFF daily to satisfy the 5/2 pattern.
     - **Allocation:**
        1. Fill Roster Quota first (check Contract Dates).
-       2. Fill Local Quota next (ensure 2 days off).
+       2. Fill Local Quota next (Do not exceed daily availability).
        3. Assign one-by-one to balance workload.
 
     ### ROLE LABELING:
@@ -446,12 +479,12 @@ export const repairProgramWithAI = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview', // Force Flash for speed
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
         responseSchema: ROSTER_SCHEMA,
-        thinkingConfig: { thinkingBudget: 32768 }
+        maxOutputTokens: 8192
       }
     });
     const parsed = safeParseJson(response.text);
