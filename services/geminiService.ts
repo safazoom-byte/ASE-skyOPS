@@ -102,82 +102,92 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     leaveBlackouts.push(`Staff Index ${sIdx} OFF: ${leave.startDate} to ${leave.endDate}`);
   });
 
-  // 3. Strict String-Matrix Schema
-  // We force all items to be strings to avoid AI confusion with mixed types, then parse INTs on client.
-  const robustSchema: Schema = {
-    type: Type.OBJECT,
-    properties: {
-      matrix: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING }
-        }
-      }
-    },
-    required: ["matrix"]
-  };
+  // 3. Define Strategy
+  // We try Pro with Schema first (Best quality). 
+  // If that fails, we try Flash with no Schema (Best parsing flexibility).
+  const strategies = [
+    { model: 'gemini-3-pro-preview', useSchema: true },
+    { model: 'gemini-3-flash-preview', useSchema: false }
+  ];
 
-  const prompt = `
-    ROLE: Aviation Scheduler.
-    TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
-
-    STAFF (Index|Initials|Skills|Credits):
-    ${staffContext}
-
-    SHIFTS (Index|Time|Needs):
-    ${shiftContext}
-
-    CONSTRAINTS:
-    ${leaveBlackouts.join('\n')}
-    - Min Rest: ${config.minRestHours}h.
-    - Don't exceed Staff Credits.
-
-    OUTPUT FORMAT:
-    Return a valid JSON object with a "matrix" property.
-    "matrix" is an array of arrays. Each inner array represents one assignment.
-    IMPORTANT: ALL VALUES MUST BE STRINGS.
-    
-    Format: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
-    
-    - DayOffset: "0" to "${config.numDays-1}"
-    - StaffIndex: Index from STAFF list
-    - ShiftIndex: Index from SHIFTS list
-    - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
-    
-    Example: { "matrix": [["0", "1", "5", "LC"], ["0", "2", "5", "RMP"], ["1", "1", "6", "LC"]] }
-  `;
-
-  // Automatic Retry Mechanism
-  let attempt = 0;
-  const maxAttempts = 2;
   let parsed: any = null;
+  let lastError: any = null;
 
-  while (attempt < maxAttempts) {
+  for (const strategy of strategies) {
       try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview', 
-          contents: prompt,
-          config: { 
-            responseMimeType: 'application/json',
-            responseSchema: robustSchema,
-            temperature: 0.1, 
+        const robustSchema: Schema = {
+            type: Type.OBJECT,
+            properties: {
+            matrix: {
+                type: Type.ARRAY,
+                items: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+                }
+            }
+            },
+            required: ["matrix"]
+        };
+
+        const prompt = `
+            ROLE: Aviation Scheduler.
+            TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
+
+            STAFF (Index|Initials|Skills|Credits):
+            ${staffContext}
+
+            SHIFTS (Index|Time|Needs):
+            ${shiftContext}
+
+            CONSTRAINTS:
+            ${leaveBlackouts.join('\n')}
+            - Min Rest: ${config.minRestHours}h.
+            - Don't exceed Staff Credits.
+
+            OUTPUT INSTRUCTIONS:
+            Return a JSON object with a "matrix" property.
+            "matrix" is an array of arrays: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
+            - DayOffset: "0" to "${config.numDays-1}"
+            - StaffIndex: Reference index from STAFF list
+            - ShiftIndex: Reference index from SHIFTS list
+            - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
+            
+            ${strategy.useSchema ? '' : 'RETURN ONLY RAW JSON. NO MARKDOWN.'}
+        `;
+
+        const requestConfig: any = {
+            temperature: 0.1,
             maxOutputTokens: 8192,
-          }
+        };
+
+        if (strategy.useSchema) {
+            requestConfig.responseMimeType = 'application/json';
+            requestConfig.responseSchema = robustSchema;
+        }
+
+        const response = await ai.models.generateContent({
+            model: strategy.model,
+            contents: prompt,
+            config: requestConfig
         });
 
         parsed = safeParseJson(response.text);
+        
+        // Validate basic structure
         if (parsed && parsed.matrix && Array.isArray(parsed.matrix)) {
-            break; // Success
+            // Check if it's not empty or looks reasonably valid
+            if (parsed.matrix.length > 0) {
+                break; // Success!
+            }
         }
       } catch (e) {
-        console.warn(`Attempt ${attempt + 1} failed:`, e);
+        console.warn(`Strategy ${strategy.model} failed:`, e);
+        lastError = e;
       }
-      attempt++;
   }
   
   if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
-      throw new Error("AI failed to generate a valid roster structure after multiple attempts.");
+      throw new Error("AI failed to generate a roster. Please try reducing the number of days or ensuring you have enough staff.");
   }
 
   // 4. Reconstruct Data from Matrix
@@ -297,7 +307,7 @@ export const repairProgramWithAI = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview', // Pro model for complex repairs
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
