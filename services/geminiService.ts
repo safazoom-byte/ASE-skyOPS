@@ -76,7 +76,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // 1. Prepare Staff & Shift Index Mappings
-  // We use indices (0, 1, 2) instead of UUIDs in the prompt to save 80% tokens
   const staffContext = data.staff.map((s, idx) => {
     const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':''].filter(Boolean).join(',');
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
@@ -164,13 +163,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     parsed.matrix.forEach((row: any[]) => {
         const [dayOff, sIdx, shIdx, role] = row;
         
+        // Safety check indices
         if (programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
             programs[dayOff].assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
                 staffId: data.staff[sIdx].id,
                 shiftId: data.shifts[shIdx].id,
                 role: role || 'AGT',
-                flightId: '' 
+                flightId: '' // Required by type definition
             });
         }
     });
@@ -236,17 +236,38 @@ export const repairProgramWithAI = async (
   constraints: { minRestHours: number }
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `FIX VIOLATIONS:\n${auditReport}\nROSTER: ${JSON.stringify(currentPrograms)}`;
+  
+  // Simplified Repair Prompt to ensure strict JSON return
+  const prompt = `
+    COMMAND: Fix Roster Violations.
+    ISSUES:
+    ${auditReport}
+    
+    CURRENT ROSTER (Compact): 
+    ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
+    
+    AVAILABLE STAFF:
+    ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials, q: [s.isShiftLeader?'SL':'', s.isLoadControl?'LC':'']} )))}
+    
+    INSTRUCTIONS:
+    1. Reassign staff to solve the issues (Rest or Qualification).
+    2. Return the COMPLETE updated "programs" array in standard JSON.
+    3. Ensure JSON is valid.
+  `;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
-      config: { responseMimeType: 'application/json' }
+      config: { 
+        responseMimeType: 'application/json',
+        maxOutputTokens: 8192
+      }
     });
     const parsed = safeParseJson(response.text);
     return { programs: parsed.programs || [] };
   } catch (err: any) {
-    throw new Error("Repair failed.");
+    console.error("Repair Error:", err);
+    throw new Error("Repair failed. Try a smaller scope.");
   }
 };
