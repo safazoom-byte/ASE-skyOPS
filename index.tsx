@@ -40,6 +40,7 @@ import { ShiftManager } from './components/ShiftManager';
 import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramChat } from './components/ProgramChat';
 import { GithubSync } from './components/GithubSync';
+import { CapacityForecast } from './components/CapacityForecast';
 import { Auth } from './components/Auth';
 import { SkyOpsLogo } from './components/Logo';
 import { generateAIProgram } from './services/geminiService';
@@ -360,6 +361,8 @@ const App: React.FC = () => {
                  ))}
              </div>
 
+             <CapacityForecast staff={staff} shifts={shifts} startDate={startDate} duration={programDuration} />
+
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 <div className="lg:col-span-2 space-y-6 md:space-y-8">
                   <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
@@ -399,7 +402,7 @@ const App: React.FC = () => {
                                   <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-2" value={incomingMin} onChange={e => setIncomingMin(e.target.value)}>
                                       {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
                                   </select>
-                               </div>
+                                </div>
                                <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0 && !incomingSearchTerm.trim()} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Bulk Lock Registry</button>
                           </div>
                           
@@ -408,13 +411,23 @@ const App: React.FC = () => {
                              <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Registered for {incomingDate}</h5>
                              <div className="flex flex-wrap gap-2">
                                {incomingDuties.filter(d => d.date === incomingDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
-                               {incomingDuties.filter(d => d.date === incomingDate).map(d => (
-                                 <div key={d.id} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in">
-                                    <span className="text-[10px] font-black text-amber-700 uppercase">{staff.find(s => s.id === d.staffId)?.initials}</span>
-                                    <span className="text-[10px] font-bold text-amber-600">{d.shiftEndTime}</span>
-                                    <button onClick={() => deleteIncomingDuty(d.id)} className="text-amber-400 hover:text-amber-600"><X size={10}/></button>
-                                 </div>
-                               ))}
+                               {incomingDuties.filter(d => d.date === incomingDate).map(d => {
+                                 const availDate = new Date(`${d.date}T${d.shiftEndTime}`);
+                                 availDate.setHours(availDate.getHours() + minRestHours);
+                                 const availStr = availDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                                 const isNextDay = availDate.getDate() !== new Date(d.date).getDate();
+                                 return (
+                                   <div key={d.id} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in group relative">
+                                      <span className="text-[10px] font-black text-amber-700 uppercase">{staff.find(s => s.id === d.staffId)?.initials}</span>
+                                      <span className="text-[10px] font-bold text-amber-600">{d.shiftEndTime}</span>
+                                      <div className="flex items-center gap-1 pl-2 border-l border-amber-200">
+                                         <Zap size={8} className="text-amber-400" />
+                                         <span className="text-[8px] font-black text-amber-500">{availStr}{isNextDay ? '+1' : ''}</span>
+                                      </div>
+                                      <button onClick={() => deleteIncomingDuty(d.id)} className="text-amber-400 hover:text-amber-600"><X size={10}/></button>
+                                   </div>
+                                 );
+                               })}
                              </div>
                           </div>
                       </div>
@@ -535,9 +548,3 @@ const App: React.FC = () => {
     </div>
   );
 };
-
-const rootElement = document.getElementById('root');
-if (rootElement) {
-  const root = createRoot(rootElement);
-  root.render(<App />);
-}

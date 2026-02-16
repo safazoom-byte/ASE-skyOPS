@@ -103,6 +103,28 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     } 
   }));
 
+  // PHASE 0: HARD REST ENFORCEMENT PRE-CALCULATION
+  // Calculate exact availability time for each staff in the rest log and explicitly BAN them from conflicting shifts.
+  const restBans: string[] = [];
+  if (data.incomingDuties && data.incomingDuties.length > 0) {
+    data.incomingDuties.forEach(duty => {
+      const staffMember = data.staff.find(s => s.id === duty.staffId);
+      if (!staffMember) return;
+
+      const lastShiftEnd = new Date(`${duty.date}T${duty.shiftEndTime}`);
+      const availableAt = new Date(lastShiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
+
+      data.shifts.forEach(shift => {
+        const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+        
+        // If the shift starts BEFORE the staff member is available (considering minRestHours)
+        if (shiftStart < availableAt) {
+           restBans.push(`- CONSTRAINT: Staff '${staffMember.id}' (${staffMember.initials}) MUST NOT be assigned to Shift ID '${shift.id}' (Shift Start: ${shift.pickupDate} ${shift.pickupTime}). REASON: Resting until ${availableAt.toISOString()}.`);
+        }
+      });
+    });
+  }
+
   // Create Strict Manifest of required shifts
   // We include the Day Index to help the AI map it to the 'programs' array
   const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | DayIndex: ${s.day} (${s.pickupDate}) | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
@@ -130,6 +152,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST + CREDIT ENFORCEMENT)
     OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
 
+    ### PHASE 0: HARD CONSTRAINTS (REST LOG ENFORCEMENT)
+    **CRITICAL**: The following assignments are PHYSICALLY IMPOSSIBLE due to fatigue laws.
+    You MUST NOT assign these staff to these specific shifts under any circumstances.
+    ${restBans.length > 0 ? restBans.join('\n') : "No rest violations detected from previous logs."}
+
     ### CRITICAL: THE SHIFT MANIFEST
     You are legally required to staff exactly ${data.shifts.length} shift slots.
     Below is the list of Shift IDs that MUST appear in your output assignments.
@@ -151,7 +178,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     **OFF-DAY ANCHORS (MANDATORY)**:
     To ensure the 5-shift limit is met evenly, follow these anchors:
     ${fairnessTable}
-    *Instructions: If a staff is listed as FORCE OFF for Day X, do NOT assign them unless absolutely no one else is available.*
+    *Instructions: If a staff is listed as FORCE OFF for Day X, do NOT assign them under any circumstances. Leave the shift understaffed if necessary.*
 
     ### PHASE 2: SPECIALIST ASSIGNMENT (DUAL ROLE OPTIMIZATION)
     For each shift, assign roles in this STRICT order:
@@ -171,14 +198,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - Fill the remaining slots to reach 'minStaff'.
     - Use **Roster** staff first.
     - Use **Local** staff second (checking the Fairness Table to skip those anchored as OFF).
+    - **CRITICAL**: If you run out of staff (due to rest, leave, or off-days), **LEAVE THE SLOT EMPTY**. It is better to return an understaffed roster than an illegal one.
 
-    ### PHASE 4: EMERGENCY OVERRIDE (FORCE FILL)
-    - **CHECK**: If a shift is still understaffed (Current < MinStaff).
-    - **ACTION**: You may override the 'FORCE OFF' rule.
-    - **PRIORITY**: Prioritize Local staff who have the lowest shift count so far (e.g., someone with 0 or 1 shift).
-    - **ZERO SHIFT RULE**: If staff like ML-ATZ, MN-ATZ have 0 shifts, they MUST be prioritized for these gaps.
-
-    ### PHASE 5: REST BARRIER
+    ### PHASE 4: REST BARRIER
     - 16:00 to 00:00 is only 8 hours. Illegal if minRest is 12.
 
     STATION DATA:
@@ -301,20 +323,19 @@ export const repairProgramWithAI = async (
     
     #### 1. DUAL ROLE & LC PRIORITY (CRITICAL)
     - **Load Control (LC)**: Must be filled.
-    - **Optimization**: If you assign an LC who is also SL, they cover BOTH requirements.
+    - **Optimization**: If the assigned LC staff is *also* a Shift Leader (SL), you count them towards the SL requirement too.
     - **Swap**: You can swap out a generic Agent to bring in a qualified LC/SL staff.
 
-    #### 2. MINIMUM STAFF COMPLIANCE (FORCE FILL)
-    - **Check \`minStaff\`**: If count < \`minStaff\`:
-       1. **FORCE FILL**: Identify Local staff with 0 shifts.
-       2. **ASSIGN**: Add them to the shift immediately.
-       3. **NOTE**: Do not leave gaps. Understaffing is forbidden.
+    #### 2. MINIMUM STAFF COMPLIANCE
+    - **Check \`minStaff\`**: Try to fill to \`minStaff\`.
+    - **CONSTRAINT**: Do NOT assign staff if it violates their 5-shift limit or rest rules.
+    - **NOTE**: It is better to leave a gap (understaffed) than to violate the law/contracts.
     
     #### 3. REST BARRIER
     - Ensure >${constraints.minRestHours}h rest gaps.
     
     #### 4. CREDIT LIMIT (REPAIR MODE)
-    - If a Local staff has 5 shifts, DO NOT ASSIGN them a 6th shift unless there is absolutely no other choice to fix a critical gap.
+    - If a Local staff has 5 shifts, DO NOT ASSIGN them a 6th shift. No exceptions.
 
     ### DATA SOURCES:
     - Staff Pool: ${JSON.stringify(staffContext)}
