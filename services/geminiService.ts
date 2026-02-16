@@ -14,20 +14,35 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
-// Robust JSON extraction helper
+// Robust JSON extraction helper that handles both code blocks and raw text
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  // Remove markdown code blocks
+  // Remove markdown code blocks and whitespace
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
   try {
     return JSON.parse(clean);
   } catch (e) {
-    // Attempt to extract JSON from text if dirty
+    // Attempt to extract JSON object/array from text if dirty
+    const firstBracket = clean.indexOf('[');
+    const lastBracket = clean.lastIndexOf(']');
     const firstBrace = clean.indexOf('{');
     const lastBrace = clean.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1) {
-       try { return JSON.parse(clean.substring(firstBrace, lastBrace + 1)); } catch (e2) {}
+    
+    // Determine which outer wrapper appears first/valid
+    let start = -1;
+    let end = -1;
+    
+    if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
+       start = firstBracket;
+       end = lastBracket;
+    } else if (firstBrace !== -1) {
+       start = firstBrace;
+       end = lastBrace;
+    }
+
+    if (start !== -1 && end !== -1) {
+       try { return JSON.parse(clean.substring(start, end + 1)); } catch (e2) {}
     }
     return null;
   }
@@ -48,7 +63,6 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
       const contractStart = new Date(staff.workFromDate);
       const contractEnd = new Date(staff.workToDate);
       
-      // Basic overlap calculation
       const overlapStart = progStart > contractStart ? progStart : contractStart;
       const overlapEnd = progEnd < contractEnd ? progEnd : contractEnd;
       
@@ -103,10 +117,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   // 3. Define Strategy
-  // Use Raw JSON extraction without strict Schema for maximum flexibility
+  // Use Pro model for logic. Use STRING mode to avoid JSON number/string type conflicts.
+  // Fallback to Flash in text mode if strict JSON fails.
   const strategies = [
-    { model: 'gemini-3-flash-preview' },
-    { model: 'gemini-2.5-flash' }
+    { model: 'gemini-3-pro-preview', mode: 'json' },
+    { model: 'gemini-2.0-flash-exp', mode: 'text' }
   ];
 
   let parsed: any = null;
@@ -131,24 +146,31 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
             OUTPUT INSTRUCTIONS:
             Return a JSON object with a single property "matrix".
-            "matrix" is an array of arrays: [DayOffset, StaffIndex, ShiftIndex, RoleCode]
+            "matrix" is an array of arrays.
+            Each inner array MUST BE STRINGS: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
             
-            Example: [[0, 1, 4, "LC"], [0, 2, 4, "AGT"]]
+            Example: [["0", "1", "4", "LC"], ["0", "2", "4", "AGT"]]
             
-            - DayOffset: Integer 0 to ${config.numDays-1}
-            - StaffIndex: Integer from STAFF list
-            - ShiftIndex: Integer from SHIFTS list
+            - DayOffset: "0" to "${config.numDays-1}"
+            - StaffIndex: Reference index from STAFF list
+            - ShiftIndex: Reference index from SHIFTS list
             - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
+            ${strategy.mode === 'text' ? 'RETURN RAW JSON ONLY. NO MARKDOWN.' : ''}
         `;
+
+        const requestConfig: any = {
+            temperature: 0.2,
+            maxOutputTokens: 8192,
+        };
+        
+        if (strategy.mode === 'json') {
+            requestConfig.responseMimeType = 'application/json';
+        }
 
         const response = await ai.models.generateContent({
             model: strategy.model,
             contents: prompt,
-            config: {
-                temperature: 0.1,
-                maxOutputTokens: 8192,
-                responseMimeType: 'application/json'
-            }
+            config: requestConfig
         });
 
         parsed = safeParseJson(response.text);
