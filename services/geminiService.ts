@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
 export interface BuildResult {
@@ -101,15 +101,49 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     leaveBlackouts.push(`Staff Index ${sIdx} OFF: ${leave.startDate} to ${leave.endDate}`);
   });
 
-  // 3. Compact Matrix Protocol Prompt
+  // 3. Matrix Schema Definition (Token-Optimized)
+  const rosterSchema = {
+    type: Type.OBJECT,
+    properties: {
+      matrix: {
+        type: Type.ARRAY,
+        description: "Array of assignment arrays. Each inner array is [dayIndex, staffIndex, shiftIndex, roleCode].",
+        items: {
+          type: Type.ARRAY,
+          items: {
+             type: Type.STRING // Schema limitation: Mixed types in array usually behave better as unspecified or handled via prompt instruction, but for strict typing in some SDK versions, we rely on prompt guidance for indices. 
+             // Actually, the new SDK handles generic arrays well. Let's use specific prompt guidance instead of over-constraining the inner array types if the SDK is strict.
+             // Best practice for matrix:
+          }
+        }
+      }
+    },
+    required: ["matrix"]
+  };
+  
+  // Better Schema for Matrix:
+  const robustSchema = {
+      type: Type.OBJECT,
+      properties: {
+          matrix: {
+              type: Type.ARRAY,
+              items: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING } // We will treat everything as string/number mixed in JSON
+              }
+          }
+      }
+  };
+
+
   const prompt = `
     ROLE: Aviation Scheduler.
     TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
 
-    STAFF LIST (Index|Initials|Skills|Credits):
+    STAFF (Index|Initials|Skills|Credits):
     ${staffContext}
 
-    SHIFTS LIST (Index|Time|Needs):
+    SHIFTS (Index|Time|Needs):
     ${shiftContext}
 
     CONSTRAINTS:
@@ -118,11 +152,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - Don't exceed Staff Credits.
 
     OUTPUT FORMAT:
-    Return a single JSON object with a "matrix" property.
-    "matrix" is an array of arrays: [DayOffset, StaffIndex, ShiftIndex, RoleCode].
-    DayOffset: 0 to ${config.numDays - 1}.
+    Return a JSON object with a "matrix" property.
+    "matrix" is an array of arrays. Each inner array represents one assignment:
+    [DayOffset (0-${config.numDays-1}), StaffIndex, ShiftIndex, RoleCode]
+    
     RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT".
-
     Example: { "matrix": [[0, 1, 5, "LC"], [0, 2, 5, "RMP"], [1, 1, 6, "LC"]] }
   `;
 
@@ -132,6 +166,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
+        responseSchema: robustSchema,
         temperature: 0.1, 
         maxOutputTokens: 8192,
       }
@@ -161,7 +196,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     // Populate from matrix
     parsed.matrix.forEach((row: any[]) => {
-        const [dayOff, sIdx, shIdx, role] = row;
+        // Handle potential string/number parsing if AI returns strings for indices
+        const dayOff = typeof row[0] === 'string' ? parseInt(row[0]) : row[0];
+        const sIdx = typeof row[1] === 'string' ? parseInt(row[1]) : row[1];
+        const shIdx = typeof row[2] === 'string' ? parseInt(row[2]) : row[2];
+        const role = row[3];
         
         // Safety check indices
         if (programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
@@ -206,25 +245,37 @@ export const extractDataFromContent = async (params: {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json" }
+    config: { 
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192 
+    }
   });
   return safeParseJson(response.text);
 };
 
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  // Pass compact IDs to save context
-  const parts: any[] = [
-    { text: `ROSTER: ${JSON.stringify(data.programs.map(p => ({d: p.dateString, a: p.assignments})))}` },
-    { text: `REQ: ${instruction}` },
-    { text: `STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}` }
-  ];
+  
+  const prompt = `
+    ROSTER MODIFICATION.
+    Instruction: ${instruction}
+    
+    Current Roster (Compact): ${JSON.stringify(data.programs.map(p => ({d: p.dateString, a: p.assignments})))}
+    Staff Map: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}
+    
+    Return strict JSON: { "programs": [ ...updated programs... ], "explanation": "string" }
+  `;
+  
+  const parts: any[] = [{ text: prompt }];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json" }
+    config: { 
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192 
+    }
   });
   return safeParseJson(response.text);
 };
@@ -237,22 +288,15 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Simplified Repair Prompt to ensure strict JSON return
   const prompt = `
-    COMMAND: Fix Roster Violations.
-    ISSUES:
+    FIX VIOLATIONS:
     ${auditReport}
     
-    CURRENT ROSTER (Compact): 
-    ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
+    ROSTER: ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
+    STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}
     
-    AVAILABLE STAFF:
-    ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials, q: [s.isShiftLeader?'SL':'', s.isLoadControl?'LC':'']} )))}
-    
-    INSTRUCTIONS:
-    1. Reassign staff to solve the issues (Rest or Qualification).
-    2. Return the COMPLETE updated "programs" array in standard JSON.
-    3. Ensure JSON is valid.
+    TASK: Reassign to solve issues. 
+    Return strictly: { "programs": [ ...full updated programs array... ] }
   `;
 
   try {
@@ -267,7 +311,6 @@ export const repairProgramWithAI = async (
     const parsed = safeParseJson(response.text);
     return { programs: parsed.programs || [] };
   } catch (err: any) {
-    console.error("Repair Error:", err);
-    throw new Error("Repair failed. Try a smaller scope.");
+    throw new Error("Repair failed.");
   }
 };
