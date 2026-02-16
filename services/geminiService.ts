@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
 export interface BuildResult {
@@ -33,17 +33,6 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-const getOverlapDays = (start1: Date, end1: Date, start2: Date, end2: Date) => {
-  const s1 = new Date(Date.UTC(start1.getUTCFullYear(), start1.getUTCMonth(), start1.getUTCDate()));
-  const e1 = new Date(Date.UTC(end1.getUTCFullYear(), end1.getUTCMonth(), end1.getUTCDate()));
-  const s2 = new Date(Date.UTC(start2.getUTCFullYear(), start2.getUTCMonth(), start2.getUTCDate()));
-  const e2 = new Date(Date.UTC(end2.getUTCFullYear(), end2.getUTCMonth(), end2.getUTCDate()));
-  const overlapStart = s1 > s2 ? s1 : s2;
-  const overlapEnd = e1 < e2 ? e1 : e2;
-  if (overlapStart > overlapEnd) return 0;
-  return Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-};
-
 const calculateCredits = (staff: Staff, startDate: string, duration: number, leaveRequests: LeaveRequest[] = []) => {
   const progStart = new Date(startDate);
   const progEnd = new Date(startDate);
@@ -58,7 +47,14 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
     } else {
       const contractStart = new Date(staff.workFromDate);
       const contractEnd = new Date(staff.workToDate);
-      grossCredits = getOverlapDays(progStart, progEnd, contractStart, contractEnd);
+      
+      // Basic overlap calculation
+      const overlapStart = progStart > contractStart ? progStart : contractStart;
+      const overlapEnd = progEnd < contractEnd ? progEnd : contractEnd;
+      
+      if (overlapStart <= overlapEnd) {
+         grossCredits = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      }
     }
   }
 
@@ -67,7 +63,12 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
   staffLeaves.forEach(leave => {
     const leaveStart = new Date(leave.startDate);
     const leaveEnd = new Date(leave.endDate);
-    leaveDeduction += getOverlapDays(progStart, progEnd, leaveStart, leaveEnd);
+    const overlapStart = progStart > leaveStart ? progStart : leaveStart;
+    const overlapEnd = progEnd < leaveEnd ? progEnd : leaveEnd;
+    
+    if (overlapStart <= overlapEnd) {
+        leaveDeduction += Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
   });
   return Math.max(0, grossCredits - leaveDeduction);
 };
@@ -101,40 +102,21 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     leaveBlackouts.push(`Staff Index ${sIdx} OFF: ${leave.startDate} to ${leave.endDate}`);
   });
 
-  // 3. Matrix Schema Definition (Token-Optimized)
-  const rosterSchema = {
+  // 3. Strict String-Matrix Schema
+  // We force all items to be strings to avoid AI confusion with mixed types, then parse INTs on client.
+  const robustSchema: Schema = {
     type: Type.OBJECT,
     properties: {
       matrix: {
         type: Type.ARRAY,
-        description: "Array of assignment arrays. Each inner array is [dayIndex, staffIndex, shiftIndex, roleCode].",
         items: {
           type: Type.ARRAY,
-          items: {
-             type: Type.STRING // Schema limitation: Mixed types in array usually behave better as unspecified or handled via prompt instruction, but for strict typing in some SDK versions, we rely on prompt guidance for indices. 
-             // Actually, the new SDK handles generic arrays well. Let's use specific prompt guidance instead of over-constraining the inner array types if the SDK is strict.
-             // Best practice for matrix:
-          }
+          items: { type: Type.STRING }
         }
       }
     },
     required: ["matrix"]
   };
-  
-  // Better Schema for Matrix:
-  const robustSchema = {
-      type: Type.OBJECT,
-      properties: {
-          matrix: {
-              type: Type.ARRAY,
-              items: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING } // We will treat everything as string/number mixed in JSON
-              }
-          }
-      }
-  };
-
 
   const prompt = `
     ROLE: Aviation Scheduler.
@@ -152,79 +134,93 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - Don't exceed Staff Credits.
 
     OUTPUT FORMAT:
-    Return a JSON object with a "matrix" property.
-    "matrix" is an array of arrays. Each inner array represents one assignment:
-    [DayOffset (0-${config.numDays-1}), StaffIndex, ShiftIndex, RoleCode]
+    Return a valid JSON object with a "matrix" property.
+    "matrix" is an array of arrays. Each inner array represents one assignment.
+    IMPORTANT: ALL VALUES MUST BE STRINGS.
     
-    RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT".
-    Example: { "matrix": [[0, 1, 5, "LC"], [0, 2, 5, "RMP"], [1, 1, 6, "LC"]] }
+    Format: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
+    
+    - DayOffset: "0" to "${config.numDays-1}"
+    - StaffIndex: Index from STAFF list
+    - ShiftIndex: Index from SHIFTS list
+    - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
+    
+    Example: { "matrix": [["0", "1", "5", "LC"], ["0", "2", "5", "RMP"], ["1", "1", "6", "LC"]] }
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', 
-      contents: prompt,
-      config: { 
-        responseMimeType: 'application/json',
-        responseSchema: robustSchema,
-        temperature: 0.1, 
-        maxOutputTokens: 8192,
-      }
-    });
+  // Automatic Retry Mechanism
+  let attempt = 0;
+  const maxAttempts = 2;
+  let parsed: any = null;
 
-    const parsed = safeParseJson(response.text);
-    
-    if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
-        console.error("Invalid AI Output:", response.text);
-        throw new Error("AI returned malformed data. Please retry.");
-    }
-
-    // 4. Reconstruct Data from Matrix
-    const programs: DailyProgram[] = [];
-    
-    // Initialize empty days
-    for(let i=0; i<config.numDays; i++) {
-        const d = new Date(config.startDate);
-        d.setDate(d.getDate() + i);
-        programs.push({
-            day: i,
-            dateString: d.toISOString().split('T')[0],
-            assignments: [],
-            offDuty: []
+  while (attempt < maxAttempts) {
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview', 
+          contents: prompt,
+          config: { 
+            responseMimeType: 'application/json',
+            responseSchema: robustSchema,
+            temperature: 0.1, 
+            maxOutputTokens: 8192,
+          }
         });
-    }
 
-    // Populate from matrix
-    parsed.matrix.forEach((row: any[]) => {
-        // Handle potential string/number parsing if AI returns strings for indices
-        const dayOff = typeof row[0] === 'string' ? parseInt(row[0]) : row[0];
-        const sIdx = typeof row[1] === 'string' ? parseInt(row[1]) : row[1];
-        const shIdx = typeof row[2] === 'string' ? parseInt(row[2]) : row[2];
-        const role = row[3];
-        
-        // Safety check indices
-        if (programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
-            programs[dayOff].assignments.push({
-                id: Math.random().toString(36).substr(2, 9),
-                staffId: data.staff[sIdx].id,
-                shiftId: data.shifts[shIdx].id,
-                role: role || 'AGT',
-                flightId: '' // Required by type definition
-            });
+        parsed = safeParseJson(response.text);
+        if (parsed && parsed.matrix && Array.isArray(parsed.matrix)) {
+            break; // Success
         }
-    });
-    
-    return {
-      programs,
-      stationHealth: 95,
-      alerts: [],
-      isCompliant: true
-    };
-
-  } catch (err: any) {
-    console.error("Gemini Error:", err);
-    throw new Error(`Roster Build Failed: ${err.message}`);
+      } catch (e) {
+        console.warn(`Attempt ${attempt + 1} failed:`, e);
+      }
+      attempt++;
   }
+  
+  if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
+      throw new Error("AI failed to generate a valid roster structure after multiple attempts.");
+  }
+
+  // 4. Reconstruct Data from Matrix
+  const programs: DailyProgram[] = [];
+  
+  // Initialize empty days
+  for(let i=0; i<config.numDays; i++) {
+      const d = new Date(config.startDate);
+      d.setDate(d.getDate() + i);
+      programs.push({
+          day: i,
+          dateString: d.toISOString().split('T')[0],
+          assignments: [],
+          offDuty: []
+      });
+  }
+
+  // Populate from matrix
+  parsed.matrix.forEach((row: string[]) => {
+      // Parse Strings back to Integers
+      const dayOff = parseInt(row[0]);
+      const sIdx = parseInt(row[1]);
+      const shIdx = parseInt(row[2]);
+      const role = row[3];
+      
+      // Safety check indices
+      if (!isNaN(dayOff) && !isNaN(sIdx) && !isNaN(shIdx) && programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
+          programs[dayOff].assignments.push({
+              id: Math.random().toString(36).substr(2, 9),
+              staffId: data.staff[sIdx].id,
+              shiftId: data.shifts[shIdx].id,
+              role: role || 'AGT',
+              flightId: '' // Required by type definition
+          });
+      }
+  });
+  
+  return {
+    programs,
+    stationHealth: 95,
+    alerts: [],
+    isCompliant: true
+  };
 };
 
 export const extractDataFromContent = async (params: { 
