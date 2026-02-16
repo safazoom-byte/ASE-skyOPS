@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
 export interface BuildResult {
@@ -14,7 +14,7 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
-// Robust JSON extraction helper
+// Robust JSON extraction helper that can fix common LLM JSON errors
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   
@@ -24,7 +24,7 @@ const safeParseJson = (text: string | undefined): any => {
   try {
     return JSON.parse(clean);
   } catch (e) {
-    // 2. If direct parse fails, try to find the outermost JSON object or array
+    // 2. If direct parse fails, try to find the outermost JSON object
     const firstBrace = clean.indexOf('{');
     const lastBrace = clean.lastIndexOf('}');
     
@@ -32,55 +32,17 @@ const safeParseJson = (text: string | undefined): any => {
       try {
         return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
       } catch (e2) {
-        // Continue to fallback
+        // 3. Last resort: Try to append closing brace if truncated
+        try {
+          return JSON.parse(clean.substring(firstBrace) + "}");
+        } catch (e3) {
+           console.error("JSON Parse Failed completely:", text);
+           return null;
+        }
       }
     }
-    
-    console.error("JSON Parse Failed:", text);
     return null;
   }
-};
-
-// Simplified Schema for Robustness
-const ROSTER_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    programs: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          day: { type: Type.INTEGER },
-          dateString: { type: Type.STRING },
-          assignments: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                staffId: { type: Type.STRING },
-                flightId: { type: Type.STRING },
-                role: { type: Type.STRING },
-                shiftId: { type: Type.STRING }
-              }
-            }
-          }
-        }
-      }
-    },
-    stationHealth: { type: Type.NUMBER },
-    alerts: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          type: { type: Type.STRING },
-          message: { type: Type.STRING }
-        }
-      }
-    }
-  },
-  required: ["programs", "stationHealth"]
 };
 
 // --- HELPER: Calculate Overlap Days ---
@@ -247,44 +209,39 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     });
   }
 
-  // WorkForce Ratio
-  const totalStaffCount = availableStaff.length || 1;
-  const localStaffCount = availableStaff.filter(s => s.type === 'Local').length;
-  const rosterStaffCount = availableStaff.filter(s => s.type === 'Roster').length;
-  const localRatio = Math.round((localStaffCount / totalStaffCount) * 100);
-  const rosterRatio = 100 - localRatio;
-
-  const targetLocalOffPerDay = Math.ceil(localStaffCount * (2/7));
-  const maxLocalPerDay = Math.max(0, localStaffCount - targetLocalOffPerDay);
-
   const prompt = `
     ROLE: MASTER AVIATION SCHEDULER
     TASK: Build a ${config.numDays}-day roster.
     START_DATE: ${config.startDate}
 
-    **GOAL:** Fill all shift requirements using available staff, respecting skills, leave, and contracts.
+    **GOAL:** Fill all shift requirements using available staff.
 
     **STAFF POOL:**
-    ${availableStaff.map(s => `- ${s.initials} (${s.type}) [Creds: ${s.credits}] Skills:${s.skills.LC?'LC':''}${s.skills.SL?'SL':''}${s.skills.Ops?'OPS':''}${s.skills.Ramp?'RMP':''}`).join('\n')}
-
-    **RULES:**
-    1. **CONTRACTS:** Roster staff ONLY work within contract dates.
-    2. **LEAVE:** Staff on leave are UNAVAILABLE.
-    3. **REST:** Minimum ${config.minRestHours}h rest between shifts.
-    4. **LOCAL LIMIT:** Max ~${maxLocalPerDay} local staff working per day.
-    5. **SKILLS:** Assign staff only to roles they have skills for (LC, SL, etc).
-    6. **BEST EFFORT:** If perfect compliance isn't possible, FILL THE SHIFT ANYWAY and note the alert. DO NOT return empty.
-
-    **CONSTRAINTS:**
-    ${contractContext.join('\n')}
-    ${leaveBlackouts.join('\n')}
-    ${hardConstraints.join('\n')}
-    ${restRules.slice(0, 50).join('\n')}... (and more rest rules)
+    ${availableStaff.map(s => `- ID:${s.id} (${s.initials}) [Creds:${s.credits}] Skills:${s.skills.LC?'LC':''}${s.skills.SL?'SL':''}${s.skills.Ops?'OPS':''}${s.skills.Ramp?'RMP':''}`).join('\n')}
 
     **SHIFTS TO FILL (Daily):**
     ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, needs: s.roleCounts })))}
 
-    **OUTPUT:** JSON only.
+    **CRITICAL INSTRUCTIONS:**
+    1. **USE EXACT IDS:** When assigning a staff member, use their exact 'id' from the STAFF POOL. When assigning a shift, use the exact 'id' from the SHIFTS TO FILL list.
+    2. **FORMAT:** Return a JSON object with this exact structure:
+       {
+         "programs": [
+           {
+             "day": 0,
+             "dateString": "YYYY-MM-DD",
+             "assignments": [
+               { "id": "unique_string", "staffId": "EXACT_STAFF_ID", "shiftId": "EXACT_SHIFT_ID", "role": "SkillName" }
+             ]
+           }
+         ],
+         "stationHealth": 90,
+         "alerts": []
+       }
+    3. **CONSTRAINTS:**
+       ${contractContext.join('\n')}
+       ${leaveBlackouts.join('\n')}
+       ${restRules.slice(0, 30).join('\n')}
   `;
 
   try {
@@ -293,8 +250,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        responseSchema: ROSTER_SCHEMA,
-        systemInstruction: "You are a robust roster engine. You MUST return a valid JSON object with 'programs' array populated, even if imperfect. Never return empty arrays.",
+        // Removed responseSchema to prevent strict validation errors
+        systemInstruction: "You are a JSON-only roster engine. Do not include markdown formatting. Return valid JSON.",
+        temperature: 0.1, // Low temperature for deterministic output
         maxOutputTokens: 8192,
       }
     });
@@ -302,9 +260,13 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const parsed = safeParseJson(response.text);
     
     // Safety check: if programs array is missing or empty, throw specific error
-    if (!parsed || !parsed.programs || !Array.isArray(parsed.programs) || parsed.programs.length === 0) {
-      console.error("AI returned empty programs:", response.text);
-      throw new Error("AI generated an empty roster. Check staff availability vs shift demand.");
+    if (!parsed || !parsed.programs || !Array.isArray(parsed.programs)) {
+      console.error("AI returned invalid structure:", response.text);
+      throw new Error("AI generated an invalid roster structure. Please retry.");
+    }
+    
+    if (parsed.programs.length === 0) {
+      throw new Error("AI returned 0 days. Check if shifts cover the selected date range.");
     }
     
     return {
@@ -400,7 +362,6 @@ export const repairProgramWithAI = async (
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        responseSchema: ROSTER_SCHEMA,
         maxOutputTokens: 8192
       }
     });

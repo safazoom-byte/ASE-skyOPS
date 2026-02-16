@@ -361,6 +361,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
       const tableData = sortedShiftIds.map((shiftId, i) => {
         const sh = getShiftById(shiftId);
+        // Fallback info if shift ID missing
+        const pickupTime = sh?.pickupTime || 'UNK';
+        const endTime = sh?.endTime || 'UNK';
+        const maxStaff = sh?.maxStaff || sh?.minStaff || '?';
+        
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
         const personnelStr = shiftsMap[shiftId].map(a => {
           const st = getStaffById(a.staffId);
@@ -370,7 +375,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
           return `${st?.initials || '??'}${roleLabel ? ' ' + roleLabel : ''}${restStr}`;
         }).join(' | ');
-        return [(i+1).toString(), sh?.pickupTime || '--:--', sh?.endTime || '--:--', fls, `${shiftsMap[shiftId].length} / ${sh?.maxStaff || sh?.minStaff || '0'}`, personnelStr];
+        return [(i+1).toString(), pickupTime, endTime, fls, `${shiftsMap[shiftId].length} / ${maxStaff}`, personnelStr];
       });
       autoTable(doc, {
         startY: 36, head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']], body: tableData, theme: 'grid',
@@ -425,7 +430,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
              if (sh) {
                 const rest = calculateRestHours(s.id, p.dateString!, sh.pickupTime);
                 row.push(`${sh.pickupTime}\n${rest !== null ? '(' + rest.toFixed(1) + 'H REST)' : ''}`);
-             } else row.push('ERROR');
+             } else row.push('UNK SHIFT');
           } else row.push('-');
        });
        const st = staffStats[s.id];
@@ -503,15 +508,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                           return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
                         }).map(([shiftId, group]) => {
                            const sh = getShiftById(shiftId);
+                           // Visual fallback if shift data missing
+                           const pickupTime = sh?.pickupTime || 'UNK';
+                           const endTime = sh?.endTime || 'UNK';
+                           
                            const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ');
                            return (
                              <div key={shiftId} className="flex flex-col md:flex-row gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
                                 <div className="w-full md:w-48 shrink-0 space-y-2">
                                    <div className="flex items-center gap-2">
                                       <Clock size={14} className="text-blue-500" />
-                                      <span className="text-sm font-black italic text-slate-900">{sh?.pickupTime} - {sh?.endTime}</span>
+                                      <span className="text-sm font-black italic text-slate-900">{pickupTime} - {endTime}</span>
                                    </div>
                                    {fls && <div className="flex items-center gap-2"><Plane size={12} className="text-slate-400" /><span className="text-[9px] font-bold text-slate-500">{fls}</span></div>}
+                                   {!sh && <span className="text-[8px] font-bold bg-rose-100 text-rose-500 px-2 py-0.5 rounded-full">ID Mismatch</span>}
                                 </div>
                                 <div className="flex-1 flex flex-wrap gap-2">
                                    {group.map(a => {
@@ -521,7 +531,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       const restViolated = rest !== null && rest < (minRestHours || 12);
                                       return (
                                         <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 transition-all hover:scale-105 ${roleCode ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
-                                           <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials}</span>
+                                           <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials || 'UNK'}</span>
                                            {roleCode && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{roleCode}</span>}
                                            {rest !== null && (
                                               <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[7px] font-black ${restViolated ? 'bg-rose-100 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
