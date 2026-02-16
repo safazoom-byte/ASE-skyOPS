@@ -87,37 +87,72 @@ const ROSTER_SCHEMA = {
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Enriched staff mapping to include ALL skills to prevent hallucinations
+  const staffContext = data.staff.map(s => ({ 
+    id: s.id, 
+    initials: s.initials, 
+    type: s.type, 
+    workFrom: s.workFromDate, 
+    workTo: s.workToDate, 
+    skills: { 
+      SL: s.isShiftLeader, 
+      LC: s.isLoadControl, 
+      RMP: s.isRamp,
+      OPS: s.isOps,
+      LF: s.isLostFound
+    } 
+  }));
+
   const prompt = `
-    ROLE: AVIATION ROSTER SOLVER (STRICT CONSTRAINT ENGINE)
+    ROLE: AVIATION ROSTER SOLVER (ALGORITHMIC ENGINE)
     OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
 
-    ### 1. THE "TOKEN BUCKET" RULE (CRITICAL FOR LOCAL STAFF)
-    You MUST mentally maintain a "Day Credit" counter for every staff member:
-    - **LOCAL STAFF**: Start with **5 CREDITS**.
-      - Every time you assign a Local staff member to a day, **DEDUCT 1 CREDIT**.
-      - **FATAL ERROR**: If Credits = 0, you **CANNOT** assign this person again. They are unavailable.
-      - **MANDATORY**: Local staff MUST have 2 days off (0 assignments) in this 7-day period.
-    - **ROSTER STAFF**: Start with **7 CREDITS**.
-      - Use them for up to 7 days if they are within their contract dates ('workFromDate' to 'workToDate').
+    ### EXECUTION PROTOCOL (FOLLOW STRICTLY IN ORDER):
 
-    ### 2. THE "REST BARRIER" (FATIGUE SAFETY)
-    - Before assigning a staff member to a shift, check their **PREVIOUS SHIFT END TIME**.
-    - **CALCULATION**: (NewShift_Start_Time - PreviousShift_End_Time) MUST be >= ${config.minRestHours} hours.
-    - Check the provided 'REST LOG' (IncomingDuties) for duties ending before Day 1.
-    - **FATAL ERROR**: Assigning a staff member with < ${config.minRestHours}h rest (e.g. 16:00 to 00:00, then starting 08:00 next day) is FORBIDDEN.
+    #### STEP 1: PRIORITIZE "ROSTER" STAFF
+    - Identify staff with type="Roster".
+    - Check if the roster date falls within their 'workFrom' and 'workTo' dates.
+    - **STRATEGY**: Maximize usage of these staff first as they do not have the 5-day limit (they work continuously within their block).
 
-    ### 3. ASSIGNMENT HIERARCHY
-    1. **FILL SPECIALISTS**: Assign 'Shift Leader' (SL), 'Load Control' (LC), 'Ramp' (RMP), 'Ops' (OPS) roles first.
-    2. **UTILIZE ROSTER STAFF**: Prioritize 'Roster' staff to preserve 'Local' staff credits.
-    3. **FILL LOCALS**: Use 'Local' staff to fill remaining slots, strictly adhering to the 5-Credit limit.
-    4. **VACANCY**: If no staff are legal (due to Credits or Rest), leave the slot unassigned or use a different eligible staff member. Do NOT force an illegal assignment.
+    #### STEP 2: ASSIGN SPECIFIC ROLES (MANDATORY)
+    - **Scanning**: Check \`roleCounts\` for ALL requested roles (SL, LC, Ramp, Ops, LF).
+    - **Priority Order**:
+      1. Assign 'Shift Leader' (SL) & 'Load Control' (LC) first (Critical).
+      2. Assign remaining roles (Ramp, Ops, LF) exactly as requested in \`roleCounts\`.
+    - **Constraint**: Use Roster staff first, then Local. 
+    - **Note**: If a role is NOT requested in \`roleCounts\`, do NOT assign it here.
+
+    #### STEP 3: THE "CREDIT SYSTEM" (LOCAL STAFF LIMIT)
+    - **LOCAL STAFF** start with **5 CREDITS** (Max 5 working days).
+    - **DECREMENT**: Every assignment costs 1 Credit.
+    - **STOP CONDITION**: When Credits = 0 (5 days worked), the staff member is **REMOVED** from the available pool for the rest of the period.
+    - **VIOLATION PREVENTION**: It is strictly forbidden to assign a 6th shift to a Local staff member.
+
+    #### STEP 4: MINIMUM STAFF COMPLIANCE (HEADCOUNT FILL)
+    - **CHECK**: Calculate current \`total_assigned\` for the shift (from Step 2).
+    - **LOOP**: WHILE \`total_assigned\` < \`minStaff\`:
+       1. Assign an available staff member (Roster available OR Local with >0 credits).
+       2. **ROLE LABELING**: Label them as **"Agent"** (Generic Filler).
+          - **DO NOT** use "Ramp" or "Ops" here. Those are only for Step 2.
+       3. Increment \`total_assigned\`.
+    
+    #### STEP 5: REST BARRIER
+    - Ensure ${config.minRestHours} hours gap between shifts (check previous day's shift end time).
+
+    ### ABSOLUTE LAWS (ZERO TOLERANCE):
+    1. **QUALIFICATION MATCH**:
+       - \`skills.SL=false\` CANNOT be assigned 'Shift Leader'.
+       - \`skills.LC=false\` CANNOT be assigned 'Load Control'.
+    2. **NO INVENTED ROLES**:
+       - Only output roles explicitly requested in \`roleCounts\`.
+       - For Step 4 (Fillers), use "Agent" only.
 
     STATION DATA:
-    - STAFF POOL: ${JSON.stringify(data.staff.map(s => ({ id: s.id, initials: s.initials, type: s.type, workFrom: s.workFromDate, workTo: s.workToDate, skills: { SL: s.isShiftLeader, LC: s.isLoadControl, RMP: s.isRamp } })))}
-    - SHIFTS CONFIG: ${JSON.stringify(data.shifts)}
+    - STAFF POOL: ${JSON.stringify(staffContext)}
+    - SHIFTS CONFIG: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, pickupTime: s.pickupTime, endTime: s.endTime, roleCounts: s.roleCounts, minStaff: s.minStaff })))}
     - FLIGHT SCHEDULE: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, date: f.date })))}
-    - REST LOG (PREV DUTIES): ${JSON.stringify(data.incomingDuties)}
-    - LEAVE (ABSENCE): ${JSON.stringify(data.leaveRequests)}
+    - REST LOG: ${JSON.stringify(data.incomingDuties)}
+    - LEAVE: ${JSON.stringify(data.leaveRequests)}
 
     OUTPUT: Return JSON matching the schema.
   `;
@@ -205,20 +240,51 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR PROTOCOL v9.0 (STRICT MODE)
-    OBJECTIVE: Fix violations in the roster below.
+  // Enriched staff mapping for Repair context
+  const staffContext = data.staff.map(s => ({ 
+    id: s.id, 
+    initials: s.initials, 
+    type: s.type, 
+    workFrom: s.workFromDate, 
+    workTo: s.workToDate,
+    skills: { 
+      SL: s.isShiftLeader, 
+      LC: s.isLoadControl, 
+      RMP: s.isRamp,
+      OPS: s.isOps,
+      LF: s.isLostFound
+    } 
+  }));
 
-    ### VIOLATION REPORT:
+  const prompt = `
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (PRIORITY MODE)
+    OBJECTIVE: Fix violations in the roster below while strictly adhering to the Station Allocation Protocol.
+
+    ### VIOLATION REPORT (PRIORITY FIXES):
     ${auditReport}
 
-    ### REPAIR INSTRUCTIONS (ZERO TOLERANCE):
-    1. **REMOVE ILLEGAL ASSIGNMENTS**: Immediately unassign any Local staff member flagged for working >5 days.
-    2. **FILL WITH STANDBY**: Replace the removed staff with Roster staff who are currently 'Standby' (not working that day) and are valid within their contract dates.
-    3. **REST BUFFER**: If a violation is "FATIGUE RISK" (<${constraints.minRestHours}h), swap the fatigued agent with a fresh one.
+    ### ALLOCATION PROTOCOL (ENFORCE DURING REPAIR):
     
+    #### 1. QUALIFICATION & SPECIFIC ROLES
+    - **Fix Qualification**: Swap staff if they lack the required skill.
+    - **Specific Roles**: Ensure all roles in \`roleCounts\` are filled by qualified staff.
+    
+    #### 2. THE "CREDIT SYSTEM" (LOCAL STAFF LIMIT)
+    - **HARD KILL**: If a Local staff member > 5 shifts, **DELETE** the extra shifts (Day 6, Day 7). 
+    - It is better to have an EMPTY slot than an illegal 6th shift.
+    
+    #### 3. MINIMUM STAFF COMPLIANCE (HEADCOUNT FILL)
+    - **Check \`minStaff\`**: If count < \`minStaff\`, fill the slot with a valid replacement.
+    - **Priority**: Use ROSTER staff first, then LOCAL staff (with < 5 shifts).
+    - **ROLE LABELING**: Label fillers as **"Agent"**. 
+       - Do NOT use "Ramp" or "Ops" here (only in Step 1).
+    
+    #### 4. REST BARRIER
+    - Ensure >${constraints.minRestHours}h rest gaps between shifts.
+
     ### DATA SOURCES:
-    - Staff: ${JSON.stringify(data.staff)}
+    - Staff Pool: ${JSON.stringify(staffContext)}
+    - Shift Specs: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, roleCounts: s.roleCounts, minStaff: s.minStaff })))}
     - Current Roster: ${JSON.stringify(currentPrograms)}
 
     ### OUTPUT FORMAT:

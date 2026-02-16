@@ -14,21 +14,17 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      'process.env.API_KEY': JSON.stringify(apiKey || ''),
-      'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl || ''),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey || '')
+      'process.env.API_KEY': JSON.stringify(apiKey),
+      'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey)
     },
     build: {
       target: 'esnext',
       outDir: 'dist',
       sourcemap: false,
       minify: 'terser',
-      // Force new filenames every build to prevent Vercel caching old JS
       rollupOptions: {
         output: {
-          entryFileNames: `assets/[name].[hash]-${Date.now()}.js`,
-          chunkFileNames: `assets/[name].[hash]-${Date.now()}.js`,
-          assetFileNames: `assets/[name].[hash]-${Date.now()}.[ext]`,
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
             'vendor-utils': ['xlsx', 'jspdf', 'jspdf-autotable', 'lucide-react']
