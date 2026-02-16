@@ -168,35 +168,37 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          'ANNUAL LEAVE': [],
          'STANDBY (RESERVE)': []
       };
+      
       staff.forEach(s => {
+         // If they are working, skip
          if (assignedIds.has(s.id)) return;
-         const stat = staffStats[s.id];
+
+         // Check specific conditions
          const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
          const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
+         
          let category = '';
+
          if (leave) {
+            // Map leave types to categories
             if (leave.type === 'Day off') category = 'DAYS OFF';
             else if (leave.type === 'Roster leave') category = 'ROSTER LEAVE';
             else category = 'ANNUAL LEAVE'; 
          } else if (restLock) {
             category = 'RESTING (POST-DUTY)';
          } else if (s.type === 'Roster') {
+             // If Roster staff is outside contract dates, they are Roster Leave (Contract)
              const isOutside = s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate);
              category = isOutside ? 'ROSTER LEAVE' : 'STANDBY (RESERVE)';
          } else if (s.type === 'Local') {
+             // If Local staff is not working and not on leave, they are on their "Day Off"
              category = 'DAYS OFF';
          } else {
              category = 'STANDBY (RESERVE)';
          }
-         let count = 0;
-         if (category === 'DAYS OFF') count = stat.off;
-         else if (category === 'ROSTER LEAVE') count = 7; 
-         else if (category === 'ANNUAL LEAVE') count = stat.annualLeave;
-         else if (category === 'STANDBY (RESERVE)') count = stat.standby;
+
          if (registryGroups[category]) {
-             let displayStr = s.initials;
-             if (category !== 'RESTING (POST-DUTY)') displayStr += ` (${count})`;
-             registryGroups[category].push(displayStr);
+             registryGroups[category].push(s.initials);
          }
       });
       return registryGroups;
@@ -206,7 +208,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     const r = String(role || '').trim().toUpperCase();
     if (!r) return '';
     
-    // Explicit Role Mapping to ensure specific roles are captured
+    // STRICT HIERARCHY DISPLAY
+    // Only show these specific roles. Hide generic AGT/STAFF/FILLER.
     if (r.includes('SHIFT LEADER') || r === 'SL') return 'SL';
     if (r.includes('LOAD CONTROL') || r === 'LC') return 'LC';
     if (r.includes('RAMP') || r === 'RMP') return 'RMP';
@@ -216,16 +219,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     // Catch combined roles like LC/SL
     if (r.includes('LC') && r.includes('SL')) return 'LC/SL';
 
-    // IGNORE GENERIC ROLES (User request: "put initials only" for non-requested roles)
-    const ignored = ['AGENT', 'STAFF', 'GENERAL', 'MEMBER', 'CREW'];
-    if (ignored.some(ig => r.includes(ig))) return '';
-    
-    // Allow basic codes if they match known patterns
-    const allowed = ['LC', 'SL', 'OPS', 'RMP', 'LF', 'LC/SL'];
-    if (allowed.includes(r)) return r;
+    // Explicitly return empty for generic roles so they show as just Initials in the boxes
+    const genericRoles = ['AGT', 'AGENT', 'STAFF', 'MEMBER', 'CREW', 'GEN', 'FILLER', 'GHA'];
+    if (genericRoles.some(gr => r === gr || r.includes(gr))) return '';
 
-    // Fallback: return truncated version if it looks like a role name
-    return r.substring(0, 4);
+    return ''; // Default to empty if not a specialist role
   };
 
   const formatRoleLabel = (role: string | undefined) => {
@@ -243,7 +241,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       staff.forEach(s => {
         if (s.type === 'Local') {
            const count = staffStats[s.id]?.work || 0;
-           let limit = 5;
+           let limit = 5; // Base limit
            
            // Deduct leaves from limit to avoid false negatives
            if (startDate && endDate) {

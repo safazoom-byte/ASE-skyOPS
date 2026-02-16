@@ -1,5 +1,5 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
+import { GoogleGenAI } from "@google/genai";
+import { DailyProgram, ProgramData, Staff, LeaveRequest, IncomingDuty } from "../types";
 
 export interface BuildResult {
   programs: DailyProgram[];
@@ -14,35 +14,27 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
-// Robust JSON extraction helper that handles both code blocks and raw text
+// 1. ROBUST JSON PARSER
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  // Remove markdown code blocks and whitespace
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
   try {
     return JSON.parse(clean);
   } catch (e) {
-    // Attempt to extract JSON object/array from text if dirty
-    const firstBracket = clean.indexOf('[');
-    const lastBracket = clean.lastIndexOf(']');
-    const firstBrace = clean.indexOf('{');
-    const lastBrace = clean.lastIndexOf('}');
-    
-    // Determine which outer wrapper appears first/valid
-    let start = -1;
-    let end = -1;
-    
-    if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
-       start = firstBracket;
-       end = lastBracket;
-    } else if (firstBrace !== -1) {
-       start = firstBrace;
-       end = lastBrace;
-    }
-
-    if (start !== -1 && end !== -1) {
-       try { return JSON.parse(clean.substring(start, end + 1)); } catch (e2) {}
+    try {
+      if (clean.startsWith('[') && !clean.endsWith(']')) {
+        const variants = [']', '}]', '"}]', '"]', '0}]']; 
+        for (const suffix of variants) {
+            try { return JSON.parse(clean + suffix); } catch (err) {}
+        }
+        const lastObjectEnd = clean.lastIndexOf('}');
+        if (lastObjectEnd > 0) {
+            return JSON.parse(clean.substring(0, lastObjectEnd + 1) + ']');
+        }
+      }
+    } catch (finalErr) {
+      console.error("JSON Repair Failed", finalErr);
     }
     return null;
   }
@@ -54,11 +46,15 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
   progEnd.setDate(progStart.getDate() + duration - 1);
 
   let grossCredits = 0;
+  
   if (staff.type === 'Local') {
+    // Local Staff: 5 days work per 7 days standard
+    // We calculate the ratio based on duration
     grossCredits = Math.ceil(duration * (5/7));
   } else {
+    // Roster Staff: Unlimited availability within contract dates, unless restricted by other rules
     if (!staff.workFromDate || !staff.workToDate) {
-      grossCredits = duration; 
+      grossCredits = duration; // Assume available whole period if no dates (fallback)
     } else {
       const contractStart = new Date(staff.workFromDate);
       const contractEnd = new Date(staff.workToDate);
@@ -67,135 +63,210 @@ const calculateCredits = (staff: Staff, startDate: string, duration: number, lea
       const overlapEnd = progEnd < contractEnd ? progEnd : contractEnd;
       
       if (overlapStart <= overlapEnd) {
-         grossCredits = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+         // Calculate days available
+         const diffTime = overlapEnd.getTime() - overlapStart.getTime();
+         grossCredits = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      } else {
+         grossCredits = 0; // Contract does not overlap with this program at all
       }
     }
   }
 
+  // Deduct Annual/Sick Leave Days from Credits
   let leaveDeduction = 0;
   const staffLeaves = leaveRequests.filter(l => l.staffId === staff.id);
   staffLeaves.forEach(leave => {
-    const leaveStart = new Date(leave.startDate);
-    const leaveEnd = new Date(leave.endDate);
-    const overlapStart = progStart > leaveStart ? progStart : leaveStart;
-    const overlapEnd = progEnd < leaveEnd ? progEnd : leaveEnd;
-    
-    if (overlapStart <= overlapEnd) {
-        leaveDeduction += Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    // Only deduct credits for "Work-blocking" leave types (Annual, Sick). 
+    // "Day off" requests just block specific days but don't necessarily reduce the 5-day work requirement if possible to fit elsewhere,
+    // BUT usually if a user requests a day off, they expect it to count towards their 2 days off.
+    // However, if they take 'Annual Leave', that reduces the work days.
+    if (leave.type === 'Annual leave' || leave.type === 'Sick leave' || leave.type === 'Lieu leave') {
+        const leaveStart = new Date(leave.startDate);
+        const leaveEnd = new Date(leave.endDate);
+        const overlapStart = progStart > leaveStart ? progStart : leaveStart;
+        const overlapEnd = progEnd < leaveEnd ? progEnd : leaveEnd;
+        if (overlapStart <= overlapEnd) {
+            leaveDeduction += Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        }
     }
   });
+
   return Math.max(0, grossCredits - leaveDeduction);
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // 1. Prepare Staff & Shift Index Mappings
-  const staffContext = data.staff.map((s, idx) => {
-    const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':''].filter(Boolean).join(',');
+  // 1. FILTER STAFF BY DATE (Strict Mode) & INCOMING DUTY REST
+  const programStart = new Date(config.startDate);
+  const programEnd = new Date(config.startDate);
+  programEnd.setDate(programStart.getDate() + config.numDays - 1);
+  const programEndStr = programEnd.toISOString().split('T')[0];
+
+  const validStaff = data.staff.filter(s => {
+      // Locals are always valid (unless manually removed, handled elsewhere)
+      if (s.type === 'Local') return true;
+      
+      // Roster staff must have dates defined and be active
+      if (s.type === 'Roster') {
+        if (!s.workFromDate || !s.workToDate) return false;
+        // Check for ANY overlap. If their contract ends before program starts, or starts after program ends, remove them.
+        if (s.workToDate < config.startDate) return false; 
+        if (s.workFromDate > programEndStr) return false;
+      }
+      return true;
+  });
+
+  // 2. Prepare Staff Map & Context
+  const staffMap: Record<string, string> = {}; // Initials -> ID
+  validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
+
+  // Ratio calculation for the prompt
+  const localCount = validStaff.filter(s => s.type === 'Local').length;
+  const rosterCount = validStaff.filter(s => s.type === 'Roster').length;
+  const totalCount = localCount + rosterCount;
+  const localRatio = totalCount > 0 ? (localCount / totalCount).toFixed(2) : "0.5";
+
+  const staffContext = validStaff.map(s => {
+    const skills = [
+        s.isLoadControl?'LC':'', 
+        s.isShiftLeader?'SL':'', 
+        s.isOps?'OPS':'', 
+        s.isRamp?'RMP':'',
+        s.isLostFound?'LF':''
+    ].filter(Boolean).join(',');
+    
+    // Credits = How many shifts they SHOULD work this week
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
-    return `${idx}|${s.initials}|${skills}|${credits}`;
+    
+    return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|Credits:${credits}`;
   }).join('\n');
 
   const shiftContext = data.shifts.map((s, idx) => {
-    return `${idx}|${s.pickupTime}-${s.endTime}|${JSON.stringify(s.roleCounts)}`;
+    // Explicitly listing Min Staff to force AI compliance
+    return `ID:${idx}|Time:${s.pickupTime}-${s.endTime}|MinStaff:${s.minStaff}|Roles:${JSON.stringify(s.roleCounts)}`;
   }).join('\n');
 
-  // 2. Prepare Constraints
-  const leaveBlackouts: string[] = [];
-  const start = new Date(config.startDate);
-  const end = new Date(config.startDate);
-  end.setDate(start.getDate() + config.numDays - 1);
-
+  // 3. Prepare Constraints
+  const explicitConstraints: string[] = [];
+  
+  // A. Leave Requests (Hard Blocks)
   (data.leaveRequests || []).forEach(leave => {
-    const sIdx = data.staff.findIndex(st => st.id === leave.staffId);
-    if (sIdx === -1) return;
+    const staffMember = validStaff.find(st => st.id === leave.staffId);
+    if (!staffMember) return;
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
-    if (lEnd < start || lStart > end) return;
-    leaveBlackouts.push(`Staff Index ${sIdx} OFF: ${leave.startDate} to ${leave.endDate}`);
+    // Overlap check
+    if (lEnd >= programStart && lStart <= programEnd) {
+       explicitConstraints.push(`- ${staffMember.initials} is UNAVAILABLE from ${leave.startDate} to ${leave.endDate} (Reason: ${leave.type}).`);
+    }
   });
 
-  // 3. Define Strategy
-  // Use Pro model for logic. Use STRING mode to avoid JSON number/string type conflicts.
-  // Fallback to Flash in text mode if strict JSON fails.
+  // B. Roster Contract Boundaries (Partial Weeks)
+  validStaff.forEach(s => {
+      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+          if (s.workFromDate > config.startDate) {
+              explicitConstraints.push(`- ${s.initials} CONTRACT STARTS ${s.workFromDate}. DO NOT ASSIGN BEFORE.`);
+          }
+          if (s.workToDate < programEndStr) {
+              explicitConstraints.push(`- ${s.initials} CONTRACT ENDS ${s.workToDate}. DO NOT ASSIGN AFTER.`);
+          }
+      }
+  });
+
+  // C. Incoming Duty Rest Logic (Rest Log)
+  (data.incomingDuties || []).forEach(d => {
+      const staffMember = validStaff.find(s => s.id === d.staffId);
+      if (!staffMember) return;
+      // Calculate when they are free: ShiftEnd + MinRest
+      const shiftEnd = new Date(`${d.date}T${d.shiftEndTime}`);
+      const freeAt = new Date(shiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
+      
+      // We format this for the AI to understand "Block until X time"
+      // If freeAt is within the program window
+      if (freeAt > programStart) {
+          const freeAtStr = freeAt.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+          explicitConstraints.push(`- ${staffMember.initials} is RESTING until ${freeAtStr}. ABSOLUTELY NO SHIFTS BEFORE THIS TIME.`);
+      }
+  });
+
+  // 4. Define Strategy
   const strategies = [
-    { model: 'gemini-3-pro-preview', mode: 'json' },
-    { model: 'gemini-2.0-flash-exp', mode: 'text' }
+    { model: 'gemini-3-pro-preview', temp: 0.15 },
+    { model: 'gemini-2.0-flash-exp', temp: 0.1 }
   ];
 
   let parsed: any = null;
-  let lastError: any = null;
 
   for (const strategy of strategies) {
       try {
         const prompt = `
-            ROLE: Aviation Scheduler.
-            TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
+            ROLE: Master Aviation Scheduler.
+            GOAL: Build a weekly roster strictly following the HIERARCHY OF ALLOCATION and CREDIT LIMITS.
 
-            STAFF (Index|Initials|Skills|Credits):
+            INPUT DATA:
+            Period: ${config.startDate} to ${programEndStr}.
+            
+            STAFF LIST (ID | Type | Skills | Credits):
             ${staffContext}
 
-            SHIFTS (Index|Time|Needs):
+            SHIFTS (ID | Time | MinStaff | RoleNeeds):
             ${shiftContext}
 
+            HIERARCHY OF ALLOCATION (Execute strictly in this order per shift):
+            1. **Load Control (LC)**: Fill 'Load Control' needs using ONLY 'LC' skilled staff. Assign Role="LC".
+            2. **Shift Leader (SL)**: Fill 'Shift Leader' needs using ONLY 'SL' skilled staff. Assign Role="SL".
+               *OPTIMIZATION*: If a staff member assigned to LC also has SL skill, you MAY count them towards the SL requirement logic, but prioritize filling the SL slot with a distinct person if headcount allows.
+            3. **Operations (OPS)**: Fill 'Operations' needs using 'OPS' staff. Assign Role="OPS".
+            4. **Ramp (RMP)**: Fill 'Ramp' needs using 'RMP' staff. Assign Role="RMP".
+            5. **Lost & Found (LF)**: Fill 'Lost and Found' needs using 'LF' staff. Assign Role="LF".
+            6. **MINIMUM STAFF**: Fill remaining slots until 'MinStaff' is reached using ANY available staff. Assign Role="AGT".
+            7. **RATIO BALANCE**: If 'MinStaff' reached but 'MaxStaff' not reached, add extra staff based on Credits availability. Maintain approx ${localRatio} ratio of Locals. Assign Role="AGT".
+
+            MANDATORY RULES:
+            - **CREDITS**: Staff have a 'Credits' value. This is the TARGET number of shifts they should work. Do not exceed it significantly.
+            - **NO 0.0H REST**: If staff works Late (ends >20:00), NO Early shift (starts <12:00) next day.
+            - **CONTRACTS**: Do not assign Roster staff outside their contract dates.
+            - **LOCAL BALANCE**: Distribute "Days Off" for Locals evenly. Do not leave Sunday empty (ensure at least some locals work every day).
+            - **REST LOG**: Respect the resting constraints listed below.
+
             CONSTRAINTS:
-            ${leaveBlackouts.join('\n')}
-            - Min Rest: ${config.minRestHours}h.
-            - Don't exceed Staff Credits.
+            ${explicitConstraints.join('\n')}
 
-            OUTPUT INSTRUCTIONS:
-            Return a JSON object with a single property "matrix".
-            "matrix" is an array of arrays.
-            Each inner array MUST BE STRINGS: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
+            OUTPUT FORMAT:
+            JSON Array. Use Initials for 'staff'.
+            [
+              { "day": 0, "shift": 0, "staff": "MS-ATZ", "role": "LC" },
+              { "day": 0, "shift": 0, "staff": "AG-HMB", "role": "AGT" }
+            ]
             
-            Example: [["0", "1", "4", "LC"], ["0", "2", "4", "AGT"]]
-            
-            - DayOffset: "0" to "${config.numDays-1}"
-            - StaffIndex: Reference index from STAFF list
-            - ShiftIndex: Reference index from SHIFTS list
-            - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
-            ${strategy.mode === 'text' ? 'RETURN RAW JSON ONLY. NO MARKDOWN.' : ''}
+            IMPORTANT: Return ONLY valid JSON.
         `;
-
-        const requestConfig: any = {
-            temperature: 0.2,
-            maxOutputTokens: 8192,
-        };
-        
-        if (strategy.mode === 'json') {
-            requestConfig.responseMimeType = 'application/json';
-        }
 
         const response = await ai.models.generateContent({
             model: strategy.model,
             contents: prompt,
-            config: requestConfig
+            config: {
+                temperature: strategy.temp,
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json'
+            }
         });
 
         parsed = safeParseJson(response.text);
-        
-        // Validate basic structure
-        if (parsed && parsed.matrix && Array.isArray(parsed.matrix)) {
-            // Check if it's not empty or looks reasonably valid
-            if (parsed.matrix.length > 0) {
-                break; // Success!
-            }
-        }
+        if (Array.isArray(parsed) && parsed.length > 0) break;
       } catch (e) {
         console.warn(`Strategy ${strategy.model} failed:`, e);
-        lastError = e;
       }
   }
   
-  if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
-      throw new Error("AI failed to generate a roster. Please ensure you have Shifts and Staff registered, or try a shorter date range.");
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error("AI failed to generate a valid roster. Please try a shorter date range or check staff availability.");
   }
 
-  // 4. Reconstruct Data from Matrix
+  // 5. Reconstruct Data
   const programs: DailyProgram[] = [];
   
-  // Initialize empty days
   for(let i=0; i<config.numDays; i++) {
       const d = new Date(config.startDate);
       d.setDate(d.getDate() + i);
@@ -207,29 +278,33 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       });
   }
 
-  // Populate from matrix
-  parsed.matrix.forEach((row: any[]) => {
-      // Parse Strings back to Integers safely
-      const dayOff = parseInt(String(row[0]));
-      const sIdx = parseInt(String(row[1]));
-      const shIdx = parseInt(String(row[2]));
-      const role = String(row[3]);
-      
-      // Safety check indices
-      if (!isNaN(dayOff) && !isNaN(sIdx) && !isNaN(shIdx) && programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
-          programs[dayOff].assignments.push({
-              id: Math.random().toString(36).substr(2, 9),
-              staffId: data.staff[sIdx].id,
-              shiftId: data.shifts[shIdx].id,
-              role: role || 'AGT',
-              flightId: '' // Required by type definition
-          });
+  parsed.forEach((item: any) => {
+      const dayOffset = typeof item.day === 'string' ? parseInt(item.day) : item.day;
+      const shiftIdx = typeof item.shift === 'string' ? parseInt(item.shift) : item.shift;
+      const staffInitials = String(item.staff || '').toUpperCase().trim();
+      const role = String(item.role || 'AGT');
+
+      if (
+          !isNaN(dayOffset) && programs[dayOffset] && 
+          !isNaN(shiftIdx) && data.shifts[shiftIdx] &&
+          staffMap[staffInitials]
+      ) {
+          const exists = programs[dayOffset].assignments.find(a => a.staffId === staffMap[staffInitials]);
+          if (!exists) {
+              programs[dayOffset].assignments.push({
+                  id: Math.random().toString(36).substr(2, 9),
+                  staffId: staffMap[staffInitials],
+                  shiftId: data.shifts[shiftIdx].id,
+                  role: role,
+                  flightId: '' 
+              });
+          }
       }
   });
   
   return {
     programs,
-    stationHealth: 95,
+    stationHealth: 98,
     alerts: [],
     isCompliant: true
   };
@@ -268,7 +343,7 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
     ROSTER MODIFICATION.
     Instruction: ${instruction}
     
-    Current Roster (Compact): ${JSON.stringify(data.programs.map(p => ({d: p.dateString, a: p.assignments})))}
+    Current Roster: ${JSON.stringify(data.programs.map(p => ({d: p.dateString, a: p.assignments})))}
     Staff Map: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}
     
     Return strict JSON: { "programs": [ ...updated programs... ], "explanation": "string" }
@@ -297,19 +372,21 @@ export const repairProgramWithAI = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    FIX VIOLATIONS:
+    FIX VIOLATIONS in Roster.
+    Errors:
     ${auditReport}
     
+    Data:
     ROSTER: ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
-    STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}
+    STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials, s: s.isShiftLeader?'SL':'AGT'})))}
     
-    TASK: Reassign to solve issues. 
+    TASK: Reassign staff to solve issues. Keep structure.
     Return strictly: { "programs": [ ...full updated programs array... ] }
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', // Pro model for complex repairs
+      model: 'gemini-3-pro-preview', 
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
