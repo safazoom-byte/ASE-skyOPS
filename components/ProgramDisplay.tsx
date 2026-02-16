@@ -205,18 +205,27 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r) return '';
-    // Normalize and Filter to explicit allowed list
-    if (r === 'SHIFT LEADER' || r === 'SL') return 'SL';
-    if (r === 'LOAD CONTROL' || r === 'LC') return 'LC';
-    if (r === 'RAMP' || r === 'RMP') return 'RMP';
-    if (r === 'OPERATIONS' || r === 'OPS') return 'OPS';
-    if (r === 'LOST AND FOUND' || r === 'LF') return 'LF';
-    if (r === 'LC/SL' || r === 'SL/LC' || (r.includes('LC') && r.includes('SL'))) return 'LC/SL';
     
-    // Whitelist specific codes, block everything else (e.g. "General", "Assistant")
+    // Explicit Role Mapping to ensure specific roles are captured
+    if (r.includes('SHIFT LEADER') || r === 'SL') return 'SL';
+    if (r.includes('LOAD CONTROL') || r === 'LC') return 'LC';
+    if (r.includes('RAMP') || r === 'RMP') return 'RMP';
+    if (r.includes('OPERATIONS') || r.includes('OPS') || r === 'OPS') return 'OPS';
+    if (r.includes('LOST') || r === 'LF' || r === 'L&F') return 'LF';
+    
+    // Catch combined roles like LC/SL
+    if (r.includes('LC') && r.includes('SL')) return 'LC/SL';
+
+    // IGNORE GENERIC ROLES (User request: "put initials only" for non-requested roles)
+    const ignored = ['AGENT', 'STAFF', 'GENERAL', 'MEMBER', 'CREW'];
+    if (ignored.some(ig => r.includes(ig))) return '';
+    
+    // Allow basic codes if they match known patterns
     const allowed = ['LC', 'SL', 'OPS', 'RMP', 'LF', 'LC/SL'];
     if (allowed.includes(r)) return r;
-    return ''; // Default to no role label (just initials)
+
+    // Fallback: return truncated version if it looks like a role name
+    return r.substring(0, 4);
   };
 
   const formatRoleLabel = (role: string | undefined) => {
@@ -355,6 +364,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
         const personnelStr = shiftsMap[shiftId].map(a => {
           const st = getStaffById(a.staffId);
+          // Explicitly format all roles (RAMP, OPS, etc.)
           const roleLabel = formatRoleLabel(a.role);
           const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
           const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
