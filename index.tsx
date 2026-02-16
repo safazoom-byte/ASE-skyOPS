@@ -361,7 +361,7 @@ const App: React.FC = () => {
                  ))}
              </div>
 
-             <CapacityForecast staff={staff} shifts={shifts} startDate={startDate} duration={programDuration} />
+             <CapacityForecast staff={staff} shifts={shifts} leaveRequests={leaveRequests} startDate={startDate} duration={programDuration} />
 
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 <div className="lg:col-span-2 space-y-6 md:space-y-8">
@@ -549,13 +549,8 @@ const App: React.FC = () => {
   );
 };
 
-// MOUNTING LOGIC
-const rootElement = document.getElementById('root');
-if (rootElement) {
-  const root = createRoot(rootElement);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<App />);
 }

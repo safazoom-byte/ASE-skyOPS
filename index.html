@@ -40,6 +40,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <script>
+      // Environment Polyfill for Browser Compatibility
       window.process = window.process || {};
       window.process.env = window.process.env || {};
     </script>
@@ -64,5 +65,18 @@
   <body class="bg-slate-50 overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('SkyOPS Service Worker registered:', registration.scope);
+            })
+            .catch(error => {
+              console.log('SkyOPS Service Worker registration failed:', error);
+            });
+        });
+      }
+    </script>
   </body>
 </html>

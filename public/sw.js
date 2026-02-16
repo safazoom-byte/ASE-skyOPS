@@ -1,5 +1,5 @@
 // SkyOPS AI - Production Service Worker
-const CACHE_NAME = 'skyops-v3';
+const CACHE_NAME = 'skyops-v5';
 const OFFLINE_URL = '/index.html';
 
 self.addEventListener('install', (event) => {
@@ -30,7 +30,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch handler required for "Add to Home Screen" prompt
+// Fetch handler required for "Add to Home Screen" prompt and SPA navigation
 self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(

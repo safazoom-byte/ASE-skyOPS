@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, SchemaType } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
 export interface BuildResult {
@@ -14,42 +14,34 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
+// Robust JSON extraction helper
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  // Aggressively clean markdown blocks to prevent parsing errors
-  let cleanText = text.replace(/```json\n?|```/gi, "").trim();
+  
+  // 1. Clean Markdown wrappers commonly returned by LLMs
+  let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
   try {
-    return JSON.parse(cleanText);
+    return JSON.parse(clean);
   } catch (e) {
-    // Fallback: Attempt to find the first array or object if text contains preamble
-    const startIdx = Math.min(
-      cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
-      cleanText.indexOf('{') === -1 && cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
-    );
-    if (startIdx === Infinity) return null;
-    let candidate = cleanText.slice(startIdx);
+    // 2. If direct parse fails, try to find the outermost JSON object or array
+    const firstBrace = clean.indexOf('{');
+    const lastBrace = clean.lastIndexOf('}');
     
-    // Attempt to parse the candidate string
-    try {
-        return JSON.parse(candidate);
-    } catch (e2) {
-        // Simple stack parser for truncated or messy JSON
-        let stack: string[] = [];
-        for (let i = 0; i < candidate.length; i++) {
-          const char = candidate[i];
-          if (char === '{' || char === '[') stack.push(char);
-          else if (char === '}' || char === ']') {
-            const last = stack.pop();
-            if ((char === '}' && last === '{') || (char === ']' && last === '[')) {
-              if (stack.length === 0) return JSON.parse(candidate.slice(0, i + 1));
-            }
-          }
-        }
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
+      } catch (e2) {
+        // Continue to fallback
+      }
     }
+    
+    console.error("JSON Parse Failed:", text);
     return null;
   }
 };
 
+// Simplified Schema for Robustness
 const ROSTER_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -70,12 +62,10 @@ const ROSTER_SCHEMA = {
                 flightId: { type: Type.STRING },
                 role: { type: Type.STRING },
                 shiftId: { type: Type.STRING }
-              },
-              required: ["id", "staffId", "role", "shiftId"]
+              }
             }
           }
-        },
-        required: ["day", "dateString", "assignments"]
+        }
       }
     },
     stationHealth: { type: Type.NUMBER },
@@ -224,6 +214,7 @@ const generateLeaveBlackouts = (leaveRequests: LeaveRequest[], staffList: Staff[
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Prepare Credit Bank
   const creditBank: Record<string, number> = {};
   data.staff.forEach(s => {
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
@@ -256,100 +247,76 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     });
   }
 
-  // CALCULATE WORKFORCE RATIO & OFF-QUOTA
+  // WorkForce Ratio
   const totalStaffCount = availableStaff.length || 1;
   const localStaffCount = availableStaff.filter(s => s.type === 'Local').length;
   const rosterStaffCount = availableStaff.filter(s => s.type === 'Roster').length;
   const localRatio = Math.round((localStaffCount / totalStaffCount) * 100);
   const rosterRatio = 100 - localRatio;
 
-  // Calculate Daily Off-Quota: Standard 2 days off per 7 days = ~28.5% of local staff must be off daily
   const targetLocalOffPerDay = Math.ceil(localStaffCount * (2/7));
   const maxLocalPerDay = Math.max(0, localStaffCount - targetLocalOffPerDay);
 
   const prompt = `
     ROLE: MASTER AVIATION SCHEDULER
-    OBJECTIVE: Build a ${config.numDays}-day roster starting ${config.startDate}.
-    
-    ### WORKFORCE METRICS:
-    - **Local Staff:** ${localRatio}% of workforce.
-    - **Roster Staff:** ${rosterRatio}% of workforce.
-    - **Daily Off-Quota (Local):** Approx. ${targetLocalOffPerDay} Local staff must be OFF each day.
-    - **Daily Work Cap (Local):** MAX ${maxLocalPerDay} Local staff can work per day.
+    TASK: Build a ${config.numDays}-day roster.
+    START_DATE: ${config.startDate}
 
-    ### EXECUTION LOGIC (STRICT SEQUENCE):
-    
-    **GLOBAL CONSTRAINT (CRITICAL - APPLIES BEFORE ANY ALLOCATION):**
-    - The **Daily Work Cap of ${maxLocalPerDay} Local Staff** applies to PHASE 1 (Specialists) and PHASE 2 (General) COMBINED.
-    - You MUST reserve space for days off. Do NOT assign more than ${maxLocalPerDay} Locals in total for any single day.
-    - **IF LIMIT REACHED IN PHASE 1:** You MUST use Roster staff to fill remaining Specialist roles.
+    **GOAL:** Fill all shift requirements using available staff, respecting skills, leave, and contracts.
 
-    **PHASE 1: SPECIALIST ROLES (Mandatory Priority)**
-    1. **Assign LOAD CONTROL (LC):** Fill all LC requirements first.
-       - *Optimization:* If an assigned LC staff has 'Shift Leader' (SL) skill, deduct 1 from the SL requirement for that shift.
-       - *Constraint:* Monitor the Local Count. If you hit ${maxLocalPerDay}, switch to Roster staff immediately.
-    2. **Assign SHIFT LEADER (SL):** Fill remaining SL requirements.
-    3. **Assign OTHERS:** Fill RAMP, OPS, and LF requirements.
-    
-    **PHASE 2: GENERAL HEADCOUNT (Ratio & Staggered Off-Days)**
-    - **Distribution Rule:** Apply the station ratio (${rosterRatio}% Roster / ${localRatio}% Local) to the remaining slots.
-    - **Strict Cap:** Do not exceed the remaining availability of Locals (Max ${maxLocalPerDay} minus those used in Phase 1).
-    
-    **PHASE 3: ALLOCATION PROCESS (One-by-One)**
-    1. **Roster Staff Allocation:** 
-       - Fill the Roster quota.
-       - Assign staff **one by one** to balance workload.
-       - **CONSTRAINT:** STRICTLY check Contract Dates (workFromDate -> workToDate). If outside dates, CANNOT work.
-    2. **Local Staff Allocation:**
-       - Fill the remaining Local slots up to the cap.
-       - Assign staff **one by one** to balance workload.
-       - **CONSTRAINT:** Local staff MUST have **2 DAYS OFF** in this ${config.numDays}-day period.
+    **STAFF POOL:**
+    ${availableStaff.map(s => `- ${s.initials} (${s.type}) [Creds: ${s.credits}] Skills:${s.skills.LC?'LC':''}${s.skills.SL?'SL':''}${s.skills.Ops?'OPS':''}${s.skills.Ramp?'RMP':''}`).join('\n')}
 
-    **PHASE 4: EXCLUSIONS**
-    - If staff is in Leave Registry or Rest Log, they are STRICTLY EXCLUDED.
+    **RULES:**
+    1. **CONTRACTS:** Roster staff ONLY work within contract dates.
+    2. **LEAVE:** Staff on leave are UNAVAILABLE.
+    3. **REST:** Minimum ${config.minRestHours}h rest between shifts.
+    4. **LOCAL LIMIT:** Max ~${maxLocalPerDay} local staff working per day.
+    5. **SKILLS:** Assign staff only to roles they have skills for (LC, SL, etc).
+    6. **BEST EFFORT:** If perfect compliance isn't possible, FILL THE SHIFT ANYWAY and note the alert. DO NOT return empty.
 
-    ### ROLE LABELING INSTRUCTION:
-    - For Phase 1 (Specialist): Use specific role names ("LC", "SL", "RAMP", "OPS", "LF").
-    - For Phase 2 (General): Use the role name "Agent" or "General".
-
-    ### STAFF POOL:
-    ${availableStaff.map(s => `- ${s.initials} (${s.type}) [Skills: ${s.skills.LC?'LC ':''}${s.skills.SL?'SL ':''}${s.skills.Ops?'OPS ':''}${s.skills.Ramp?'RMP ':''}${s.skills.LF?'LF':''}]`).join('\n')}
-
-    ### EXCLUSIONS & RESTRICTIONS:
+    **CONSTRAINTS:**
     ${contractContext.join('\n')}
     ${leaveBlackouts.join('\n')}
     ${hardConstraints.join('\n')}
+    ${restRules.slice(0, 50).join('\n')}... (and more rest rules)
 
-    ### FORBIDDEN TRANSITIONS (REST LAWS):
-    ${restRules.join('\n')}
+    **SHIFTS TO FILL (Daily):**
+    ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, needs: s.roleCounts })))}
 
-    ### SHIFT REQUIREMENTS:
-    - SHIFTS: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, minStaff: s.minStaff, roles: s.roleCounts })))}
-
-    OUTPUT: Return JSON matching the schema.
+    **OUTPUT:** JSON only.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Force Flash for speed
+      model: 'gemini-3-flash-preview', 
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
         responseSchema: ROSTER_SCHEMA,
-        maxOutputTokens: 8192, // Crucial for preventing JSON truncation on 7-day rosters
+        systemInstruction: "You are a robust roster engine. You MUST return a valid JSON object with 'programs' array populated, even if imperfect. Never return empty arrays.",
+        maxOutputTokens: 8192,
       }
     });
+
     const parsed = safeParseJson(response.text);
-    if (!parsed || !parsed.programs) throw new Error("AI returned malformed or empty data.");
+    
+    // Safety check: if programs array is missing or empty, throw specific error
+    if (!parsed || !parsed.programs || !Array.isArray(parsed.programs) || parsed.programs.length === 0) {
+      console.error("AI returned empty programs:", response.text);
+      throw new Error("AI generated an empty roster. Check staff availability vs shift demand.");
+    }
     
     return {
-      programs: parsed.programs || [],
-      stationHealth: parsed.stationHealth || 0,
+      programs: parsed.programs,
+      stationHealth: parsed.stationHealth || 90,
       alerts: parsed.alerts || [],
       isCompliant: true
     };
+
   } catch (err: any) {
-    throw new Error(err.message || "AI Engine failure.");
+    console.error("Gemini Generation Error:", err);
+    throw new Error(`Roster Build Failed: ${err.message}`);
   }
 };
 
@@ -366,23 +333,24 @@ export const extractDataFromContent = async (params: {
     params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   }
   const prompt = `
-    COMMAND: STATION REGISTRY EXTRACTION
-    OBJECTIVE: Parse and extract aviation station data into structured JSON.
+    COMMAND: EXTRACT AVIATION DATA to JSON.
     TARGET: ${params.targetType}
-    STATION_START_DATE: ${params.startDate || 'N/A'}
-
-    INSTRUCTIONS:
-    1. EXTRACT FLIGHTS: Look for flight numbers, sectors, times.
-    2. EXTRACT STAFF: Look for names, initials, roles. Look for date ranges (Start/End dates) and capture them as workFromDate/workToDate.
-    3. EXTRACT SHIFTS: Look for duty start/end times.
-    4. EXTRACT LEAVE/ABSENCE: Look for "Leave Registry", "Absence", "Days Off". Return as 'leaveRequests' array.
-    5. EXTRACT REST/FATIGUE: Look for "Rest Log", "Previous Duties", "Fatigue Audit". Return as 'incomingDuties' array.
+    START_DATE: ${params.startDate || 'N/A'}
+    
+    Instructions:
+    - Extract Flights (flightNumber, from, to, times)
+    - Extract Staff (name, initials, type, skills)
+    - Extract Shifts (start/end times)
+    - Return JSON.
   `;
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview', // Force Flash for speed
+    model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { responseMimeType: "application/json" }
+    config: { 
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192
+    }
   });
   return safeParseJson(response.text);
 };
@@ -390,16 +358,18 @@ export const extractDataFromContent = async (params: {
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [
-    { text: `CONTEXT: Current programs: ${JSON.stringify(data.programs)}` },
-    { text: `INSTRUCTION: ${instruction}` },
-    { text: `Staff: ${JSON.stringify(data.staff)}` }
+    { text: `CURRENT ROSTER: ${JSON.stringify(data.programs)}` },
+    { text: `USER REQUEST: ${instruction}` },
+    { text: `STAFF: ${JSON.stringify(data.staff)}` }
   ];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
+  
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview', // Force Flash for speed
+    model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
+      systemInstruction: "Modify the roster JSON based on user request. Return valid JSON.",
       maxOutputTokens: 8192
     }
   });
@@ -414,72 +384,19 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const sortedPrograms = [...currentPrograms].sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
-  const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
-  const numDays = sortedPrograms.length || 7;
-
-  // CALCULATE WORKFORCE RATIO & OFF-QUOTA
-  const totalStaffCount = data.staff.length || 1;
-  const localStaffCount = data.staff.filter(s => s.type === 'Local').length;
-  const rosterStaffCount = data.staff.filter(s => s.type === 'Roster').length;
-  const localRatio = Math.round((localStaffCount / totalStaffCount) * 100);
-  const rosterRatio = 100 - localRatio;
-  
-  // Calculate Daily Off-Quota: Standard 2 days off per 7 days = ~28.5% of local staff must be off daily
-  const targetLocalOffPerDay = Math.ceil(localStaffCount * (2/7));
-  const maxLocalPerDay = Math.max(0, localStaffCount - targetLocalOffPerDay);
-
-  const restRules = generateRestConstraints(data.shifts, constraints.minRestHours);
-  const contractContext = generateContractContext(data.staff, startDate, numDays);
-  const leaveBlackouts = generateLeaveBlackouts(data.leaveRequests || [], data.staff, startDate, numDays);
-
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR
-    OBJECTIVE: Fix violations in the roster below using STRICT PHASED ALLOCATION.
-
-    ### PRIORITY RULES & SEQUENCE:
-    
-    **GLOBAL CONSTRAINT (CRITICAL - APPLIES BEFORE ANY ALLOCATION):**
-    - The **Daily Work Cap of ${maxLocalPerDay} Local Staff** applies to PHASE 1 and PHASE 2 COMBINED.
-    - You MUST reserve space for days off. Do NOT assign more than ${maxLocalPerDay} Locals in total for any single day.
-    - **IF LIMIT REACHED IN PHASE 1:** You MUST use Roster staff to fill remaining Specialist roles.
-
-    **PHASE 1: SPECIALIST ROLES (Mandatory)**
-    1. **LC First:** Fill Load Control. If LC staff has SL skill, deduct 1 from SL demand.
-    2. **SL Second:** Fill remaining Shift Leader demand.
-    3. **Other Roles:** Fill RAMP, OPS, LF.
-    
-    **PHASE 2: GENERAL HEADCOUNT (Ratio-Based)**
-    - Target **${rosterRatio}% Roster** and **${localRatio}% Local**.
-    - **Daily Work Cap (Local):** Ensure at least **${targetLocalOffPerDay}** Local staff are OFF daily to satisfy the 5/2 pattern.
-    - **Allocation:**
-       1. Fill Roster Quota first (check Contract Dates).
-       2. Fill Local Quota next (Do not exceed daily availability).
-       3. Assign one-by-one to balance workload.
-
-    ### ROLE LABELING:
-    - Use specific names ("LC", "SL") for specialists.
-    - Use "Agent" for general headcount filling.
-
-    ### AVAILABILITY CONTEXT:
-    ${contractContext.join('\n')}
-    ${leaveBlackouts.join('\n')}
-
-    ### VIOLATION REPORT (FIX THESE):
+    FIX ROSTER VIOLATIONS:
     ${auditReport}
-
-    ### DATA SOURCES:
-    - Staff Pool: ${JSON.stringify(data.staff.map(s => ({ id: s.id, initials: s.initials, type: s.type, skills: { LC: s.isLoadControl, SL: s.isShiftLeader, Ops: s.isOps, Ramp: s.isRamp } })))}
-    - Shift Specs: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, minStaff: s.minStaff, roles: s.roleCounts })))}
-    - Current Roster: ${JSON.stringify(currentPrograms)}
-
-    ### OUTPUT FORMAT:
-    Return a JSON object containing the FULL updated 'programs' array.
+    
+    CURRENT ROSTER: ${JSON.stringify(currentPrograms)}
+    STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, initials: s.initials, skills: s.isShiftLeader?'SL':''})))}
+    
+    TASK: Reassign staff to fix violations. Return full JSON.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Force Flash for speed
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',

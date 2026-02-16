@@ -1,15 +1,25 @@
 import React, { useMemo } from 'react';
-import { Staff, ShiftConfig } from '../types';
-import { Users, TrendingUp, AlertTriangle, CheckCircle2, Calculator, CalendarClock, Briefcase, Activity, Scale } from 'lucide-react';
+import { Staff, ShiftConfig, LeaveRequest } from '../types';
+import { Users, TrendingUp, AlertTriangle, CheckCircle2, Calculator, CalendarClock, Briefcase, Activity, Scale, CalendarX } from 'lucide-react';
 
 interface Props {
   staff: Staff[];
   shifts: ShiftConfig[];
+  leaveRequests?: LeaveRequest[];
   startDate: string;
   duration: number;
 }
 
-export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, duration }) => {
+// Helper to calculate days overlap between two ranges
+const getOverlapDays = (start1: Date, end1: Date, start2: Date, end2: Date) => {
+  const overlapStart = start1 > start2 ? start1 : start2;
+  const overlapEnd = end1 < end2 ? end1 : end2;
+  if (overlapStart > overlapEnd) return 0;
+  const diffTime = overlapEnd.getTime() - overlapStart.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
+
+export const CapacityForecast: React.FC<Props> = ({ staff, shifts, leaveRequests = [], startDate, duration }) => {
   const stats = useMemo(() => {
     if (!startDate || duration <= 0) return null;
 
@@ -22,11 +32,32 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
     const localStaff = staff.filter(s => s.type === 'Local');
     const rosterStaff = staff.filter(s => s.type === 'Roster');
 
-    // Local: 5 days work per 7 days week
-    // Formula: Headcount * 5 * (duration / 7)
-    const localCapacity = Math.round(localStaff.length * 5 * (duration / 7));
+    // --- LOCAL CAPACITY CALCULATION (WITH LEAVE DISRUPTION) ---
+    // Rule: Standard is approx 5 days work per 7 days.
+    // Disruption: Deduct specific leave days falling in this period.
+    let localCapacity = 0;
+    let totalLeaveLost = 0;
 
-    // Roster: Count active days in the window for each staff
+    localStaff.forEach(s => {
+       // Base capacity for this duration (e.g. 7 days -> 5 shifts)
+       const baseCap = Math.ceil(duration * (5/7));
+       
+       // Calculate leave overlap
+       let leaveDays = 0;
+       const sLeaves = leaveRequests.filter(l => l.staffId === s.id);
+       
+       sLeaves.forEach(l => {
+          const lStart = new Date(l.startDate);
+          const lEnd = new Date(l.endDate);
+          leaveDays += getOverlapDays(start, end, lStart, lEnd);
+       });
+
+       totalLeaveLost += leaveDays;
+       // Net capacity cannot be negative
+       localCapacity += Math.max(0, baseCap - leaveDays);
+    });
+
+    // --- ROSTER CAPACITY CALCULATION ---
     let rosterCapacity = 0;
     rosterStaff.forEach(s => {
       if (!s.workFromDate || !s.workToDate) return;
@@ -34,15 +65,19 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
       const contractStart = new Date(s.workFromDate);
       const contractEnd = new Date(s.workToDate);
       
-      // Calculate overlap between [start, end] and [contractStart, contractEnd]
-      const overlapStart = contractStart > start ? contractStart : start;
-      const overlapEnd = contractEnd < end ? contractEnd : end;
+      const days = getOverlapDays(start, end, contractStart, contractEnd);
+      
+      // Also deduct leaves for Roster staff if they exist
+      let leaveDays = 0;
+      const sLeaves = leaveRequests.filter(l => l.staffId === s.id);
+      sLeaves.forEach(l => {
+          const lStart = new Date(l.startDate);
+          const lEnd = new Date(l.endDate);
+          leaveDays += getOverlapDays(start, end, lStart, lEnd);
+      });
 
-      if (overlapStart <= overlapEnd) {
-        const diffTime = overlapEnd.getTime() - overlapStart.getTime();
-        const days = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
-        rosterCapacity += days;
-      }
+      rosterCapacity += Math.max(0, days - leaveDays);
+      totalLeaveLost += leaveDays;
     });
 
     const totalSupply = localCapacity + rosterCapacity;
@@ -70,6 +105,7 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
       rosterCount: rosterStaff.length,
       localCapacity,
       rosterCapacity,
+      totalLeaveLost,
       totalSupply,
       minDemand,
       maxDemand,
@@ -78,7 +114,7 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
       shiftCount,
       coveragePercent
     };
-  }, [staff, shifts, startDate, duration]);
+  }, [staff, shifts, leaveRequests, startDate, duration]);
 
   if (!stats) return null;
 
@@ -121,9 +157,16 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
              
              {/* Supply Side */}
              <div className="bg-white/5 border border-white/5 rounded-[2rem] p-6 space-y-6">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                   <Users size={14} className="text-indigo-400" /> Available Supply
-                </h4>
+                <div className="flex justify-between items-start">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                     <Users size={14} className="text-indigo-400" /> Available Supply
+                  </h4>
+                  {stats.totalLeaveLost > 0 && (
+                     <div className="px-2 py-1 bg-rose-500/20 border border-rose-500/20 rounded-lg flex items-center gap-1.5 text-[8px] font-black text-rose-400 uppercase tracking-widest">
+                        <CalendarX size={10} /> -{stats.totalLeaveLost} Days Absence
+                     </div>
+                  )}
+                </div>
                 <div className="flex items-end gap-2">
                    <span className="text-4xl font-black italic tracking-tighter">{stats.totalSupply}</span>
                    <span className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">Total Man-Shifts</span>
@@ -133,7 +176,7 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, startDate, du
                    <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
                       <div className="flex flex-col">
                          <span className="text-[9px] font-black text-slate-400 uppercase">Local Staff</span>
-                         <span className="text-[8px] text-slate-500">{stats.localCount} Agents (5/7 Rate)</span>
+                         <span className="text-[8px] text-slate-500">{stats.localCount} Agents (Leave Adjusted)</span>
                       </div>
                       <span className="text-xl font-black italic text-indigo-400">{stats.localCapacity}</span>
                    </div>
