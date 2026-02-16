@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { modifyProgramWithAI, ExtractionMedia } from '../services/geminiService';
 import { ProgramData, DailyProgram } from '../types';
@@ -88,7 +87,7 @@ export const ProgramChat: React.FC<Props> = ({ data, onUpdate }) => {
       const result = await modifyProgramWithAI(instruction, data, media);
       
       if (!result) {
-        throw new Error("AI returned no response.");
+        throw new Error("AI returned no response or invalid JSON.");
       }
 
       const isIdentical = JSON.stringify(result.programs) === JSON.stringify(data.programs);
