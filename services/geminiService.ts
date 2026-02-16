@@ -103,11 +103,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   // 3. Define Strategy
-  // We try Pro with Schema first (Best quality). 
-  // If that fails, we try Flash with no Schema (Best parsing flexibility).
+  // Use Raw JSON extraction without strict Schema for maximum flexibility
   const strategies = [
-    { model: 'gemini-3-pro-preview', useSchema: true },
-    { model: 'gemini-3-flash-preview', useSchema: false }
+    { model: 'gemini-3-flash-preview' },
+    { model: 'gemini-2.5-flash' }
   ];
 
   let parsed: any = null;
@@ -115,20 +114,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   for (const strategy of strategies) {
       try {
-        const robustSchema: Schema = {
-            type: Type.OBJECT,
-            properties: {
-            matrix: {
-                type: Type.ARRAY,
-                items: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-                }
-            }
-            },
-            required: ["matrix"]
-        };
-
         const prompt = `
             ROLE: Aviation Scheduler.
             TASK: Assign Staff to Shifts for ${config.numDays} days starting ${config.startDate}.
@@ -145,30 +130,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             - Don't exceed Staff Credits.
 
             OUTPUT INSTRUCTIONS:
-            Return a JSON object with a "matrix" property.
-            "matrix" is an array of arrays: ["DayOffset", "StaffIndex", "ShiftIndex", "RoleCode"]
-            - DayOffset: "0" to "${config.numDays-1}"
-            - StaffIndex: Reference index from STAFF list
-            - ShiftIndex: Reference index from SHIFTS list
-            - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
+            Return a JSON object with a single property "matrix".
+            "matrix" is an array of arrays: [DayOffset, StaffIndex, ShiftIndex, RoleCode]
             
-            ${strategy.useSchema ? '' : 'RETURN ONLY RAW JSON. NO MARKDOWN.'}
+            Example: [[0, 1, 4, "LC"], [0, 2, 4, "AGT"]]
+            
+            - DayOffset: Integer 0 to ${config.numDays-1}
+            - StaffIndex: Integer from STAFF list
+            - ShiftIndex: Integer from SHIFTS list
+            - RoleCode: "LC", "SL", "OPS", "RMP", "LF", or "AGT"
         `;
-
-        const requestConfig: any = {
-            temperature: 0.1,
-            maxOutputTokens: 8192,
-        };
-
-        if (strategy.useSchema) {
-            requestConfig.responseMimeType = 'application/json';
-            requestConfig.responseSchema = robustSchema;
-        }
 
         const response = await ai.models.generateContent({
             model: strategy.model,
             contents: prompt,
-            config: requestConfig
+            config: {
+                temperature: 0.1,
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json'
+            }
         });
 
         parsed = safeParseJson(response.text);
@@ -187,7 +167,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
   
   if (!parsed || !parsed.matrix || !Array.isArray(parsed.matrix)) {
-      throw new Error("AI failed to generate a roster. Please try reducing the number of days or ensuring you have enough staff.");
+      throw new Error("AI failed to generate a roster. Please ensure you have Shifts and Staff registered, or try a shorter date range.");
   }
 
   // 4. Reconstruct Data from Matrix
@@ -206,12 +186,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
 
   // Populate from matrix
-  parsed.matrix.forEach((row: string[]) => {
-      // Parse Strings back to Integers
-      const dayOff = parseInt(row[0]);
-      const sIdx = parseInt(row[1]);
-      const shIdx = parseInt(row[2]);
-      const role = row[3];
+  parsed.matrix.forEach((row: any[]) => {
+      // Parse Strings back to Integers safely
+      const dayOff = parseInt(String(row[0]));
+      const sIdx = parseInt(String(row[1]));
+      const shIdx = parseInt(String(row[2]));
+      const role = String(row[3]);
       
       // Safety check indices
       if (!isNaN(dayOff) && !isNaN(sIdx) && !isNaN(shIdx) && programs[dayOff] && data.staff[sIdx] && data.shifts[shIdx]) {
