@@ -23,10 +23,12 @@ const safeParseJson = (text: string | undefined): any => {
   } catch (e) {
     const startIdx = Math.min(
       cleanText.indexOf('{') === -1 ? Infinity : cleanText.indexOf('{'),
-      cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
+      cleanText.indexOf('{') === -1 && cleanText.indexOf('[') === -1 ? Infinity : cleanText.indexOf('[')
     );
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
+    
+    // Simple stack-based extractor for the first valid JSON object/array
     let stack: string[] = [];
     for (let i = 0; i < candidate.length; i++) {
       const char = candidate[i];
@@ -85,6 +87,54 @@ const ROSTER_SCHEMA = {
   required: ["programs", "stationHealth"]
 };
 
+// --- Shared Constraint Logic for Generator & Repair ---
+const generateHardConstraints = (data: ProgramData, config: { minRestHours: number }) => {
+  const hardConstraints: string[] = [];
+
+  // 1. Roster Contract Date Enforcement (Strict)
+  const rosterStaff = data.staff.filter(s => s.type === 'Roster');
+  rosterStaff.forEach(s => {
+    if (!s.workFromDate || !s.workToDate) return;
+    data.shifts.forEach(shift => {
+      // Check if shift pickup date is outside the [workFrom, workTo] range
+      if (shift.pickupDate < s.workFromDate! || shift.pickupDate > s.workToDate!) {
+        hardConstraints.push(`- CONSTRAINT: Staff '${s.id}' (${s.initials}) MUST NOT work Shift ID '${shift.id}' (${shift.pickupDate}). REASON: Outside Contract (${s.workFromDate} to ${s.workToDate}).`);
+      }
+    });
+  });
+
+  // 2. Rest Log Enforcement (Incoming Duties)
+  if (data.incomingDuties && data.incomingDuties.length > 0) {
+    data.incomingDuties.forEach(duty => {
+      const staffMember = data.staff.find(s => s.id === duty.staffId);
+      if (!staffMember) return;
+
+      const lastShiftEnd = new Date(`${duty.date}T${duty.shiftEndTime}`);
+      const availableAt = new Date(lastShiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
+
+      data.shifts.forEach(shift => {
+        const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+        if (shiftStart < availableAt) {
+           hardConstraints.push(`- CONSTRAINT: Staff '${staffMember.id}' (${staffMember.initials}) MUST NOT work Shift ID '${shift.id}' (${shift.pickupDate} ${shift.pickupTime}). REASON: Resting until ${availableAt.toISOString()}.`);
+        }
+      });
+    });
+  }
+
+  return hardConstraints;
+};
+
+const calculateStaffRatios = (staff: Staff[]) => {
+  const localStaff = staff.filter(s => s.type === 'Local');
+  const rosterStaff = staff.filter(s => s.type === 'Roster');
+  const totalStaffCount = localStaff.length + rosterStaff.length;
+  
+  const localRatio = totalStaffCount > 0 ? Math.round((localStaff.length / totalStaffCount) * 100) : 0;
+  const rosterRatio = totalStaffCount > 0 ? 100 - localRatio : 0;
+
+  return { localRatio, rosterRatio, localStaff, rosterStaff };
+};
+
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -104,48 +154,20 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     } 
   }));
 
-  // PHASE 0: HARD REST ENFORCEMENT PRE-CALCULATION
-  // Calculate exact availability time for each staff in the rest log and explicitly BAN them from conflicting shifts.
-  const restBans: string[] = [];
-  if (data.incomingDuties && data.incomingDuties.length > 0) {
-    data.incomingDuties.forEach(duty => {
-      const staffMember = data.staff.find(s => s.id === duty.staffId);
-      if (!staffMember) return;
-
-      const lastShiftEnd = new Date(`${duty.date}T${duty.shiftEndTime}`);
-      const availableAt = new Date(lastShiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
-
-      data.shifts.forEach(shift => {
-        const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
-        
-        // If the shift starts BEFORE the staff member is available (considering minRestHours)
-        if (shiftStart < availableAt) {
-           restBans.push(`- CONSTRAINT: Staff '${staffMember.id}' (${staffMember.initials}) MUST NOT be assigned to Shift ID '${shift.id}' (Shift Start: ${shift.pickupDate} ${shift.pickupTime}). REASON: Resting until ${availableAt.toISOString()}.`);
-        }
-      });
-    });
-  }
+  // PHASE 0: HARD CONSTRAINTS
+  const hardConstraints = generateHardConstraints(data, { minRestHours: config.minRestHours });
 
   // Create Strict Manifest of required shifts
-  // We include the Day Index to help the AI map it to the 'programs' array
   const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | DayIndex: ${s.day} (${s.pickupDate}) | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
 
-  // DETERMINISTIC FAIRNESS ANCHORS
-  // Calculate specific off-days for Local staff to ensure 5-on/2-off rotation.
-  // We group staff into blocks of 5 and rotate their off-days.
-  const localStaff = data.staff.filter(s => s.type === 'Local');
+  // DETERMINISTIC FAIRNESS ANCHORS (Local Staff 5/2 Rotation)
+  const { localRatio, rosterRatio, localStaff } = calculateStaffRatios(data.staff);
+
   const fairnessTable = localStaff.map((s, i) => {
-    // Logic: Group 0 (Indices 0-4) gets Day 1 & 2 Off.
-    // Logic: Group 1 (Indices 5-9) gets Day 3 & 4 Off.
-    // ... wrapping around the numDays.
     const groupIndex = Math.floor(i / 5);
     const startDayOffset = (groupIndex * 2) % config.numDays;
-    
-    // Day numbers are 1-based for the prompt
-    // We handle the 0-index wrap around to ensure valid day numbers
     const d1 = startDayOffset + 1;
     const d2 = ((startDayOffset + 1) % config.numDays) + 1;
-
     return `- ${s.initials} (Index ${i}): FORCE OFF on Day ${d1} and Day ${d2} (Has 0 credits)`;
   }).join('\n');
 
@@ -153,10 +175,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST + CREDIT ENFORCEMENT)
     OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
 
-    ### PHASE 0: HARD CONSTRAINTS (REST LOG ENFORCEMENT)
-    **CRITICAL**: The following assignments are PHYSICALLY IMPOSSIBLE due to fatigue laws.
+    ### PHASE 0: HARD CONSTRAINTS (PHYSICALLY IMPOSSIBLE)
+    **CRITICAL**: The following assignments are BANNED due to Contract Dates or Fatigue Laws.
     You MUST NOT assign these staff to these specific shifts under any circumstances.
-    ${restBans.length > 0 ? restBans.join('\n') : "No rest violations detected from previous logs."}
+    ${hardConstraints.length > 0 ? hardConstraints.join('\n') : "No hard constraints detected."}
 
     ### CRITICAL: THE SHIFT MANIFEST
     You are legally required to staff exactly ${data.shifts.length} shift slots.
@@ -196,10 +218,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
        - Assign remaining specialist roles.
 
     ### PHASE 3: GENERAL FILL (AGENT ROLE)
+    **DISTRIBUTION PROTOCOL (FAIR SHARE)**:
+    Your workforce is roughly **${localRatio}% Local** and **${rosterRatio}% Roster**.
+    When filling General Agent slots, you MUST mirror this ratio per shift *using only Available staff*.
+    *Example: If a shift needs 10 agents, try to assign ~${Math.round(10 * (localRatio/100))} Locals and ~${Math.round(10 * (rosterRatio/100))} Roster.*
+
     - Fill the remaining slots to reach 'minStaff'.
-    - Use **Roster** staff first.
-    - Use **Local** staff second (checking the Fairness Table to skip those anchored as OFF).
-    - **CRITICAL**: If you run out of staff (due to rest, leave, or off-days), **LEAVE THE SLOT EMPTY**. It is better to return an understaffed roster than an illegal one.
+    - **CRITICAL**: If you run out of staff (due to rest, leave, contract dates, or off-days), **LEAVE THE SLOT EMPTY**. It is better to return an understaffed roster than an illegal one.
+    - **FATIGUE SAFETY override**: It is better to leave a shift UNDERSTAFFED (e.g. 10/12) than to assign a staff member with less than ${config.minRestHours} hours gap. **Zero exceptions.**
 
     ### PHASE 4: REST BARRIER
     - 16:00 to 00:00 is only 8 hours. Illegal if minRest is ${config.minRestHours}.
@@ -297,7 +323,6 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Enriched staff mapping for Repair context
   const staffContext = data.staff.map(s => ({ 
     id: s.id, 
     initials: s.initials, 
@@ -312,6 +337,12 @@ export const repairProgramWithAI = async (
       LF: s.isLostFound
     } 
   }));
+
+  // SYNC: Generate the SAME hard constraints for Repair as for Generator
+  const hardConstraints = generateHardConstraints(data, { minRestHours: constraints.minRestHours });
+
+  // SYNC: Calculate Ratios for Repair Fairness
+  const { localRatio, rosterRatio } = calculateStaffRatios(data.staff);
 
   const prompt = `
     COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (PRIORITY MODE)
@@ -329,14 +360,21 @@ export const repairProgramWithAI = async (
 
     #### 2. MINIMUM STAFF COMPLIANCE
     - **Check \`minStaff\`**: Try to fill to \`minStaff\`.
-    - **CONSTRAINT**: Do NOT assign staff if it violates their 5-shift limit or rest rules.
+    - **CONSTRAINT**: Do NOT assign staff if it violates their 5-shift limit (Local) or contract dates (Roster).
     - **NOTE**: It is better to leave a gap (understaffed) than to violate the law/contracts.
     
-    #### 3. REST BARRIER
+    #### 3. HARD CONSTRAINTS (CONTRACTS & FATIGUE)
+    You MUST NOT assign these staff to these shifts (Physically Impossible):
+    ${hardConstraints.length > 0 ? hardConstraints.join('\n') : "No hard constraints."}
+    
+    #### 4. REST BARRIER
     - Ensure >${constraints.minRestHours}h rest gaps.
     
-    #### 4. CREDIT LIMIT (REPAIR MODE)
+    #### 5. CREDIT LIMIT (REPAIR MODE)
     - If a Local staff has 5 shifts, DO NOT ASSIGN them a 6th shift. No exceptions.
+    
+    #### 6. FAIRNESS CHECK
+    - Try to maintain the ${localRatio}% Local / ${rosterRatio}% Roster split when filling empty slots, if possible.
 
     ### DATA SOURCES:
     - Staff Pool: ${JSON.stringify(staffContext)}
