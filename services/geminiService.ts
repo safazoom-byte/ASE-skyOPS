@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Flight, Staff, DailyProgram, ProgramData, ShiftConfig, Assignment, Skill, IncomingDuty, LeaveRequest } from "../types";
 
 export interface BuildResult {
@@ -45,10 +45,56 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-// --- HELPER: Calculate Overlap Days ---
+const ROSTER_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    programs: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          day: { type: Type.INTEGER },
+          dateString: { type: Type.STRING },
+          assignments: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                staffId: { type: Type.STRING },
+                shiftId: { type: Type.STRING },
+                role: { type: Type.STRING }
+              }
+            }
+          }
+        }
+      }
+    },
+    stationHealth: { type: Type.NUMBER },
+    alerts: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          type: { type: Type.STRING },
+          message: { type: Type.STRING }
+        }
+      }
+    }
+  },
+  required: ["programs", "stationHealth"]
+};
+
+// --- HELPER: Calculate Overlap Days (UTC Safe) ---
 const getOverlapDays = (start1: Date, end1: Date, start2: Date, end2: Date) => {
-  const overlapStart = start1 > start2 ? start1 : start2;
-  const overlapEnd = end1 < end2 ? end1 : end2;
+  // Normalize to UTC midnight to avoid timezone offsets affecting day counts
+  const s1 = new Date(Date.UTC(start1.getUTCFullYear(), start1.getUTCMonth(), start1.getUTCDate()));
+  const e1 = new Date(Date.UTC(end1.getUTCFullYear(), end1.getUTCMonth(), end1.getUTCDate()));
+  const s2 = new Date(Date.UTC(start2.getUTCFullYear(), start2.getUTCMonth(), start2.getUTCDate()));
+  const e2 = new Date(Date.UTC(end2.getUTCFullYear(), end2.getUTCMonth(), end2.getUTCDate()));
+
+  const overlapStart = s1 > s2 ? s1 : s2;
+  const overlapEnd = e1 < e2 ? e1 : e2;
   
   if (overlapStart > overlapEnd) return 0;
   
@@ -101,9 +147,9 @@ const generateRestConstraints = (shifts: ShiftConfig[], minRestHours: number) =>
       const [startH, startM] = shiftA.pickupTime.split(':').map(Number);
       const [nextStartH, nextStartM] = shiftB.pickupTime.split(':').map(Number);
       
-      const shiftAEndVal = endH + endM/60;
-      const shiftAStartVal = startH + startM/60;
-      const shiftBStartVal = nextStartH + nextStartM/60;
+      const shiftAEndVal = endH + (endM || 0)/60;
+      const shiftAStartVal = startH + (startM || 0)/60;
+      const shiftBStartVal = nextStartH + (nextStartM || 0)/60;
       
       const endsOnNextDay = shiftAEndVal < shiftAStartVal;
       
@@ -224,20 +270,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     **CRITICAL INSTRUCTIONS:**
     1. **USE EXACT IDS:** When assigning a staff member, use their exact 'id' from the STAFF POOL. When assigning a shift, use the exact 'id' from the SHIFTS TO FILL list.
-    2. **FORMAT:** Return a JSON object with this exact structure:
-       {
-         "programs": [
-           {
-             "day": 0,
-             "dateString": "YYYY-MM-DD",
-             "assignments": [
-               { "id": "unique_string", "staffId": "EXACT_STAFF_ID", "shiftId": "EXACT_SHIFT_ID", "role": "SkillName" }
-             ]
-           }
-         ],
-         "stationHealth": 90,
-         "alerts": []
-       }
+    2. **CREDITS:** '[Creds: X]' indicates remaining shifts allowed. Try to prioritize staff with credits > 0. If absolutely necessary to fill a shift, you may exceed credits, but respect LEAVE and CONTRACT DATES strictly.
     3. **CONSTRAINTS:**
        ${contractContext.join('\n')}
        ${leaveBlackouts.join('\n')}
@@ -250,9 +283,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        // Removed responseSchema to prevent strict validation errors
-        systemInstruction: "You are a JSON-only roster engine. Do not include markdown formatting. Return valid JSON.",
-        temperature: 0.1, // Low temperature for deterministic output
+        responseSchema: ROSTER_SCHEMA,
+        systemInstruction: "You are a specialized roster generator. You must output strictly valid JSON matching the schema. If credits are low, prioritize filling the schedule over credit limits.",
+        temperature: 0.1, 
         maxOutputTokens: 8192,
       }
     });
@@ -362,6 +395,7 @@ export const repairProgramWithAI = async (
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
+        responseSchema: ROSTER_SCHEMA,
         maxOutputTokens: 8192
       }
     });
