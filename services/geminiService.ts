@@ -104,11 +104,30 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }));
 
   // Create Strict Manifest of required shifts
-  // We explicitly list every shift to force the LLM to account for them
-  const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | Date: ${s.pickupDate} | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
+  // We include the Day Index to help the AI map it to the 'programs' array
+  const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | DayIndex: ${s.day} (${s.pickupDate}) | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
+
+  // DETERMINISTIC FAIRNESS ANCHORS
+  // Calculate specific off-days for Local staff to ensure 5-on/2-off rotation.
+  // We group staff into blocks of 5 and rotate their off-days.
+  const localStaff = data.staff.filter(s => s.type === 'Local');
+  const fairnessTable = localStaff.map((s, i) => {
+    // Logic: Group 0 (Indices 0-4) gets Day 1 & 2 Off.
+    // Logic: Group 1 (Indices 5-9) gets Day 3 & 4 Off.
+    // ... wrapping around the numDays.
+    const groupIndex = Math.floor(i / 5);
+    const startDayOffset = (groupIndex * 2) % config.numDays;
+    
+    // Day numbers are 1-based for the prompt
+    // We handle the 0-index wrap around to ensure valid day numbers
+    const d1 = startDayOffset + 1;
+    const d2 = ((startDayOffset + 1) % config.numDays) + 1;
+
+    return `- ${s.initials} (Index ${i}): FORCE OFF on Day ${d1} and Day ${d2} (Has 0 credits)`;
+  }).join('\n');
 
   const prompt = `
-    ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST ENFORCEMENT)
+    ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST + CREDIT ENFORCEMENT)
     OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
 
     ### CRITICAL: THE SHIFT MANIFEST
@@ -120,21 +139,19 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     **VERIFICATION PROTOCOL**: 
     1. Read the Manifest.
-    2. For EACH Shift ID in the Manifest, generate assignments.
+    2. For EACH Shift ID in the Manifest, generate assignments matching 'MinStaff'.
     3. Do NOT stop until every single ID has been processed.
     4. If a shift is missing in the output, the program is invalid.
 
-    ### PHASE 1: MATHEMATICAL DISTRIBUTION (THE "OFF DAY" STRATEGY)
-    Before assigning shifts, calculate the daily numbers:
-    1. **DEMAND**: Sum of 'minStaff' for all shifts on Day X.
-    2. **ROSTER SUPPLY**: Count of 'Roster' staff active on Day X.
-    3. **LOCAL GAP**: Demand - Roster Supply.
-    4. **LOCAL SUPPLY**: Total 'Local' staff count.
-    5. **OFF TARGET**: Local Supply - Local Gap.
+    ### PHASE 1: CREDIT LIMIT & FAIRNESS (STRICT)
+    **RULE**: Local Staff have a strict credit of **5 SHIFTS MAXIMUM**.
+    - If a staff member works 5 shifts, they have **0 CREDITS LEFT**.
+    - You must NOT assign them a 6th shift.
     
-    **STRATEGY**: 
-    - You must assign 'Day Off' to exactly {OFF TARGET} Local staff each day.
-    - **CRITICAL**: You must ROTATE these off days. Do not give everyone Sat/Sun off. Distribute off days evenly (Mon, Tue, Wed...) to ensure the "Gap" is always filled.
+    **OFF-DAY ANCHORS (MANDATORY)**:
+    To ensure the 5-shift limit is met evenly, follow these anchors:
+    ${fairnessTable}
+    *Instructions: If a staff is listed as FORCE OFF for Day X, do NOT assign them unless absolutely no one else is available.*
 
     ### PHASE 2: SPECIALIST ASSIGNMENT (DUAL ROLE OPTIMIZATION)
     For each shift, assign roles in this STRICT order:
@@ -153,12 +170,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ### PHASE 3: GENERAL FILL (AGENT ROLE)
     - Fill the remaining slots to reach 'minStaff'.
     - Use **Roster** staff first.
-    - Use **Local** staff second (excluding those selected for 'Day Off' in Phase 1).
+    - Use **Local** staff second (checking the Fairness Table to skip those anchored as OFF).
 
     ### PHASE 4: EMERGENCY OVERRIDE (FORCE FILL)
     - **CHECK**: If a shift is still understaffed (Current < MinStaff).
-    - **ACTION**: CANCEL the 'Day Off' for needed Local staff.
-    - **RULE**: It is better to burn a Local credit (work 6 days) than to leave a shift understaffed.
+    - **ACTION**: You may override the 'FORCE OFF' rule.
+    - **PRIORITY**: Prioritize Local staff who have the lowest shift count so far (e.g., someone with 0 or 1 shift).
     - **ZERO SHIFT RULE**: If staff like ML-ATZ, MN-ATZ have 0 shifts, they MUST be prioritized for these gaps.
 
     ### PHASE 5: REST BARRIER
@@ -295,6 +312,9 @@ export const repairProgramWithAI = async (
     
     #### 3. REST BARRIER
     - Ensure >${constraints.minRestHours}h rest gaps.
+    
+    #### 4. CREDIT LIMIT (REPAIR MODE)
+    - If a Local staff has 5 shifts, DO NOT ASSIGN them a 6th shift unless there is absolutely no other choice to fix a critical gap.
 
     ### DATA SOURCES:
     - Staff Pool: ${JSON.stringify(staffContext)}
