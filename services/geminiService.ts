@@ -16,7 +16,6 @@ export interface ExtractionMedia {
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  // Deep Check Fix: Added 'i' flag for case-insensitive matching (handles ```JSON vs ```json)
   let cleanText = text.replace(/```json\n?|```/gi, "").trim();
   try {
     return JSON.parse(cleanText);
@@ -28,7 +27,6 @@ const safeParseJson = (text: string | undefined): any => {
     if (startIdx === Infinity) return null;
     let candidate = cleanText.slice(startIdx);
     
-    // Simple stack-based extractor for the first valid JSON object/array
     let stack: string[] = [];
     for (let i = 0; i < candidate.length; i++) {
       const char = candidate[i];
@@ -87,157 +85,236 @@ const ROSTER_SCHEMA = {
   required: ["programs", "stationHealth"]
 };
 
-// --- Shared Constraint Logic for Generator & Repair ---
-const generateHardConstraints = (data: ProgramData, config: { minRestHours: number }) => {
-  const hardConstraints: string[] = [];
+// --- HELPER: Calculate Overlap Days ---
+const getOverlapDays = (start1: Date, end1: Date, start2: Date, end2: Date) => {
+  const overlapStart = start1 > start2 ? start1 : start2;
+  const overlapEnd = end1 < end2 ? end1 : end2;
+  
+  if (overlapStart > overlapEnd) return 0;
+  
+  const diffTime = overlapEnd.getTime() - overlapStart.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
 
-  // 1. Roster Contract Date Enforcement (Strict)
-  const rosterStaff = data.staff.filter(s => s.type === 'Roster');
-  rosterStaff.forEach(s => {
-    if (!s.workFromDate || !s.workToDate) return;
-    data.shifts.forEach(shift => {
-      // Check if shift pickup date is outside the [workFrom, workTo] range
-      if (shift.pickupDate < s.workFromDate! || shift.pickupDate > s.workToDate!) {
-        hardConstraints.push(`- CONSTRAINT: Staff '${s.id}' (${s.initials}) MUST NOT work Shift ID '${shift.id}' (${shift.pickupDate}). REASON: Outside Contract (${s.workFromDate} to ${s.workToDate}).`);
+// --- HELPER: Calculate Available Credits (Considers Leave) ---
+const calculateCredits = (staff: Staff, startDate: string, duration: number, leaveRequests: LeaveRequest[] = []) => {
+  const progStart = new Date(startDate);
+  const progEnd = new Date(startDate);
+  progEnd.setDate(progStart.getDate() + duration - 1);
+
+  let grossCredits = 0;
+
+  if (staff.type === 'Local') {
+    grossCredits = 5; // Hard limit for locals
+  } else {
+    // For Roster, calculate contract overlap days
+    if (!staff.workFromDate || !staff.workToDate) {
+      grossCredits = 0; 
+    } else {
+      const contractStart = new Date(staff.workFromDate);
+      const contractEnd = new Date(staff.workToDate);
+      grossCredits = getOverlapDays(progStart, progEnd, contractStart, contractEnd);
+    }
+  }
+
+  // Deduct Leave Days
+  let leaveDeduction = 0;
+  const staffLeaves = leaveRequests.filter(l => l.staffId === staff.id);
+  
+  staffLeaves.forEach(leave => {
+    const leaveStart = new Date(leave.startDate);
+    const leaveEnd = new Date(leave.endDate);
+    
+    // We only deduct leave that happens strictly within the valid program/contract window
+    const overlap = getOverlapDays(progStart, progEnd, leaveStart, leaveEnd);
+    leaveDeduction += overlap;
+  });
+
+  return Math.max(0, grossCredits - leaveDeduction);
+};
+
+// --- HELPER: Generate Forbidden Transitions (Rest Violations) ---
+const generateRestConstraints = (shifts: ShiftConfig[], minRestHours: number) => {
+  const constraints: string[] = [];
+  shifts.forEach(shiftA => {
+    shifts.forEach(shiftB => {
+      const [endH, endM] = shiftA.endTime.split(':').map(Number);
+      const [startH, startM] = shiftB.pickupTime.split(':').map(Number);
+      const hoursLeftInDay = 24 - (endH + (endM/60));
+      const hoursIntoNextDay = startH + (startM/60);
+      const totalGap = hoursLeftInDay + hoursIntoNextDay;
+      if (totalGap < minRestHours) {
+        constraints.push(`- RULE: If staff works Shift '${shiftA.pickupTime}-${shiftA.endTime}', they are BANNED from next day's '${shiftB.pickupTime}' shift (Gap: ${totalGap.toFixed(1)}h).`);
       }
     });
   });
-
-  // 2. Rest Log Enforcement (Incoming Duties)
-  if (data.incomingDuties && data.incomingDuties.length > 0) {
-    data.incomingDuties.forEach(duty => {
-      const staffMember = data.staff.find(s => s.id === duty.staffId);
-      if (!staffMember) return;
-
-      const lastShiftEnd = new Date(`${duty.date}T${duty.shiftEndTime}`);
-      const availableAt = new Date(lastShiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
-
-      data.shifts.forEach(shift => {
-        const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
-        if (shiftStart < availableAt) {
-           hardConstraints.push(`- CONSTRAINT: Staff '${staffMember.id}' (${staffMember.initials}) MUST NOT work Shift ID '${shift.id}' (${shift.pickupDate} ${shift.pickupTime}). REASON: Resting until ${availableAt.toISOString()}.`);
-        }
-      });
-    });
-  }
-
-  return hardConstraints;
+  return constraints;
 };
 
-const calculateStaffRatios = (staff: Staff[]) => {
-  const localStaff = staff.filter(s => s.type === 'Local');
-  const rosterStaff = staff.filter(s => s.type === 'Roster');
-  const totalStaffCount = localStaff.length + rosterStaff.length;
+// --- HELPER: Generate Contract Blackouts (Date-Specific) ---
+const generateContractBlackouts = (staffList: Staff[], startDate: string, duration: number) => {
+  const blackouts: string[] = [];
+  const programDates: string[] = [];
+  const start = new Date(startDate);
   
-  const localRatio = totalStaffCount > 0 ? Math.round((localStaff.length / totalStaffCount) * 100) : 0;
-  const rosterRatio = totalStaffCount > 0 ? 100 - localRatio : 0;
+  for(let i=0; i<duration; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    programDates.push(d.toISOString().split('T')[0]);
+  }
 
-  return { localRatio, rosterRatio, localStaff, rosterStaff };
+  staffList.filter(s => s.type === 'Roster').forEach(s => {
+    if (!s.workFromDate || !s.workToDate) return; 
+    
+    const invalidDates = programDates.filter(date => date < s.workFromDate! || date > s.workToDate!);
+    
+    if (invalidDates.length > 0) {
+      blackouts.push(`- ${s.initials} (${s.id}) is OFF-CONTRACT on: [${invalidDates.join(', ')}]. DO NOT ASSIGN.`);
+    }
+  });
+  return blackouts;
+};
+
+// --- HELPER: Generate Leave Blackouts (Date-Specific) ---
+const generateLeaveBlackouts = (leaveRequests: LeaveRequest[], staffList: Staff[], startDate: string, duration: number) => {
+  const blackouts: string[] = [];
+  const start = new Date(startDate);
+  const end = new Date(startDate);
+  end.setDate(start.getDate() + duration - 1);
+
+  leaveRequests.forEach(leave => {
+    const s = staffList.find(st => st.id === leave.staffId);
+    if (!s) return;
+
+    // Expand leave range to individual dates
+    const lStart = new Date(leave.startDate);
+    const lEnd = new Date(leave.endDate);
+    
+    // Check if relevant to this program
+    if (lEnd < start || lStart > end) return;
+
+    const datesBlocked: string[] = [];
+    let curr = new Date(lStart);
+    while (curr <= lEnd) {
+      if (curr >= start && curr <= end) {
+        datesBlocked.push(curr.toISOString().split('T')[0]);
+      }
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    if (datesBlocked.length > 0) {
+      blackouts.push(`- ${s.initials} (${s.id}) is ON LEAVE (${leave.type}) on: [${datesBlocked.join(', ')}]. DO NOT ASSIGN.`);
+    }
+  });
+  return blackouts;
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Enriched staff mapping
-  const staffContext = data.staff.map(s => ({ 
-    id: s.id, 
-    initials: s.initials, 
-    type: s.type, 
-    workFrom: s.workFromDate, 
-    workTo: s.workToDate, 
-    skills: { 
-      SL: s.isShiftLeader, 
-      LC: s.isLoadControl, 
-      RMP: s.isRamp,
-      OPS: s.isOps,
-      LF: s.isLostFound
-    } 
+  // 1. Calculate Credit Bank & Qualification Pools
+  const creditBank: Record<string, number> = {};
+  const lcPool: string[] = [];
+  const slPool: string[] = [];
+  
+  data.staff.forEach(s => {
+    // Pass leaveRequests to deduct from credits
+    const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
+    creditBank[s.id] = credits;
+    if (s.isLoadControl) lcPool.push(`${s.initials} (${s.id})`);
+    if (s.isShiftLeader) slPool.push(`${s.initials} (${s.id})`);
+  });
+
+  // 2. Filter Staff (Remove 0 credit staff from pool)
+  const availableStaff = data.staff.filter(s => creditBank[s.id] > 0).map(s => ({
+    id: s.id,
+    initials: s.initials,
+    type: s.type,
+    credits: creditBank[s.id],
+    skills: { LC: s.isLoadControl, SL: s.isShiftLeader },
   }));
 
-  // PHASE 0: HARD CONSTRAINTS
-  const hardConstraints = generateHardConstraints(data, { minRestHours: config.minRestHours });
+  // 3. Pre-calculate Rest, Contract, and Leave Blackouts
+  const restRules = generateRestConstraints(data.shifts, config.minRestHours);
+  const contractBlackouts = generateContractBlackouts(data.staff, config.startDate, config.numDays);
+  const leaveBlackouts = generateLeaveBlackouts(data.leaveRequests || [], data.staff, config.startDate, config.numDays);
 
-  // Create Strict Manifest of required shifts
-  const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | DayIndex: ${s.day} (${s.pickupDate}) | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
+  // 4. Hard Constraints (Incoming Rest)
+  const hardConstraints: string[] = [];
+  if (data.incomingDuties && data.incomingDuties.length > 0) {
+    data.incomingDuties.forEach(duty => {
+      const staffMember = data.staff.find(s => s.id === duty.staffId);
+      if (!staffMember) return;
+      const lastShiftEnd = new Date(`${duty.date}T${duty.shiftEndTime}`);
+      const availableAt = new Date(lastShiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
+      const progStart = new Date(config.startDate + "T00:00:00");
+      if (availableAt > progStart) {
+         hardConstraints.push(`- STARTUP BAN: ${staffMember.initials} is resting until ${availableAt.toISOString()}. NO shifts before this time.`);
+      }
+    });
+  }
 
-  // DETERMINISTIC FAIRNESS ANCHORS (Local Staff 5/2 Rotation)
-  const { localRatio, rosterRatio, localStaff } = calculateStaffRatios(data.staff);
-
-  const fairnessTable = localStaff.map((s, i) => {
-    const groupIndex = Math.floor(i / 5);
-    const startDayOffset = (groupIndex * 2) % config.numDays;
-    const d1 = startDayOffset + 1;
-    const d2 = ((startDayOffset + 1) % config.numDays) + 1;
-    return `- ${s.initials} (Index ${i}): FORCE OFF on Day ${d1} and Day ${d2} (Has 0 credits)`;
-  }).join('\n');
+  // 5. Calculate Ratios for General Fill
+  const localStaffCount = availableStaff.filter(s => s.type === 'Local').length;
+  const rosterStaffCount = availableStaff.filter(s => s.type === 'Roster').length;
+  const totalCount = localStaffCount + rosterStaffCount;
+  const localRatio = totalCount > 0 ? Math.round((localStaffCount / totalCount) * 100) : 50;
 
   const prompt = `
-    ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST + CREDIT ENFORCEMENT)
-    OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
-
-    ### PHASE 0: HARD CONSTRAINTS (PHYSICALLY IMPOSSIBLE)
-    **CRITICAL**: The following assignments are BANNED due to Contract Dates or Fatigue Laws.
-    You MUST NOT assign these staff to these specific shifts under any circumstances.
-    ${hardConstraints.length > 0 ? hardConstraints.join('\n') : "No hard constraints detected."}
-
-    ### CRITICAL: THE SHIFT MANIFEST
-    You are legally required to staff exactly ${data.shifts.length} shift slots.
-    Below is the list of Shift IDs that MUST appear in your output assignments.
+    ROLE: MASTER AVIATION SCHEDULER
+    OBJECTIVE: Build a ${config.numDays}-day roster starting ${config.startDate}.
     
-    MANIFEST:
-    ${shiftManifest}
-
-    **VERIFICATION PROTOCOL**: 
-    1. Read the Manifest.
-    2. For EACH Shift ID in the Manifest, generate assignments matching 'MinStaff'.
-    3. Do NOT stop until every single ID has been processed.
-    4. If a shift is missing in the output, the program is invalid.
-
-    ### PHASE 1: CREDIT LIMIT & FAIRNESS (STRICT)
-    **RULE**: Local Staff have a strict credit of **5 SHIFTS MAXIMUM**.
-    - If a staff member works 5 shifts, they have **0 CREDITS LEFT**.
-    - You must NOT assign them a 6th shift.
+    ### CORE LOGIC: THE CREDIT SYSTEM (STRICT)
+    You have a "Wallet" of credits for each staff member.
+    - **Local Staff:** Max 5 Credits (Minus any Leave Taken).
+    - **Roster Staff:** Contract Days (Minus any Leave Taken).
     
-    **OFF-DAY ANCHORS (MANDATORY)**:
-    To ensure the 5-shift limit is met evenly, follow these anchors:
-    ${fairnessTable}
-    *Instructions: If a staff is listed as FORCE OFF for Day X, do NOT assign them under any circumstances. Leave the shift understaffed if necessary.*
-
-    ### PHASE 2: SPECIALIST ASSIGNMENT (DUAL ROLE OPTIMIZATION)
-    For each shift, assign roles in this STRICT order:
+    **CRITICAL RULE:** Every time you assign a staff member, mentally deduct 1 credit.
+    **IF CREDITS == 0, THE STAFF MEMBER IS DEAD. DO NOT ASSIGN THEM AGAIN.**
     
-    1. **LOAD CONTROL (LC) - HIGHEST PRIORITY**
-       - Assign a qualified LC staff member (Roster preferred, then Local).
-       - **OPTIMIZATION**: If the assigned LC staff is *also* a Shift Leader (SL), you count them towards the SL requirement too.
-       - *Example*: Shift needs 1 LC, 1 SL. Staff 'AZ' (has LC & SL) is assigned to 'LC'. Now Shift needs 0 SL. (Saved 1 headcount).
+    ### CREDIT BANK (STARTING BALANCE):
+    ${availableStaff.map(s => `- ${s.initials} (${s.type}): ${s.credits} Credits`).join('\n')}
 
-    2. **SHIFT LEADER (SL)**
-       - Assign remaining SLs needed (if not covered by the LC optimization).
+    ### AVAILABILITY BLACKOUTS (DATE SPECIFIC):
+    Even if a staff has credits, **THEY CANNOT WORK** on specific dates if they are Off-Contract OR On-Leave.
+    **CHECK THIS LIST FOR EVERY ASSIGNMENT:**
+    ${contractBlackouts.join('\n')}
+    ${leaveBlackouts.join('\n')}
+    ${hardConstraints.join('\n')}
 
-    3. **RAMP / OPS / LOST & FOUND**
-       - Assign remaining specialist roles.
+    ### ALLOCATION PIPELINE (FOLLOW IN ORDER FOR EACH SHIFT):
 
-    ### PHASE 3: GENERAL FILL (AGENT ROLE)
-    **DISTRIBUTION PROTOCOL (FAIR SHARE)**:
-    Your workforce is roughly **${localRatio}% Local** and **${rosterRatio}% Roster**.
-    When filling General Agent slots, you MUST mirror this ratio per shift *using only Available staff*.
-    *Example: If a shift needs 10 agents, try to assign ~${Math.round(10 * (localRatio/100))} Locals and ~${Math.round(10 * (rosterRatio/100))} Roster.*
+    #### STEP 1: LOAD CONTROL (LC) - THE PRIORITY
+    - For every shift requiring LC, assign a qualified person from the **LC POOL**.
+    - **CHECK BLACKOUTS:** Ensure the LC person is not Blacklisted for that specific Date.
+    - **LC POOL:** [${lcPool.join(', ')}]
+    - **OPTIMIZATION:** If the chosen LC person is *also* a Shift Leader (SL), count them for BOTH roles. (Role output: "LC/SL").
 
-    - Fill the remaining slots to reach 'minStaff'.
-    - **CRITICAL**: If you run out of staff (due to rest, leave, contract dates, or off-days), **LEAVE THE SLOT EMPTY**. It is better to return an understaffed roster than an illegal one.
-    - **FATIGUE SAFETY override**: It is better to leave a shift UNDERSTAFFED (e.g. 10/12) than to assign a staff member with less than ${config.minRestHours} hours gap. **Zero exceptions.**
+    #### STEP 2: SHIFT LEADER (SL)
+    - Fill remaining SL slots using the **SL POOL**.
+    - **SL POOL:** [${slPool.join(', ')}]
+    - Do not assign if Step 1 already covered the SL requirement.
 
-    ### PHASE 4: REST BARRIER
-    - 16:00 to 00:00 is only 8 hours. Illegal if minRest is ${config.minRestHours}.
+    #### STEP 3: GENERAL FILL (RATIO SEQUENCE)
+    - Fill remaining 'MinStaff' slots.
+    - **Target Ratio:** ${localRatio}% Local / ${100 - localRatio}% Roster.
+    - **EXECUTION LOOP:**
+      1. Pick next candidate from sequence (Local -> Roster -> Local...).
+      2. **VALIDATE:** Does candidate have Credits > 0?
+      3. **VALIDATE:** Is candidate free from Blackouts (Leave/Contract) for this Date?
+      4. **VALIDATE:** Is candidate free from Rest Constraints (Forbidden Transitions)?
+      5. If Valid -> Assign and Deduct 1 Credit.
+      6. If Invalid -> Skip to next candidate in sequence. Do NOT deduct credit (save it for a valid day).
 
-    STATION DATA:
-    - STAFF POOL: ${JSON.stringify(staffContext)}
-    - SHIFTS CONFIG: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, pickupTime: s.pickupTime, endTime: s.endTime, roleCounts: s.roleCounts, minStaff: s.minStaff })))}
-    - FLIGHT SCHEDULE: ${JSON.stringify(data.flights.map(f => ({ id: f.id, fn: f.flightNumber, date: f.date })))}
-    - REST LOG: ${JSON.stringify(data.incomingDuties)}
-    - LEAVE: ${JSON.stringify(data.leaveRequests)}
+    ### FORBIDDEN TRANSITIONS (REST LAWS):
+    The following shift combinations are ILLEGAL due to <${config.minRestHours}h rest:
+    ${restRules.join('\n')}
 
-    OUTPUT: Return JSON matching the schema.
+    ### STATION DATA:
+    - SHIFTS: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, minStaff: s.minStaff, roles: s.roleCounts })))}
+    - LEAVE REGISTRY (Reference): ${JSON.stringify(data.leaveRequests)}
+
+    OUTPUT: Return JSON matching the schema. Ensure 'programs' array covers exactly ${config.numDays} days.
   `;
 
   try {
@@ -323,62 +400,57 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const staffContext = data.staff.map(s => ({ 
-    id: s.id, 
-    initials: s.initials, 
-    type: s.type, 
-    workFrom: s.workFromDate, 
-    workTo: s.workToDate,
-    skills: { 
-      SL: s.isShiftLeader, 
-      LC: s.isLoadControl, 
-      RMP: s.isRamp,
-      OPS: s.isOps,
-      LF: s.isLostFound
-    } 
-  }));
+  // Infer start date and duration from currentPrograms to ensure accurate date-based logic
+  const sortedPrograms = [...currentPrograms].sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
+  const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
+  const numDays = sortedPrograms.length || 7;
 
-  // SYNC: Generate the SAME hard constraints for Repair as for Generator
-  const hardConstraints = generateHardConstraints(data, { minRestHours: constraints.minRestHours });
+  // 1. Calculate Credit Bank & Qualification Pools (Synced with Generate)
+  const creditBank: Record<string, number> = {};
+  data.staff.forEach(s => {
+     // Synced with generate logic: include leaveRequests for deduction
+     const credits = calculateCredits(s, startDate, numDays, data.leaveRequests || []); 
+     creditBank[s.id] = credits;
+  });
 
-  // SYNC: Calculate Ratios for Repair Fairness
-  const { localRatio, rosterRatio } = calculateStaffRatios(data.staff);
+  const lcPool = data.staff.filter(s => s.isLoadControl).map(s => s.initials);
+
+  // 2. Pre-calculate Rest, Contract, and Leave Blackouts (Synced with Generate)
+  const restRules = generateRestConstraints(data.shifts, constraints.minRestHours);
+  const contractBlackouts = generateContractBlackouts(data.staff, startDate, numDays);
+  const leaveBlackouts = generateLeaveBlackouts(data.leaveRequests || [], data.staff, startDate, numDays);
 
   const prompt = `
-    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (PRIORITY MODE)
-    OBJECTIVE: Fix violations in the roster below while strictly adhering to the Station Allocation Protocol.
+    COMMAND: STATION OPERATIONS COMMAND - SURGICAL REPAIR (CREDIT & LC PRIORITY)
+    OBJECTIVE: Fix violations in the roster below.
+
+    ### CORE LOGIC: THE CREDIT SYSTEM (STRICT)
+    - **Local Staff:** Max 5 Credits (Minus any Leave Taken).
+    - **Roster Staff:** Contract Days (Minus any Leave Taken).
+    **IF CREDITS == 0, THE STAFF MEMBER IS DEAD. DO NOT ASSIGN THEM AGAIN.**
+
+    ### CREDIT BANK (REMAINING BUDGET):
+    ${data.staff.map(s => `- ${s.initials} (${s.type}): ${creditBank[s.id]} Credits`).join('\n')}
+
+    ### AVAILABILITY BLACKOUTS (DATE SPECIFIC):
+    **CRITICAL: DO NOT ASSIGN STAFF ON THESE DATES:**
+    ${contractBlackouts.join('\n')}
+    ${leaveBlackouts.join('\n')}
 
     ### VIOLATION REPORT (PRIORITY FIXES):
     ${auditReport}
 
-    ### ALLOCATION PROTOCOL (ENFORCE DURING REPAIR):
-    
-    #### 1. DUAL ROLE & LC PRIORITY (CRITICAL)
-    - **Load Control (LC)**: Must be filled.
-    - **Optimization**: If the assigned LC staff is *also* a Shift Leader (SL), you count them towards the SL requirement too.
-    - **Swap**: You can swap out a generic Agent to bring in a qualified LC/SL staff.
-
-    #### 2. MINIMUM STAFF COMPLIANCE
-    - **Check \`minStaff\`**: Try to fill to \`minStaff\`.
-    - **CONSTRAINT**: Do NOT assign staff if it violates their 5-shift limit (Local) or contract dates (Roster).
-    - **NOTE**: It is better to leave a gap (understaffed) than to violate the law/contracts.
-    
-    #### 3. HARD CONSTRAINTS (CONTRACTS & FATIGUE)
-    You MUST NOT assign these staff to these shifts (Physically Impossible):
-    ${hardConstraints.length > 0 ? hardConstraints.join('\n') : "No hard constraints."}
-    
-    #### 4. REST BARRIER
-    - Ensure >${constraints.minRestHours}h rest gaps.
-    
-    #### 5. CREDIT LIMIT (REPAIR MODE)
-    - If a Local staff has 5 shifts, DO NOT ASSIGN them a 6th shift. No exceptions.
-    
-    #### 6. FAIRNESS CHECK
-    - Try to maintain the ${localRatio}% Local / ${rosterRatio}% Roster split when filling empty slots, if possible.
+    ### REPAIR PROTOCOL:
+    1. **STRICT CREDITS:** Enforce the credit limits above. Remove assignments if they exceed credits.
+    2. **LC PRIORITY:** Ensure all shifts with Load Control needs have a qualified LC staff.
+       - LC POOL: [${lcPool.join(', ')}]
+       - Use Dual Role (LC+SL) optimization if possible to save headcount.
+    3. **REST GAPS:** Respect the following forbidden transitions:
+       ${restRules.join('\n')}
 
     ### DATA SOURCES:
-    - Staff Pool: ${JSON.stringify(staffContext)}
-    - Shift Specs: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, roleCounts: s.roleCounts, minStaff: s.minStaff })))}
+    - Staff Pool: ${JSON.stringify(data.staff.map(s => ({ id: s.id, initials: s.initials, type: s.type, skills: { LC: s.isLoadControl, SL: s.isShiftLeader } })))}
+    - Shift Specs: ${JSON.stringify(data.shifts.map(s => ({ id: s.id, time: `${s.pickupTime}-${s.endTime}`, minStaff: s.minStaff, roles: s.roleCounts })))}
     - Current Roster: ${JSON.stringify(currentPrograms)}
 
     ### OUTPUT FORMAT:
