@@ -87,7 +87,7 @@ const ROSTER_SCHEMA = {
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Enriched staff mapping to include ALL skills to prevent hallucinations
+  // Enriched staff mapping
   const staffContext = data.staff.map(s => ({ 
     id: s.id, 
     initials: s.initials, 
@@ -103,49 +103,66 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     } 
   }));
 
+  // Create Strict Manifest of required shifts
+  // We explicitly list every shift to force the LLM to account for them
+  const shiftManifest = data.shifts.map(s => `ID: "${s.id}" | Date: ${s.pickupDate} | Time: ${s.pickupTime}-${s.endTime} | MinStaff: ${s.minStaff}`).join('\n');
+
   const prompt = `
-    ROLE: AVIATION ROSTER SOLVER (ALGORITHMIC ENGINE)
+    ROLE: AVIATION ROSTER SOLVER (STRICT MANIFEST ENFORCEMENT)
     OBJECTIVE: Generate a ${config.numDays}-day operational roster starting ${config.startDate}.
 
-    ### EXECUTION PROTOCOL (FOLLOW STRICTLY IN ORDER):
-
-    #### STEP 1: PRIORITIZE "ROSTER" STAFF
-    - Identify staff with type="Roster".
-    - Check if the roster date falls within their 'workFrom' and 'workTo' dates.
-    - **STRATEGY**: Maximize usage of these staff first as they do not have the 5-day limit (they work continuously within their block).
-
-    #### STEP 2: ASSIGN SPECIFIC ROLES (MANDATORY)
-    - **Scanning**: Check \`roleCounts\` for ALL requested roles (SL, LC, Ramp, Ops, LF).
-    - **Priority Order**:
-      1. Assign 'Shift Leader' (SL) & 'Load Control' (LC) first (Critical).
-      2. Assign remaining roles (Ramp, Ops, LF) exactly as requested in \`roleCounts\`.
-    - **Constraint**: Use Roster staff first, then Local. 
-    - **Note**: If a role is NOT requested in \`roleCounts\`, do NOT assign it here.
-
-    #### STEP 3: THE "CREDIT SYSTEM" (LOCAL STAFF LIMIT)
-    - **LOCAL STAFF** start with **5 CREDITS** (Max 5 working days).
-    - **DECREMENT**: Every assignment costs 1 Credit.
-    - **STOP CONDITION**: When Credits = 0 (5 days worked), the staff member is **REMOVED** from the available pool for the rest of the period.
-    - **VIOLATION PREVENTION**: It is strictly forbidden to assign a 6th shift to a Local staff member.
-
-    #### STEP 4: MINIMUM STAFF COMPLIANCE (HEADCOUNT FILL)
-    - **CHECK**: Calculate current \`total_assigned\` for the shift (from Step 2).
-    - **LOOP**: WHILE \`total_assigned\` < \`minStaff\`:
-       1. Assign an available staff member (Roster available OR Local with >0 credits).
-       2. **ROLE LABELING**: Label them as **"Agent"** (Generic Filler).
-          - **DO NOT** use "Ramp" or "Ops" here. Those are only for Step 2.
-       3. Increment \`total_assigned\`.
+    ### CRITICAL: THE SHIFT MANIFEST
+    You are legally required to staff exactly ${data.shifts.length} shift slots.
+    Below is the list of Shift IDs that MUST appear in your output assignments.
     
-    #### STEP 5: REST BARRIER
-    - Ensure ${config.minRestHours} hours gap between shifts (check previous day's shift end time).
+    MANIFEST:
+    ${shiftManifest}
 
-    ### ABSOLUTE LAWS (ZERO TOLERANCE):
-    1. **QUALIFICATION MATCH**:
-       - \`skills.SL=false\` CANNOT be assigned 'Shift Leader'.
-       - \`skills.LC=false\` CANNOT be assigned 'Load Control'.
-    2. **NO INVENTED ROLES**:
-       - Only output roles explicitly requested in \`roleCounts\`.
-       - For Step 4 (Fillers), use "Agent" only.
+    **VERIFICATION PROTOCOL**: 
+    1. Read the Manifest.
+    2. For EACH Shift ID in the Manifest, generate assignments.
+    3. Do NOT stop until every single ID has been processed.
+    4. If a shift is missing in the output, the program is invalid.
+
+    ### PHASE 1: MATHEMATICAL DISTRIBUTION (THE "OFF DAY" STRATEGY)
+    Before assigning shifts, calculate the daily numbers:
+    1. **DEMAND**: Sum of 'minStaff' for all shifts on Day X.
+    2. **ROSTER SUPPLY**: Count of 'Roster' staff active on Day X.
+    3. **LOCAL GAP**: Demand - Roster Supply.
+    4. **LOCAL SUPPLY**: Total 'Local' staff count.
+    5. **OFF TARGET**: Local Supply - Local Gap.
+    
+    **STRATEGY**: 
+    - You must assign 'Day Off' to exactly {OFF TARGET} Local staff each day.
+    - **CRITICAL**: You must ROTATE these off days. Do not give everyone Sat/Sun off. Distribute off days evenly (Mon, Tue, Wed...) to ensure the "Gap" is always filled.
+
+    ### PHASE 2: SPECIALIST ASSIGNMENT (DUAL ROLE OPTIMIZATION)
+    For each shift, assign roles in this STRICT order:
+    
+    1. **LOAD CONTROL (LC) - HIGHEST PRIORITY**
+       - Assign a qualified LC staff member (Roster preferred, then Local).
+       - **OPTIMIZATION**: If the assigned LC staff is *also* a Shift Leader (SL), you count them towards the SL requirement too.
+       - *Example*: Shift needs 1 LC, 1 SL. Staff 'AZ' (has LC & SL) is assigned to 'LC'. Now Shift needs 0 SL. (Saved 1 headcount).
+
+    2. **SHIFT LEADER (SL)**
+       - Assign remaining SLs needed (if not covered by the LC optimization).
+
+    3. **RAMP / OPS / LOST & FOUND**
+       - Assign remaining specialist roles.
+
+    ### PHASE 3: GENERAL FILL (AGENT ROLE)
+    - Fill the remaining slots to reach 'minStaff'.
+    - Use **Roster** staff first.
+    - Use **Local** staff second (excluding those selected for 'Day Off' in Phase 1).
+
+    ### PHASE 4: EMERGENCY OVERRIDE (FORCE FILL)
+    - **CHECK**: If a shift is still understaffed (Current < MinStaff).
+    - **ACTION**: CANCEL the 'Day Off' for needed Local staff.
+    - **RULE**: It is better to burn a Local credit (work 6 days) than to leave a shift understaffed.
+    - **ZERO SHIFT RULE**: If staff like ML-ATZ, MN-ATZ have 0 shifts, they MUST be prioritized for these gaps.
+
+    ### PHASE 5: REST BARRIER
+    - 16:00 to 00:00 is only 8 hours. Illegal if minRest is 12.
 
     STATION DATA:
     - STAFF POOL: ${JSON.stringify(staffContext)}
@@ -265,22 +282,19 @@ export const repairProgramWithAI = async (
 
     ### ALLOCATION PROTOCOL (ENFORCE DURING REPAIR):
     
-    #### 1. QUALIFICATION & SPECIFIC ROLES
-    - **Fix Qualification**: Swap staff if they lack the required skill.
-    - **Specific Roles**: Ensure all roles in \`roleCounts\` are filled by qualified staff.
+    #### 1. DUAL ROLE & LC PRIORITY (CRITICAL)
+    - **Load Control (LC)**: Must be filled.
+    - **Optimization**: If you assign an LC who is also SL, they cover BOTH requirements.
+    - **Swap**: You can swap out a generic Agent to bring in a qualified LC/SL staff.
+
+    #### 2. MINIMUM STAFF COMPLIANCE (FORCE FILL)
+    - **Check \`minStaff\`**: If count < \`minStaff\`:
+       1. **FORCE FILL**: Identify Local staff with 0 shifts.
+       2. **ASSIGN**: Add them to the shift immediately.
+       3. **NOTE**: Do not leave gaps. Understaffing is forbidden.
     
-    #### 2. THE "CREDIT SYSTEM" (LOCAL STAFF LIMIT)
-    - **HARD KILL**: If a Local staff member > 5 shifts, **DELETE** the extra shifts (Day 6, Day 7). 
-    - It is better to have an EMPTY slot than an illegal 6th shift.
-    
-    #### 3. MINIMUM STAFF COMPLIANCE (HEADCOUNT FILL)
-    - **Check \`minStaff\`**: If count < \`minStaff\`, fill the slot with a valid replacement.
-    - **Priority**: Use ROSTER staff first, then LOCAL staff (with < 5 shifts).
-    - **ROLE LABELING**: Label fillers as **"Agent"**. 
-       - Do NOT use "Ramp" or "Ops" here (only in Step 1).
-    
-    #### 4. REST BARRIER
-    - Ensure >${constraints.minRestHours}h rest gaps between shifts.
+    #### 3. REST BARRIER
+    - Ensure >${constraints.minRestHours}h rest gaps.
 
     ### DATA SOURCES:
     - Staff Pool: ${JSON.stringify(staffContext)}
