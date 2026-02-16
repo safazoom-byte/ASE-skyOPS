@@ -16,7 +16,8 @@ export interface ExtractionMedia {
 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
-  let cleanText = text.replace(/```json\n?|```/g, "").trim();
+  // Deep Check Fix: Added 'i' flag for case-insensitive matching (handles ```JSON vs ```json)
+  let cleanText = text.replace(/```json\n?|```/gi, "").trim();
   try {
     return JSON.parse(cleanText);
   } catch (e) {
@@ -201,7 +202,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     - **CRITICAL**: If you run out of staff (due to rest, leave, or off-days), **LEAVE THE SLOT EMPTY**. It is better to return an understaffed roster than an illegal one.
 
     ### PHASE 4: REST BARRIER
-    - 16:00 to 00:00 is only 8 hours. Illegal if minRest is 12.
+    - 16:00 to 00:00 is only 8 hours. Illegal if minRest is ${config.minRestHours}.
 
     STATION DATA:
     - STAFF POOL: ${JSON.stringify(staffContext)}
