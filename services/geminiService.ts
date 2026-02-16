@@ -17,16 +17,32 @@ export interface ExtractionMedia {
 // Robust JSON extraction helper
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  // Remove markdown code blocks
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  
   try {
     return JSON.parse(clean);
   } catch (e) {
+    // Attempt to extract array if parsing failed
     const firstBracket = clean.indexOf('[');
     const lastBracket = clean.lastIndexOf(']');
+    
     if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
       try {
-        return JSON.parse(clean.substring(firstBracket, lastBracket + 1));
+        const arrayStr = clean.substring(firstBracket, lastBracket + 1);
+        return JSON.parse(arrayStr);
       } catch (e2) {
+         // Attempt to extract object if parsing failed
+         const firstBrace = clean.indexOf('{');
+         const lastBrace = clean.lastIndexOf('}');
+         if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+             try {
+                return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
+             } catch (e3) {
+                console.error("Failed to parse JSON segment:", clean);
+                return null;
+             }
+         }
          return null;
       }
     }
@@ -153,7 +169,16 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     });
 
     const parsedArray = safeParseJson(response.text);
-    if (!Array.isArray(parsedArray)) throw new Error("Invalid AI Output Format");
+    
+    // Safety check for empty or invalid data
+    if (!Array.isArray(parsedArray)) {
+        console.error("Invalid Structure:", response.text);
+        throw new Error("AI generated an invalid structure. Please retry.");
+    }
+    
+    if (parsedArray.length === 0 && config.numDays > 0 && data.shifts.length > 0) {
+        console.warn("Empty assignments returned.");
+    }
 
     // 5. Reconstruct State
     const programs: DailyProgram[] = [];
