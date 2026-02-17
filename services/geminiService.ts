@@ -21,22 +21,23 @@ const safeParseJson = (text: string | undefined): any => {
   // Remove markdown code blocks
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
+  // Aggressive extraction: Find the outer-most array brackets
+  const firstOpen = clean.indexOf('[');
+  const lastClose = clean.lastIndexOf(']');
+  
+  if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+      clean = clean.substring(firstOpen, lastClose + 1);
+  }
+
   // Attempt direct parse
   try {
     return JSON.parse(clean);
   } catch (e) {
     // Repair common AI JSON truncation or wrapping issues
     try {
+      // Try fixing unclosed array
       if (clean.startsWith('[') && !clean.endsWith(']')) {
-        const variants = [']', ']]', '"-"]]']; 
-        for (const suffix of variants) {
-            try { return JSON.parse(clean + suffix); } catch (err) {}
-        }
-        // Last resort: cut to last closing brace/bracket
-        const lastArrayEnd = clean.lastIndexOf(']');
-        if (lastArrayEnd > 0) {
-            return JSON.parse(clean.substring(0, lastArrayEnd + 1));
-        }
+         return JSON.parse(clean + ']');
       }
     } catch (finalErr) {
       console.error("JSON Repair Failed", finalErr);
@@ -107,7 +108,7 @@ const getDayOffset = (startStr: string, currentStr: string) => {
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // 1. FILTER STAFF BY DATE (Strict Mode)
+  // 1. FILTER STAFF BY DATE (Relaxed Mode to prevent "No Staff" errors)
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
@@ -117,9 +118,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       // Locals are always valid
       if (s.type === 'Local') return true;
       
-      // Roster staff must have dates defined and be active
+      // Roster staff - Allow if dates are missing (assume active) or if they overlap/touch the period
       if (s.type === 'Roster') {
-        if (!s.workFromDate || !s.workToDate) return false;
+        if (!s.workFromDate || !s.workToDate) return true; // Assume active if dates missing
         if (s.workToDate < config.startDate) return false; 
         if (s.workFromDate > programEndStr) return false;
       }
@@ -203,10 +204,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   // 5. Execute Strategy
-  // We prioritize gemini-2.0-flash-exp because it handles large contexts/output better.
+  // Prioritize Gemini 3 Flash for stability, fallback to 2.0 Flash Exp for context window
   const strategies = [
-    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 65000 },
-    { model: 'gemini-3-flash-preview', temp: 0.1, limit: 8192 }
+    { model: 'gemini-3-flash-preview', temp: 0.1, limit: 8192 },
+    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 65000 }
   ];
 
   let parsed: any = null;
@@ -215,7 +216,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       try {
         const prompt = `
             ROLE: Aviation Scheduler.
-            MISSION: GENERATE A ROSTER. BEST EFFORT. DO NOT FAIL.
+            MISSION: GENERATE A ROSTER. BEST EFFORT.
             
             PRIORITY RULE #1 (COVERAGE):
             Target: Assigned Count >= 'mn' (MinStaff).
@@ -223,20 +224,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             Instead, use available ROSTER ('R') staff (Standby) to fill the gap.
             
             PRIORITY RULE #2 (FATIGUE SAFETY):
-            Check the 'et' (End Time) of a staff member's previous shift (including incoming duties).
+            Check the 'et' (End Time) of a staff member's previous shift.
             The gap to the new 'pt' (Pickup Time) MUST be >= ${config.minRestHours} hours.
             
-            HIERARCHY OF ASSIGNMENT:
-            1. MANDATORY ROLES: Assign staff with required skills (SL, LC, RMP, OPS, LF) to meet 'rc'.
-            2. HEADCOUNT FILL (ROSTER): Use available Roster ('R') staff to reach 'mn'.
-            3. HEADCOUNT FILL (LOCAL): Assign Local ('L') staff.
-            
             FAILURE HANDLING (CRITICAL):
-            If you cannot meet 'mn' or 'rc' due to lack of eligible/rested staff:
-            - FILL AS MANY SLOTS AS POSSIBLE.
-            - LEAVE THE REST EMPTY.
-            - PROCEED TO THE NEXT SHIFT.
-            - DO NOT FAIL OR RETURN EMPTY JSON.
+            - If you cannot meet 'mn' or 'rc' due to lack of staff: FILL WHAT YOU CAN.
+            - LEAVE REMAINING SLOTS EMPTY.
+            - DO NOT FAIL. DO NOT RETURN ERROR MESSAGE.
+            - ALWAYS RETURN A VALID JSON ARRAY, even if partial.
             
             INPUT (Minified):
             Period: ${config.startDate} to ${programEndStr}.
@@ -251,13 +246,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             ${explicitConstraints.join('\n')}
 
             OUTPUT JSON:
-            Return a COMPACT ARRAY of ARRAYS to save space.
+            Return a COMPACT ARRAY of ARRAYS.
             Format: [[dayOffset, shiftIndex, "StaffInitials", "Role"], ...]
             Example: [[0, 0, "MS-ATZ", "LC"], [0, 0, "AG-HMB", "AGT"]]
             
             CRITICAL: 
-            - DO NOT USE OBJECT KEYS (like "d":0). USE ARRAYS ONLY.
-            - CALCULATE REST HOURS BETWEEN SHIFTS.
+            - USE ARRAYS ONLY.
             - IF PERFECT SOLUTION IS IMPOSSIBLE, RETURN PARTIAL SOLUTION.
         `;
 
