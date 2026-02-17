@@ -516,7 +516,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           const assign = p.assignments.find(a => a.staffId === s.id);
           if (assign) {
              const sh = getShiftById(assign.shiftId);
-             row.push(sh?.pickupTime || 'WORK');
+             // Calculate rest hours from previous shift/duty
+             const rest = calculateRestHours(s.id, p.dateString!, sh?.pickupTime || '');
+             // Format: "08:00 [12.5H]"
+             const restLabel = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
+             row.push((sh?.pickupTime || 'WORK') + restLabel);
              workCount++;
           } else {
              row.push('-');
@@ -535,7 +539,26 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       headStyles: { fillColor: matrixOrange, fontSize: 8 },
       bodyStyles: { fontSize: 7, cellPadding: 2 },
       styles: { halign: 'center' },
-      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 30, halign: 'left' } }
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 30, halign: 'left' } },
+      didParseCell: (data) => {
+        // Detect Rest Hours Violation in Matrix Cells
+        // Column 0 is S/N, Column 1 is Name, Column Last is Audit.
+        // Data columns are index 2 to (length-2).
+        if (data.section === 'body' && data.column.index >= 2 && data.column.index < data.table.columns.length - 1) {
+           const text = data.cell.text[0] || '';
+           // Look for pattern [12.5H] or similar
+           const match = text.match(/\[(\d+(\.\d+)?)H\]/);
+           if (match) {
+              const restHours = parseFloat(match[1]);
+              if (restHours < minRestHours!) {
+                 // VIOLATION: Set Background Red, Text White
+                 data.cell.styles.fillColor = [220, 38, 38]; // Red
+                 data.cell.styles.textColor = [255, 255, 255]; // White
+                 data.cell.styles.fontStyle = 'bold';
+              }
+           }
+        }
+      }
     });
 
     doc.save(`SkyOPS_Program_${startDate}.pdf`);
