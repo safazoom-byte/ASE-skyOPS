@@ -17,21 +17,31 @@ export interface ExtractionMedia {
 // 1. ROBUST JSON PARSER
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  // Remove markdown code blocks
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
+  // Attempt direct parse
   try {
     return JSON.parse(clean);
   } catch (e) {
+    // Repair common AI JSON truncation or wrapping issues
     try {
       if (clean.startsWith('[') && !clean.endsWith(']')) {
-        const variants = [']', '}]', '"}]', '"]', '0}]']; 
+        const variants = [']', '}]', '"}]', '"]', '0}]', 'T"}]']; 
         for (const suffix of variants) {
             try { return JSON.parse(clean + suffix); } catch (err) {}
         }
+        // Last resort: cut to last closing brace
         const lastObjectEnd = clean.lastIndexOf('}');
         if (lastObjectEnd > 0) {
             return JSON.parse(clean.substring(0, lastObjectEnd + 1) + ']');
         }
+      }
+      // Try finding the array inside text
+      const startIdx = clean.indexOf('[');
+      const endIdx = clean.lastIndexOf(']');
+      if (startIdx !== -1 && endIdx !== -1) {
+          return JSON.parse(clean.substring(startIdx, endIdx + 1));
       }
     } catch (finalErr) {
       console.error("JSON Repair Failed", finalErr);
@@ -77,9 +87,6 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
   const staffLeaves = leaveRequests.filter(l => l.staffId === staff.id);
   staffLeaves.forEach(leave => {
     // Only deduct credits for "Work-blocking" leave types (Annual, Sick). 
-    // "Day off" requests just block specific days but don't necessarily reduce the 5-day work requirement if possible to fit elsewhere,
-    // BUT usually if a user requests a day off, they expect it to count towards their 2 days off.
-    // However, if they take 'Annual Leave', that reduces the work days.
     if (leave.type === 'Annual leave' || leave.type === 'Sick leave' || leave.type === 'Lieu leave') {
         const leaveStart = new Date(leave.startDate);
         const leaveEnd = new Date(leave.endDate);
@@ -104,13 +111,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const programEndStr = programEnd.toISOString().split('T')[0];
 
   const validStaff = data.staff.filter(s => {
-      // Locals are always valid (unless manually removed, handled elsewhere)
+      // Locals are always valid
       if (s.type === 'Local') return true;
       
       // Roster staff must have dates defined and be active
       if (s.type === 'Roster') {
         if (!s.workFromDate || !s.workToDate) return false;
-        // Check for ANY overlap. If their contract ends before program starts, or starts after program ends, remove them.
         if (s.workToDate < config.startDate) return false; 
         if (s.workFromDate > programEndStr) return false;
       }
@@ -120,12 +126,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   // 2. Prepare Staff Map & Context
   const staffMap: Record<string, string> = {}; // Initials -> ID
   validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
-
-  // Ratio calculation for the prompt
-  const localCount = validStaff.filter(s => s.type === 'Local').length;
-  const rosterCount = validStaff.filter(s => s.type === 'Roster').length;
-  const totalCount = localCount + rosterCount;
-  const localRatio = totalCount > 0 ? (localCount / totalCount).toFixed(2) : "0.5";
 
   const staffContext = validStaff.map(s => {
     const skills = [
@@ -142,9 +142,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|Credits:${credits}`;
   }).join('\n');
 
-  const shiftContext = data.shifts.map((s, idx) => {
-    // Explicitly listing Min Staff to force AI compliance
-    return `ID:${idx}|Time:${s.pickupTime}-${s.endTime}|MinStaff:${s.minStaff}|Roles:${JSON.stringify(s.roleCounts)}`;
+  // Explicitly list shifts sorted chronologically to help the AI flow
+  const sortedShifts = [...data.shifts].sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime));
+  
+  const shiftContext = sortedShifts.map((s, idx) => {
+    const originalIdx = data.shifts.findIndex(os => os.id === s.id);
+    return `Index:${originalIdx}|Day:${s.day}|Time:${s.pickupTime}|MinStaff:${s.minStaff}|Roles:${JSON.stringify(s.roleCounts)}`;
   }).join('\n');
 
   // 3. Prepare Constraints
@@ -156,13 +159,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     if (!staffMember) return;
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
-    // Overlap check
     if (lEnd >= programStart && lStart <= programEnd) {
        explicitConstraints.push(`- ${staffMember.initials} is UNAVAILABLE from ${leave.startDate} to ${leave.endDate} (Reason: ${leave.type}).`);
     }
   });
 
-  // B. Roster Contract Boundaries (Partial Weeks)
+  // B. Roster Contract Boundaries
   validStaff.forEach(s => {
       if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
           if (s.workFromDate > config.startDate) {
@@ -174,16 +176,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
   });
 
-  // C. Incoming Duty Rest Logic (Rest Log)
+  // C. Incoming Duty Rest Logic
   (data.incomingDuties || []).forEach(d => {
       const staffMember = validStaff.find(s => s.id === d.staffId);
       if (!staffMember) return;
-      // Calculate when they are free: ShiftEnd + MinRest
       const shiftEnd = new Date(`${d.date}T${d.shiftEndTime}`);
       const freeAt = new Date(shiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
-      
-      // We format this for the AI to understand "Block until X time"
-      // If freeAt is within the program window
       if (freeAt > programStart) {
           const freeAtStr = freeAt.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
           explicitConstraints.push(`- ${staffMember.initials} is RESTING until ${freeAtStr}. ABSOLUTELY NO SHIFTS BEFORE THIS TIME.`);
@@ -191,9 +189,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   // 4. Define Strategy
+  // We prioritize the most capable model for complex constraint solving
   const strategies = [
-    { model: 'gemini-3-pro-preview', temp: 0.15 },
-    { model: 'gemini-2.0-flash-exp', temp: 0.1 }
+    { model: 'gemini-3-pro-preview', temp: 0.3 },
+    { model: 'gemini-2.0-flash-exp', temp: 0.2 }
   ];
 
   let parsed: any = null;
@@ -202,49 +201,44 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       try {
         const prompt = `
             ROLE: Master Aviation Scheduler.
-            GOAL: Build a weekly roster. 
+            MISSION: FILL EVERY SHIFT (OPERATION FIRST, RULES SECOND).
             
-            HIERARCHY OF OBJECTIVES:
-            1. **FILL MINIMUM STAFF (HIGHEST PRIORITY)**: Every shift MUST meet 'MinStaff'. This is non-negotiable.
-            2. **ORGANIZE WITH CREDITS**: Use 'Credits' to distribute work fairly.
-            3. **OVERRIDE**: If a shift needs staff to meet MinStaff, but available staff have 0 credits left, **YOU MUST ASSIGN THEM ANYWAY**. An overloaded staff member is better than an empty shift.
-
+            STRICT ALGORITHM (FOLLOW EXACTLY):
+            1. SORT shifts chronologically (already done in input).
+            2. ITERATE through every shift one by one.
+            3. IDENTIFY required 'MinStaff' count.
+            4. FIND available staff (not on Leave, not Resting).
+            5. ALLOCATE staff using this priority:
+               a. Staff with Credits > 0.
+               b. Staff with Credits = 0 (OVERTIME).
+            
+            CRITICAL RULES:
+            - **NEVER** leave a shift empty if a human is available, even if they have 0 credits.
+            - **NEVER** leave a shift empty if they have worked consecutive days.
+            - **PRIORITY**: FLIGHT OPERATION > STAFF COMFORT.
+            - If you run out of staff with credits, you MUST assign staff with 0 credits.
+            - Ensure qualified staff (LC, SL) are assigned where RoleNeeds dictate.
+            
             INPUT DATA:
             Period: ${config.startDate} to ${programEndStr}.
             
-            STAFF LIST (ID | Type | Skills | Credits):
+            STAFF POOL (ID | Type | Skills | Credits):
             ${staffContext}
 
-            SHIFTS (ID | Time | MinStaff | RoleNeeds):
+            SHIFTS TO FILL (Index | Day | Time | MinStaff | RoleNeeds):
             ${shiftContext}
 
-            ALLOCATION STEPS:
-            1. **Load Control (LC)**: Fill 'Load Control' needs using ONLY 'LC' skilled staff. Assign Role="LC".
-            2. **Shift Leader (SL)**: Fill 'Shift Leader' needs using ONLY 'SL' skilled staff. Assign Role="SL".
-            3. **Operations (OPS)**: Fill 'Operations' needs using 'OPS' staff. Assign Role="OPS".
-            4. **Ramp (RMP)**: Fill 'Ramp' needs using 'RMP' staff. Assign Role="RMP".
-            5. **Lost & Found (LF)**: Fill 'Lost and Found' needs using 'LF' staff. Assign Role="LF".
-            6. **MINIMUM STAFF (CRITICAL)**: Fill remaining slots until 'MinStaff' is reached using ANY available staff. Assign Role="AGT". 
-               *NOTE: If you run out of staff with credits, use staff with 0 credits. DO NOT leave slots empty.*
-            7. **RATIO BALANCE**: If 'MinStaff' reached but 'MaxStaff' not reached, add extra staff based on Credits availability. Assign Role="AGT".
-
-            RULES:
-            - **NO 0.0H REST**: If staff works Late (ends >20:00), NO Early shift (starts <12:00) next day.
-            - **CONTRACTS**: Do not assign Roster staff outside their contract dates.
-            - **LOCAL BALANCE**: Distribute "Days Off" for Locals evenly.
-            - **REST LOG**: Respect the resting constraints listed below.
-
-            CONSTRAINTS:
+            CONSTRAINTS (Hard Blocks - Do Not Violate):
             ${explicitConstraints.join('\n')}
 
             OUTPUT FORMAT:
-            JSON Array. Use Initials for 'staff'.
+            JSON Array ONLY. Use Initials for 'staff'.
             [
               { "day": 0, "shift": 0, "staff": "MS-ATZ", "role": "LC" },
               { "day": 0, "shift": 0, "staff": "AG-HMB", "role": "AGT" }
             ]
             
-            IMPORTANT: Return ONLY valid JSON.
+            Return ONLY valid JSON.
         `;
 
         const response = await ai.models.generateContent({
@@ -252,7 +246,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             contents: prompt,
             config: {
                 temperature: strategy.temp,
-                maxOutputTokens: 8192,
+                maxOutputTokens: 20000, // Increased to ensure full week generation
                 responseMimeType: 'application/json'
             }
         });
@@ -380,7 +374,6 @@ export const repairProgramWithAI = async (
   const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
   const numDays = sortedPrograms.length || 7;
 
-  // Calculate Capacity Stats for Prompt
   let totalSupply = 0;
   
   const staffContext = data.staff.map(s => {
@@ -398,7 +391,6 @@ export const repairProgramWithAI = async (
     return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|Credits:${credits}`;
   }).join('\n');
 
-  // Calculate Demand
   let totalDemand = 0;
   const programEnd = new Date(startDate);
   programEnd.setDate(programEnd.getDate() + numDays - 1);
@@ -420,9 +412,6 @@ export const repairProgramWithAI = async (
     
     CAPACITY FORECAST:
     ${capacitySummary}
-
-    STAFF LIMITS (Credits = Max Shifts):
-    ${staffContext}
     
     Data:
     ROSTER: ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
