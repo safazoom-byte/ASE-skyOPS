@@ -192,11 +192,32 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     for (let i = 1; i < 30; i++) { 
         d.setDate(d.getDate() - 1);
         const prevDateStr = d.toISOString().split('T')[0];
+        
+        // 1. Try to find explicit program
         const prevProg = programs.find(p => p.dateString === prevDateStr);
+        let prevStatus = '';
+
+        if (prevProg) {
+            prevStatus = getStatusForDay(s, prevDateStr, prevProg);
+        } else {
+            // Fallback: Check global records if program not generated for that day
+            const leave = leaveRequests.find(r => r.staffId === s.id && prevDateStr >= r.startDate && prevDateStr <= r.endDate);
+            const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === prevDateStr);
+            
+            if (leave) {
+                if (leave.type === 'Day off') prevStatus = 'DAYS OFF';
+                else if (leave.type === 'Roster leave') prevStatus = 'ROSTER LEAVE';
+                else prevStatus = 'ANNUAL LEAVE'; 
+            } else if (restLock) {
+                prevStatus = 'RESTING (POST-DUTY)';
+            } else if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+                 const isOutside = (prevDateStr < s.workFromDate || prevDateStr > s.workToDate);
+                 if (isOutside) prevStatus = 'ROSTER LEAVE';
+            }
+            // For inferred 'DAYS OFF' (Local staff), we cannot safely assume status without roster data,
+            // so prevStatus remains empty and loop breaks naturally.
+        }
         
-        if (!prevProg) break; // End of data or start of program
-        
-        const prevStatus = getStatusForDay(s, prevDateStr, prevProg);
         if (prevStatus === category) {
             count++;
         } else {
@@ -254,7 +275,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r) return '';
-    if (r.includes('SHIFT LEADER') || r === 'SL') return 'SL';
+    // Correctly map LS (typo) to SL
+    if (r.includes('SHIFT LEADER') || r === 'SL' || r === 'LS') return 'SL';
     if (r.includes('LOAD CONTROL') || r === 'LC') return 'LC';
     if (r.includes('RAMP') || r === 'RMP') return 'RMP';
     if (r.includes('OPERATIONS') || r.includes('OPS') || r === 'OPS') return 'OPS';
@@ -267,8 +289,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formatRoleLabel = (role: string | undefined) => {
     const code = formatRoleCode(role || '');
-    // Requested Change: Hide RMP and AGT tags for General Agents
-    if (code === 'RMP') return ''; 
+    // Display all specialist codes including RMP, hide generic agents (empty string)
     return code ? `(${code})` : '';
   };
 
@@ -559,13 +580,20 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       }
     });
 
-    // --- NEW: Specialist Role Fulfillment Matrix ---
+    // --- NEW: Compact Specialist Role Fulfillment Matrix (1 Page) ---
     doc.addPage('l', 'mm', 'a4');
     doc.setFontSize(20).setTextColor(0).text("Specialist Role Fulfillment Matrix", 14, 20);
-    
-    const fulfillmentRows: any[] = [];
+
+    const specialistHeaders = ['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF'];
+    const specialistKeys: Skill[] = ['Shift Leader', 'Load Control', 'Ramp', 'Operations', 'Lost and Found'];
+
+    const fulfillmentMatrixBody: any[] = [];
+
     filteredPrograms.forEach(p => {
-        // Group by shift
+        const d = new Date(p.dateString || '');
+        const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+        
+        // Group assignments by shift
         const shiftAssignments: Record<string, Assignment[]> = {};
         p.assignments.forEach(a => {
             if(a.shiftId) {
@@ -574,7 +602,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             }
         });
 
-        // Use same sort order as other tables
+        // Sort shifts
         const sortedShiftIds = Object.keys(shiftAssignments).sort((a,b) => {
             const sA = getShiftById(a); const sB = getShiftById(b);
             return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
@@ -582,56 +610,56 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
         sortedShiftIds.forEach(sid => {
             const sh = getShiftById(sid);
-            if(!sh || !sh.roleCounts) return;
+            if(!sh) return;
+            
+            const row: any[] = [
+                { content: dateLabel, styles: { fontStyle: 'bold' } },
+                { content: `${sh.pickupTime}-${sh.endTime}`, styles: { fontStyle: 'bold' } }
+            ];
 
-            // Iterate requested specialist roles
-            Object.entries(sh.roleCounts).forEach(([skill, reqCount]) => {
-                // If 0 required, skip
-                if (!reqCount || reqCount === 0) return;
+            specialistKeys.forEach(skill => {
+                const reqCount = sh.roleCounts?.[skill] || 0;
                 
-                // Find assignments that MATCH this role code
-                const assigned = shiftAssignments[sid].filter(a => {
-                    const assignedCode = formatRoleCode(a.role);
-                    const targetCode = formatRoleCode(skill);
-                    return assignedCode === targetCode;
-                });
-                
-                const assignedInitials = assigned.map(a => getStaffById(a.staffId)?.initials).filter(Boolean).join(', ');
-                const isMet = assigned.length >= (reqCount as number);
-                
-                const d = new Date(p.dateString || '');
-                const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
-
-                fulfillmentRows.push([
-                    dateLabel,
-                    `${sh.pickupTime}-${sh.endTime}`,
-                    sh.flightIds?.map(fid => getFlightById(fid)?.flightNumber).join('/') || 'NIL',
-                    skill,
-                    reqCount.toString(),
-                    isMet ? 'OK' : 'FAIL', // Text status
-                    assignedInitials || '-'
-                ]);
+                if (reqCount === 0) {
+                    row.push({ content: '-', styles: { halign: 'center', textColor: 150 } });
+                } else {
+                    // Find assignments for this shift with this role
+                    const assigned = shiftAssignments[sid].filter(a => {
+                        const assignedCode = formatRoleCode(a.role); // e.g. SL
+                        const targetCode = formatRoleCode(skill);    // e.g. SL
+                        return assignedCode === targetCode;
+                    });
+                    
+                    const isMet = assigned.length >= reqCount;
+                    const assignedInitials = assigned.map(a => getStaffById(a.staffId)?.initials).filter(Boolean).join(', ');
+                    
+                    row.push({
+                        content: assignedInitials || 'MISSING',
+                        styles: {
+                            fillColor: isMet ? [22, 163, 74] : [220, 38, 38], // Green or Red
+                            textColor: 255,
+                            fontStyle: 'bold',
+                            halign: 'center'
+                        }
+                    });
+                }
             });
+            
+            fulfillmentMatrixBody.push(row);
         });
     });
 
-    autoTable(doc, { 
-        startY: 25, 
-        head: [['DATE', 'SHIFT', 'FLIGHTS', 'REQUESTED ROLE', 'REQ', 'STATUS', 'ASSIGNED TO']], 
-        body: fulfillmentRows, 
-        theme: 'grid', 
-        headStyles: { fillColor: headerBlack },
-        bodyStyles: { fontSize: 8, cellPadding: 3 },
-        didParseCell: (data) => {
-            if (data.section === 'body' && data.column.index === 5) {
-                if (data.cell.text[0] === 'OK') {
-                    data.cell.styles.textColor = [22, 163, 74]; // Green
-                    data.cell.styles.fontStyle = 'bold';
-                } else {
-                    data.cell.styles.textColor = [220, 38, 38]; // Red
-                    data.cell.styles.fontStyle = 'bold';
-                }
-            }
+    autoTable(doc, {
+        startY: 25,
+        head: [specialistHeaders],
+        body: fulfillmentMatrixBody,
+        theme: 'grid',
+        headStyles: { fillColor: headerBlack, halign: 'center' },
+        bodyStyles: { fontSize: 8, cellPadding: 3, valign: 'middle' },
+        columnStyles: {
+            0: { cellWidth: 15 },
+            1: { cellWidth: 25 },
+            // Remaining columns auto width
         }
     });
 
@@ -757,7 +785,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       return (
                                         <div key={idx} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm ${isFatigued ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-white border-slate-100 text-slate-700'}`}>
                                           <span>{s?.initials}</span>
-                                          {formatRoleCode(assign.role) && formatRoleCode(assign.role) !== 'RMP' && (
+                                          {formatRoleCode(assign.role) && (
                                             <span className="px-1 py-0.5 bg-slate-900 text-white rounded-[4px] text-[7px] tracking-tight">{formatRoleCode(assign.role)}</span>
                                           )}
                                           {rest !== null && (

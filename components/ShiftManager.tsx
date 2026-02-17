@@ -190,6 +190,17 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     }
   };
 
+  const getSkillCode = (skill: string) => {
+    switch(skill) {
+      case 'Shift Leader': return 'SL';
+      case 'Load Control': return 'LC';
+      case 'Ramp': return 'RMP';
+      case 'Operations': return 'OPS';
+      case 'Lost and Found': return 'LF';
+      default: return '';
+    }
+  };
+
   const getPhaseStyle = (time: string) => {
     const hour = parseInt(time.split(':')[0]);
     if (hour >= 4 && hour < 12) return { label: 'Morning', color: 'text-blue-500', bg: 'bg-blue-500/10' };
@@ -491,16 +502,33 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
                             <div className="space-y-3">
                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Specialist Matrix</p>
-                               <div className="flex gap-2">
+                               <div className="flex flex-wrap gap-2">
                                   {AVAILABLE_SKILLS.map(skill => {
                                     const count = s.roleCounts?.[skill] || 0;
                                     const isNeeded = count > 0;
+                                    const shortCode = getSkillCode(skill);
+                                    
                                     return (
-                                      <div key={skill} title={`${skill}: ${count}`} className={`w-10 h-10 rounded-2xl flex items-center justify-center relative transition-all ${
-                                        isNeeded ? 'bg-slate-950 text-white shadow-lg scale-105' : 'bg-slate-50 text-slate-200'
-                                      }`}>
+                                      <div 
+                                        key={skill} 
+                                        title={`${skill}: ${count}`} 
+                                        className={`px-3 py-2 rounded-xl flex items-center gap-2 transition-all ${
+                                          isNeeded 
+                                            ? 'bg-slate-900 text-white shadow-lg scale-105' 
+                                            : 'bg-slate-50 text-slate-300'
+                                        }`}
+                                      >
                                         {getSkillIcon(skill)}
-                                        {isNeeded && count > 1 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-blue-600 rounded-full text-[8px] font-black flex items-center justify-center border-2 border-white">{count}</span>}
+                                        {isNeeded && (
+                                          <div className="flex items-center gap-1">
+                                            <span className="text-[9px] font-black">{shortCode}</span>
+                                            {count > 1 && (
+                                              <span className="px-1.5 py-0.5 bg-blue-600 rounded-full text-[8px] font-black flex items-center justify-center border border-blue-500">
+                                                {count}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
