@@ -51,10 +51,13 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
   let grossCredits = 0;
   
   if (staff.type === 'Local') {
-    // Local Staff: 5 days work per 7 days standard
-    grossCredits = Math.ceil(duration * (5/7));
+    // Local Staff: STRICT 5 days work per 7 days standard.
+    // We floor/ceil to ensure they don't get over-assigned.
+    grossCredits = Math.floor(duration * (5/7)); 
+    // If duration is less than 7 days, we scale proportionally but conservatively.
+    if (duration < 7 && duration > 0) grossCredits = Math.ceil(duration * 0.75);
   } else {
-    // Roster Staff: Availability within contract dates
+    // Roster Staff logic
     if (!staff.workFromDate || !staff.workToDate) {
       grossCredits = duration;
     } else {
@@ -68,7 +71,8 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
          const diffTime = overlapEnd.getTime() - overlapStart.getTime();
          grossCredits = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
       } else {
-         grossCredits = 0;
+         // Contract doesn't overlap? Assume availability if manually added to DB.
+         grossCredits = duration; 
       }
     }
   }
@@ -98,54 +102,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
   const programEndStr = programEnd.toISOString().split('T')[0];
 
-  // --- STRICT ACTIVE POOL FILTERING ---
-  // Completely ignore staff whose contract has not started or has ended.
-  const validStaff = data.staff.filter(s => {
-      if (s.type === 'Local') return true;
-      if (s.type === 'Roster') {
-        if (!s.workFromDate || !s.workToDate) return true;
-        const sStart = s.workFromDate;
-        const sEnd = s.workToDate;
-        // Staff must be active for at least one day within the target period
-        return (sStart <= programEndStr && sEnd >= config.startDate);
-      }
-      return true;
-  });
-
+  const validStaff = data.staff; 
   const staffMap: Record<string, string> = {};
   validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
-
-  // --- STRATEGIC ANALYSIS: DEMAND HEATMAP ---
-  // We calculate the load for every day to guide the "Light Day" off-day strategy
-  const dailyLoad: Record<string, { total: number, sl: number, lc: number, rmp: number, ops: number, lf: number }> = {};
-  
-  for(let i=0; i<config.numDays; i++) {
-    const d = new Date(config.startDate);
-    d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
-    
-    let dayTotal = 0;
-    let daySL = 0;
-    let dayLC = 0;
-    let dayRMP = 0;
-    let dayOPS = 0;
-    let dayLF = 0;
-
-    data.shifts.filter(s => s.pickupDate === dateStr).forEach(s => {
-       dayTotal += s.minStaff || 0;
-       daySL += s.roleCounts?.['Shift Leader'] || 0;
-       dayLC += s.roleCounts?.['Load Control'] || 0;
-       dayRMP += s.roleCounts?.['Ramp'] || 0;
-       dayOPS += s.roleCounts?.['Operations'] || 0;
-       dayLF += s.roleCounts?.['Lost and Found'] || 0;
-    });
-
-    dailyLoad[dateStr] = { total: dayTotal, sl: daySL, lc: dayLC, rmp: dayRMP, ops: dayOPS, lf: dayLF };
-  }
-
-  // Identify "Light Days" (lowest total demand) to suggest as off-days for Locals
-  const sortedDaysByLoad = Object.entries(dailyLoad).sort(([,a], [,b]) => a.total - b.total);
-  const lightDays = sortedDaysByLoad.slice(0, 3).map(([date]) => date); // Top 3 lightest days
 
   // --- SEMANTIC CONTEXT GENERATION ---
   const staffContext = validStaff.map(s => {
@@ -158,7 +117,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ].filter(Boolean).join(',');
     
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
-    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}], MaxShiftsAllowed: ${credits}`; 
+    
+    // CRITICAL FIX: Tell AI the exact contract window so it doesn't assign outside it
+    let contractInfo = "";
+    if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+      contractInfo = `[CONTRACT: ${s.workFromDate} to ${s.workToDate}]`;
+    }
+
+    return `Agent: ${s.initials}, Type: ${s.type} ${contractInfo}, Skills: [${skills}], ShiftCreditLimit: ${credits}`; 
   }).join('\n');
 
   const sortedShifts = [...data.shifts].sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime));
@@ -182,21 +148,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     if (lEnd >= programStart && lStart <= programEnd) {
-       explicitConstraints.push(`- ${staffMember.initials} is NOT AVAILABLE (Leave) from ${leave.startDate} to ${leave.endDate}.`);
+       explicitConstraints.push(`- ${staffMember.initials} is ON LEAVE from ${leave.startDate} to ${leave.endDate}. DO NOT ASSIGN.`);
     }
-  });
-
-  validStaff.forEach(s => {
-      if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-          if (s.workFromDate > config.startDate) explicitConstraints.push(`- ${s.initials} cannot work BEFORE contract start date ${s.workFromDate}.`);
-          if (s.workToDate < programEndStr) explicitConstraints.push(`- ${s.initials} cannot work AFTER contract end date ${s.workToDate}.`);
-      }
   });
 
   (data.incomingDuties || []).forEach(d => {
       const staffMember = validStaff.find(s => s.id === d.staffId);
       if (!staffMember) return;
-      explicitConstraints.push(`- ${staffMember.initials} finished a previous duty on ${d.date} at ${d.shiftEndTime}. They MUST rest for ${config.minRestHours} hours.`);
+      explicitConstraints.push(`- ${staffMember.initials} finished duty ${d.date} at ${d.shiftEndTime}. MUST REST ${config.minRestHours}H.`);
   });
 
   // Execute Gemini
@@ -210,51 +169,45 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   for (const strategy of strategies) {
       try {
         const prompt = `
-            ROLE: Senior Aviation Operations Strategist.
-            MISSION: Construct a 7-day master operations schedule using a GLOBAL MATRIX STRATEGY.
+            ROLE: Senior Aviation Scheduler.
+            MISSION: Create a 100% PERFECTLY BALANCED roster. No fatigue, no underutilization.
             
-            STRATEGIC BRIEFING:
-            1. HEAVY DAYS vs LIGHT DAYS:
-               - Calculated Light Days (Ideal for Local Off-Days): ${lightDays.join(', ')}.
-               - Heavy Days (Maximize Staff): The remaining days.
+            THE "GOLDEN RULES" OF SCHEDULING (STRICT ENFORCEMENT):
             
-            2. EXECUTION PROTOCOL (The 4-Phase Matrix Solver):
+            1. THE 5/2 RULE (FATIGUE SAFETY):
+               - LOCAL Staff must have exactly 2 OFF DAYS in a 7-day period.
+               - MAX 5 SHIFTS per person.
+               - DO NOT assign a 6th shift. If a Local has 5 shifts, they are BANNED from more.
             
-               PHASE A: SPECIALIST MAPPING (CRITICAL)
-               - Map [SL, LC, RMP, OPS, LF] roles to shifts FIRST. 
-               - These are scarce resources. DO NOT waste a specialist on a generic 'AGT' role if a specialist role is open.
-               - Ensure every 'Needs' requirement in the shift list is met by a qualified person.
-               
-               PHASE B: OFF-DAY TARGETING
-               - Local Staff (Type: Local) need 2 days off per 7 days.
-               - STRATEGY: Assign their off-days primarily on the "Light Days" listed above.
-               - This preserves maximum workforce for the Heavy Days.
-               
-               PHASE C: ROSTER STAFF FILL
-               - Roster Staff (Type: Roster) work continuously within their contract dates.
-               - Use them to cover the bulk of the "General" slots.
-               
-               PHASE D: LOCAL STAFF FILL
-               - Use remaining Local Staff to fill gaps.
-               - Ensure NO shift is left below 'MinStaff'.
+            2. THE ROSTER MANDATE (CONTRACTOR PRIORITY):
+               - ROSTER Staff (Contractors) MUST work EVERY DAY of their contract.
+               - IF a date is outside their [CONTRACT: Start to End], DO NOT assign them.
+               - IF a date is inside their contract, they MUST work.
+               - Assign Roster staff FIRST to fill the schedule base.
             
-            OPERATIONAL RULES:
-            - REST MANDATE: Minimum ${config.minRestHours} hours rest between any two shifts.
-            - SKILL ASSIGNMENT: Only assign SL/LC/RMP/OPS/LF roles to staff with those skills.
-            - ACTIVE POOL ONLY: Use only the provided active personnel.
+            3. THE ROBIN HOOD RULE (LOAD BALANCING):
+               - STOP overworking the same people.
+               - Before assigning a shift to someone with 4 or 5 shifts, LOOK for someone with 0, 1, or 2 shifts.
+               - Use "Standby" staff (like MY-HMB, NK-ATZ) to fill gaps. 
+               - AIM for everyone to have roughly equal shifts (e.g. everyone has 4-5 shifts).
             
-            INPUT:
+            LOGIC FLOW:
+            1. Assign SPECIALIST roles (SL, LC, OPS) to qualified Roster staff first, then qualified Local staff.
+            2. Fill remaining slots with ROSTER staff (Force them to work).
+            3. Fill remaining slots with LOCAL staff who have < 5 shifts.
+            
+            INPUT DATA:
             Period: ${config.startDate} to ${programEndStr}
-            ACTIVE PERSONNEL POOL:
+            PERSONNEL (See ShiftCreditLimit & Contract):
             ${staffContext}
-            SHIFTS TO COVER:
+            SHIFTS:
             ${shiftContext}
-            HARD CONSTRAINTS:
+            RESTRICTIONS:
             ${explicitConstraints.join('\n')}
 
             OUTPUT FORMAT:
             JSON array of arrays: [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
-            Example: [[0, 5, "AB-HMB", "SL"], [0, 12, "NK-ATZ", "LC"], [0, 5, "JJ-HMB", "AGT"]]
+            Example: [[0, 5, "AB-HMB", "SL"], [0, 12, "NK-ATZ", "LC"]]
         `;
 
         const response = await ai.models.generateContent({
@@ -388,25 +341,40 @@ export const repairProgramWithAI = async (
   const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
   const numDays = sortedPrograms.length || 7;
 
+  // Uses the updated calculateCredits which forces availability for Roster staff
   const staffContext = data.staff.map(s => {
     const credits = calculateCredits(s, startDate, numDays, data.leaveRequests || []);
     const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':'', s.isLostFound?'LF':''].filter(Boolean).join(',');
-    return `ID:${s.initials}, Type:${s.type}, Skills:${skills}, CreditLimit:${credits}`;
+    
+    // CRITICAL FIX: Include contract dates in repair context
+    let contractInfo = "";
+    if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
+      contractInfo = `[CONTRACT: ${s.workFromDate} to ${s.workToDate}]`;
+    }
+
+    return `ID:${s.initials}, Type:${s.type} ${contractInfo}, Skills:${skills}, CreditLimit:${credits}`;
   }).join('\n');
 
   const prompt = `
-    FIX ROSTER VIOLATIONS.
-    Violations to Solve:
+    FIX ROSTER VIOLATIONS & BALANCE WORKLOAD.
+    
+    CRITICAL RULES (DO NOT BREAK):
+    1. LOCALS: Must have 2 DAYS OFF. Max 5 shifts. No 7-day streaks.
+    2. ROSTER: Must work EVERY DAY of contract. Prioritize them.
+       - IF Date is outside [CONTRACT: Start to End], UNASSIGN them.
+       - IF Date is inside, ASSIGN them.
+    3. BALANCE: Swap Overworked Staff (>5 shifts) with Underutilized Staff (<3 shifts).
+    
+    Violations Detected:
     ${auditReport}
     
-    Minimum Rest Required: ${constraints.minRestHours} hours.
+    Min Rest: ${constraints.minRestHours}h.
     
     Current Roster: ${JSON.stringify(currentPrograms.map(p => ({date: p.dateString, assignments: p.assignments})))}
     Available Staff:
     ${staffContext}
     
-    ACTION: Reassign staff to eliminate the violations while keeping coverage intact. 
-    Balance the workload. Do not use the same staff for 7 days straight if others are free.
+    ACTION: Perform swaps to satisfy the 5/2 rule for locals and utilize Roster staff fully.
     Return strictly: { "programs": [ ...full updated programs array... ] }
   `;
 
