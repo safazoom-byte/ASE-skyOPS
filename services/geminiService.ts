@@ -215,10 +215,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       try {
         const prompt = `
             ROLE: Aviation Scheduler.
-            MISSION: 100% COVERAGE. NO FATIGUE. NO HOLES.
+            MISSION: GENERATE A ROSTER. BEST EFFORT. DO NOT FAIL.
             
             PRIORITY RULE #1 (COVERAGE):
-            For EVERY shift, Assigned Count MUST BE >= 'mn' (MinStaff).
+            Target: Assigned Count >= 'mn' (MinStaff).
             If a day is "LIGHT", do NOT aggressively assign Days Off to Locals if it means missing 'mn'.
             Instead, use available ROSTER ('R') staff (Standby) to fill the gap.
             
@@ -228,10 +228,15 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             
             HIERARCHY OF ASSIGNMENT:
             1. MANDATORY ROLES: Assign staff with required skills (SL, LC, RMP, OPS, LF) to meet 'rc'.
-               - NOTE: For SL/LC/RMP/OPS, if 'rc' is 1, assigning 1 qualified person is enough. Prioritize the skill.
-            2. HEADCOUNT FILL (ROSTER): Use available Roster ('R') staff to reach 'mn'. They have unlimited availability inside contract dates.
-            3. HEADCOUNT FILL (LOCAL): Assign Local ('L') staff to remaining slots.
-               - Constraint: Locals generally need 2 days off. BUT if 'mn' is not met, you CANNOT give them a day off. You must fill the shift first. 
+            2. HEADCOUNT FILL (ROSTER): Use available Roster ('R') staff to reach 'mn'.
+            3. HEADCOUNT FILL (LOCAL): Assign Local ('L') staff.
+            
+            FAILURE HANDLING (CRITICAL):
+            If you cannot meet 'mn' or 'rc' due to lack of eligible/rested staff:
+            - FILL AS MANY SLOTS AS POSSIBLE.
+            - LEAVE THE REST EMPTY.
+            - PROCEED TO THE NEXT SHIFT.
+            - DO NOT FAIL OR RETURN EMPTY JSON.
             
             INPUT (Minified):
             Period: ${config.startDate} to ${programEndStr}.
@@ -252,8 +257,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             
             CRITICAL: 
             - DO NOT USE OBJECT KEYS (like "d":0). USE ARRAYS ONLY.
-            - DO NOT LEAVE EMPTY SLOTS. If 'mn' is 12, assignments must be >= 12.
             - CALCULATE REST HOURS BETWEEN SHIFTS.
+            - IF PERFECT SOLUTION IS IMPOSSIBLE, RETURN PARTIAL SOLUTION.
         `;
 
         const response = await ai.models.generateContent({
