@@ -184,7 +184,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return 'DAYS OFF'; 
   };
 
-  const getConsecutiveCount = (s: Staff, currentDateStr: string, category: string): number => {
+  const getConsecutiveCount = (s: Staff, currentDateStr: string, category: string, limitDate?: string): number => {
     let count = 1;
     const d = new Date(currentDateStr);
     
@@ -193,6 +193,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         d.setDate(d.getDate() - 1);
         const prevDateStr = d.toISOString().split('T')[0];
         
+        // STOP if we cross the start date of the program (Fix #1)
+        if (limitDate && prevDateStr < limitDate) break;
+
         // 1. Try to find explicit program
         const prevProg = programs.find(p => p.dateString === prevDateStr);
         let prevStatus = '';
@@ -260,7 +263,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
          if (registryGroups[category]) {
              if (includeCounts) {
-                 const count = getConsecutiveCount(s, dateStr, category);
+                 // Pass startDate to restrict counting to program period
+                 const count = getConsecutiveCount(s, dateStr, category, startDate);
                  registryGroups[category].push(`${s.initials} (${count})`);
              } else {
                  registryGroups[category].push(s.initials);
@@ -443,36 +447,54 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.setFontSize(14).setFont('helvetica', 'bold').setTextColor(0).text(getDayLabel(program), 14, 32);
       
       // Program Table
-      const shiftsMap: Record<string, Assignment[]> = {};
+      // UPDATED (Fix #2): Iterate over SCHEDULED SHIFTS from shift list, not assignments
+      const dayShifts = shifts.filter(s => s.pickupDate === program.dateString)
+                              .sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
+
+      // Quick lookup for assignments
+      const assignmentsByShift: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
-        if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
-        shiftsMap[a.shiftId || ''].push(a);
+          if (a.shiftId) {
+              if (!assignmentsByShift[a.shiftId]) assignmentsByShift[a.shiftId] = [];
+              assignmentsByShift[a.shiftId].push(a);
+          }
       });
-      const sortedShiftIds = Object.keys(shiftsMap).sort((a,b) => {
-         const sA = getShiftById(a); const sB = getShiftById(b);
-         return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
+
+      const tableData = dayShifts.map((sh, i) => {
+        const pickupTime = sh.pickupTime || 'UNK';
+        const endTime = sh.endTime || 'UNK';
+        const maxStaff = sh.maxStaff || sh.minStaff || '?';
+        const fls = sh.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
+        
+        const assignedStaff = assignmentsByShift[sh.id] || [];
+        
+        const personnelStr = assignedStaff.length > 0 
+            ? assignedStaff.map(a => {
+                const st = getStaffById(a.staffId);
+                const roleLabel = formatRoleLabel(a.role);
+                const rest = calculateRestHours(a.staffId, program.dateString!, sh.pickupTime || '');
+                const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
+                return `${st?.initials || '??'}${roleLabel ? ' ' + roleLabel : ''}${restStr}`;
+              }).join(' | ')
+            : 'UNSTAFFED / MISSING ASSIGNMENTS';
+
+        return [(i+1).toString(), pickupTime, endTime, fls, `${assignedStaff.length} / ${maxStaff}`, personnelStr];
       });
-      const tableData = sortedShiftIds.map((shiftId, i) => {
-        const sh = getShiftById(shiftId);
-        const pickupTime = sh?.pickupTime || 'UNK';
-        const endTime = sh?.endTime || 'UNK';
-        const maxStaff = sh?.maxStaff || sh?.minStaff || '?';
-        const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
-        const personnelStr = shiftsMap[shiftId].map(a => {
-          const st = getStaffById(a.staffId);
-          const roleLabel = formatRoleLabel(a.role);
-          const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
-          const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
-          return `${st?.initials || '??'}${roleLabel ? ' ' + roleLabel : ''}${restStr}`;
-        }).join(' | ');
-        return [(i+1).toString(), pickupTime, endTime, fls, `${shiftsMap[shiftId].length} / ${maxStaff}`, personnelStr];
-      });
+
       autoTable(doc, {
         startY: 36, head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']], body: tableData, theme: 'grid',
         headStyles: { fillColor: headerBlack, textColor: 255, fontSize: 9, fontStyle: 'bold', cellPadding: 3 },
         bodyStyles: { fontSize: 8, cellPadding: 3, textColor: 50 },
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 30 }, 4: { cellWidth: 20 }, 5: { cellWidth: 'auto' } },
-        styles: { lineColor: [220, 220, 220], lineWidth: 0.1 }
+        styles: { lineColor: [220, 220, 220], lineWidth: 0.1 },
+        didParseCell: (data: any) => {
+            if (data.section === 'body' && data.column.index === 5) {
+                if (data.cell.raw === 'UNSTAFFED / MISSING ASSIGNMENTS') {
+                    data.cell.styles.textColor = [220, 38, 38];
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
       });
       
       // Registry Table
@@ -502,7 +524,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
        const st = staffStats[s.id];
        return [(i+1).toString(), s.name, s.initials, st.work.toString(), st.off.toString(), st.work === 5 ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditRows, theme: 'grid', headStyles: { fillColor: headerBlack } });
+    
+    // Updated Local Audit with Color Logic (Fix #3)
+    autoTable(doc, { 
+        startY: 25, 
+        head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], 
+        body: localAuditRows, 
+        theme: 'grid', 
+        headStyles: { fillColor: headerBlack },
+        didParseCell: (data: any) => {
+            if (data.section === 'body') {
+                const row = data.row.raw as string[];
+                const status = row[5]; // STATUS column
+                if (status === 'MATCH') {
+                    data.cell.styles.fillColor = [22, 163, 74];
+                    data.cell.styles.textColor = [255, 255, 255];
+                    data.cell.styles.fontStyle = 'bold';
+                } else if (status === 'CHECK') {
+                    data.cell.styles.fillColor = [220, 38, 38];
+                    data.cell.styles.textColor = [255, 255, 255];
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
+    });
 
     doc.addPage('l', 'mm', 'a4');
     doc.setFontSize(20).setTextColor(0).text("Weekly Personnel Utilization Audit (Roster)", 14, 20);
@@ -513,7 +558,30 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          st.rosterPotential.toString(), st.work.toString(), st.work === st.rosterPotential ? 'MATCH' : 'CHECK'
        ];
     });
-    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditRows, theme: 'grid', headStyles: { fillColor: headerBlack } });
+
+    // Updated Roster Audit with Color Logic (Fix #3)
+    autoTable(doc, { 
+        startY: 25, 
+        head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], 
+        body: rosterAuditRows, 
+        theme: 'grid', 
+        headStyles: { fillColor: headerBlack },
+        didParseCell: (data: any) => {
+            if (data.section === 'body') {
+                const row = data.row.raw as string[];
+                const status = row[7]; // STATUS column
+                if (status === 'MATCH') {
+                    data.cell.styles.fillColor = [22, 163, 74];
+                    data.cell.styles.textColor = [255, 255, 255];
+                    data.cell.styles.fontStyle = 'bold';
+                } else if (status === 'CHECK') {
+                    data.cell.styles.fillColor = [220, 38, 38];
+                    data.cell.styles.textColor = [255, 255, 255];
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
+    });
 
     // Matrix View
     doc.addPage('l', 'mm', 'a4');
@@ -589,6 +657,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const d = new Date(p.dateString || '');
         const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
         
+        // UPDATED (Fix #2): Iterate SCHEDULED SHIFTS
+        const dayShifts = shifts.filter(s => s.pickupDate === p.dateString)
+                                .sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
+
         // Group assignments by shift
         const shiftAssignments: Record<string, Assignment[]> = {};
         p.assignments.forEach(a => {
@@ -598,20 +670,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
             }
         });
 
-        // Sort shifts
-        const sortedShiftIds = Object.keys(shiftAssignments).sort((a,b) => {
-            const sA = getShiftById(a); const sB = getShiftById(b);
-            return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
-        });
-
-        sortedShiftIds.forEach(sid => {
-            const sh = getShiftById(sid);
-            if(!sh) return;
-            
+        dayShifts.forEach(sh => {
             const row: any[] = [
                 { content: dateLabel, styles: { fontStyle: 'bold' } },
                 { content: `${sh.pickupTime}-${sh.endTime}`, styles: { fontStyle: 'bold' } }
             ];
+
+            const assignedToShift = shiftAssignments[sh.id] || [];
 
             specialistKeys.forEach(skill => {
                 const reqCount = sh.roleCounts?.[skill] || 0;
@@ -620,12 +685,10 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     row.push({ content: '-', styles: { halign: 'center', textColor: 150 } });
                 } else {
                     // Find assignments for this shift who POSSESS the required skill
-                    // We don't just check the assigned 'role' string (e.g. SL), we check the staff capability.
-                    const assigned = shiftAssignments[sid].filter(a => {
+                    const assigned = assignedToShift.filter(a => {
                         const s = getStaffById(a.staffId);
                         if (!s) return false;
                         
-                        // Check if the staff member has the qualification
                         if (skill === 'Shift Leader') return s.isShiftLeader;
                         if (skill === 'Load Control') return s.isLoadControl;
                         if (skill === 'Ramp') return s.isRamp;
@@ -637,8 +700,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                     const isMet = assigned.length >= reqCount;
                     const assignedInitials = assigned.map(a => {
                        const s = getStaffById(a.staffId);
-                       // Append assigned role if different from skill column to avoid confusion?
-                       // Actually, just showing initials is cleaner for matrix.
                        return s?.initials;
                     }).filter(Boolean).join(', ');
                     
@@ -758,51 +819,59 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                       </thead>
                       <tbody className="text-sm font-medium text-slate-700">
                         {(() => {
-                          const shiftsMap: Record<string, Assignment[]> = {};
+                          // UPDATED (Fix #2): Iterate over SCHEDULED SHIFTS for this day
+                          const dayShifts = shifts.filter(s => s.pickupDate === program.dateString)
+                                                  .sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
+
+                          // Look up map
+                          const assignmentsByShift: Record<string, Assignment[]> = {};
                           program.assignments.forEach(a => {
-                            if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
-                            shiftsMap[a.shiftId || ''].push(a);
-                          });
-                          const sortedShiftIds = Object.keys(shiftsMap).sort((a,b) => {
-                            const sA = getShiftById(a); const sB = getShiftById(b);
-                            return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
+                            if (a.shiftId) {
+                                if (!assignmentsByShift[a.shiftId]) assignmentsByShift[a.shiftId] = [];
+                                assignmentsByShift[a.shiftId].push(a);
+                            }
                           });
 
-                          return sortedShiftIds.map((shiftId, i) => {
-                            const sh = getShiftById(shiftId);
-                            const activeCount = shiftsMap[shiftId].length;
-                            const max = sh?.maxStaff || sh?.minStaff || '?';
-                            const flightList = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ') || '-';
+                          return dayShifts.map((sh, i) => {
+                            const activeAssignments = assignmentsByShift[sh.id] || [];
+                            const activeCount = activeAssignments.length;
+                            const max = sh.maxStaff || sh.minStaff || '?';
+                            const flightList = sh.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ') || '-';
+                            const isUnderstaffed = activeCount < (sh.minStaff || 0);
                             
                             return (
-                              <tr key={shiftId} className="border-b border-slate-50 group hover:bg-slate-50/50 transition-colors">
+                              <tr key={sh.id} className="border-b border-slate-50 group hover:bg-slate-50/50 transition-colors">
                                 <td className="py-6 font-black text-slate-300">{i + 1}</td>
-                                <td className="py-6 font-black italic">{sh?.pickupTime}</td>
-                                <td className="py-6 font-black italic text-slate-500">{sh?.endTime}</td>
+                                <td className="py-6 font-black italic">{sh.pickupTime}</td>
+                                <td className="py-6 font-black italic text-slate-500">{sh.endTime}</td>
                                 <td className="py-6 font-bold text-xs uppercase tracking-tight text-blue-600">{flightList}</td>
                                 <td className="py-6 font-black text-xs">
-                                  <span className={activeCount < (sh?.minStaff || 0) ? 'text-rose-500' : 'text-emerald-500'}>{activeCount}</span>
+                                  <span className={activeCount < (sh.minStaff || 0) ? 'text-rose-500' : 'text-emerald-500'}>{activeCount}</span>
                                   <span className="text-slate-300"> / {max}</span>
                                 </td>
                                 <td className="py-6">
                                   <div className="flex flex-wrap gap-2">
-                                    {shiftsMap[shiftId].map((assign, idx) => {
-                                      const s = getStaffById(assign.staffId);
-                                      const rest = calculateRestHours(assign.staffId, program.dateString!, sh?.pickupTime || '');
-                                      const isFatigued = rest !== null && rest < minRestHours;
-                                      
-                                      return (
-                                        <div key={idx} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm ${isFatigued ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-white border-slate-100 text-slate-700'}`}>
-                                          <span>{s?.initials}</span>
-                                          {formatRoleCode(assign.role) && (
-                                            <span className="px-1 py-0.5 bg-slate-900 text-white rounded-[4px] text-[7px] tracking-tight">{formatRoleCode(assign.role)}</span>
-                                          )}
-                                          {rest !== null && (
-                                            <span className={`text-[8px] ${isFatigued ? 'text-rose-400' : 'text-slate-400'}`}>[{rest.toFixed(1)}H]</span>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
+                                    {activeAssignments.length > 0 ? (
+                                        activeAssignments.map((assign, idx) => {
+                                          const s = getStaffById(assign.staffId);
+                                          const rest = calculateRestHours(assign.staffId, program.dateString!, sh.pickupTime || '');
+                                          const isFatigued = rest !== null && rest < minRestHours;
+                                          
+                                          return (
+                                            <div key={idx} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm ${isFatigued ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-white border-slate-100 text-slate-700'}`}>
+                                              <span>{s?.initials}</span>
+                                              {formatRoleCode(assign.role) && (
+                                                <span className="px-1 py-0.5 bg-slate-900 text-white rounded-[4px] text-[7px] tracking-tight">{formatRoleCode(assign.role)}</span>
+                                              )}
+                                              {rest !== null && (
+                                                <span className={`text-[8px] ${isFatigued ? 'text-rose-400' : 'text-slate-400'}`}>[{rest.toFixed(1)}H]</span>
+                                              )}
+                                            </div>
+                                          );
+                                        })
+                                    ) : (
+                                        <span className="text-[10px] font-black uppercase text-rose-400 italic">Unstaffed / Missing</span>
+                                    )}
                                   </div>
                                 </td>
                               </tr>
