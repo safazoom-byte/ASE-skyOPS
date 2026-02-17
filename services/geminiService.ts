@@ -40,7 +40,7 @@ const safeParseJson = (text: string | undefined): any => {
   }
 };
 
-const calculateCredits = (staff: Staff, startDate: string, duration: number, leaveRequests: LeaveRequest[] = []) => {
+export const calculateCredits = (staff: Staff, startDate: string, duration: number, leaveRequests: LeaveRequest[] = []) => {
   const progStart = new Date(startDate);
   const progEnd = new Date(startDate);
   progEnd.setDate(progStart.getDate() + duration - 1);
@@ -202,7 +202,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       try {
         const prompt = `
             ROLE: Master Aviation Scheduler.
-            GOAL: Build a weekly roster strictly following the HIERARCHY OF ALLOCATION and CREDIT LIMITS.
+            GOAL: Build a weekly roster. 
+            
+            HIERARCHY OF OBJECTIVES:
+            1. **FILL MINIMUM STAFF (HIGHEST PRIORITY)**: Every shift MUST meet 'MinStaff'. This is non-negotiable.
+            2. **ORGANIZE WITH CREDITS**: Use 'Credits' to distribute work fairly.
+            3. **OVERRIDE**: If a shift needs staff to meet MinStaff, but available staff have 0 credits left, **YOU MUST ASSIGN THEM ANYWAY**. An overloaded staff member is better than an empty shift.
 
             INPUT DATA:
             Period: ${config.startDate} to ${programEndStr}.
@@ -213,21 +218,20 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             SHIFTS (ID | Time | MinStaff | RoleNeeds):
             ${shiftContext}
 
-            HIERARCHY OF ALLOCATION (Execute strictly in this order per shift):
+            ALLOCATION STEPS:
             1. **Load Control (LC)**: Fill 'Load Control' needs using ONLY 'LC' skilled staff. Assign Role="LC".
             2. **Shift Leader (SL)**: Fill 'Shift Leader' needs using ONLY 'SL' skilled staff. Assign Role="SL".
-               *OPTIMIZATION*: If a staff member assigned to LC also has SL skill, you MAY count them towards the SL requirement logic, but prioritize filling the SL slot with a distinct person if headcount allows.
             3. **Operations (OPS)**: Fill 'Operations' needs using 'OPS' staff. Assign Role="OPS".
             4. **Ramp (RMP)**: Fill 'Ramp' needs using 'RMP' staff. Assign Role="RMP".
             5. **Lost & Found (LF)**: Fill 'Lost and Found' needs using 'LF' staff. Assign Role="LF".
-            6. **MINIMUM STAFF**: Fill remaining slots until 'MinStaff' is reached using ANY available staff. Assign Role="AGT".
-            7. **RATIO BALANCE**: If 'MinStaff' reached but 'MaxStaff' not reached, add extra staff based on Credits availability. Maintain approx ${localRatio} ratio of Locals. Assign Role="AGT".
+            6. **MINIMUM STAFF (CRITICAL)**: Fill remaining slots until 'MinStaff' is reached using ANY available staff. Assign Role="AGT". 
+               *NOTE: If you run out of staff with credits, use staff with 0 credits. DO NOT leave slots empty.*
+            7. **RATIO BALANCE**: If 'MinStaff' reached but 'MaxStaff' not reached, add extra staff based on Credits availability. Assign Role="AGT".
 
-            MANDATORY RULES:
-            - **CREDITS**: Staff have a 'Credits' value. This is the TARGET number of shifts they should work. Do not exceed it significantly.
+            RULES:
             - **NO 0.0H REST**: If staff works Late (ends >20:00), NO Early shift (starts <12:00) next day.
             - **CONTRACTS**: Do not assign Roster staff outside their contract dates.
-            - **LOCAL BALANCE**: Distribute "Days Off" for Locals evenly. Do not leave Sunday empty (ensure at least some locals work every day).
+            - **LOCAL BALANCE**: Distribute "Days Off" for Locals evenly.
             - **REST LOG**: Respect the resting constraints listed below.
 
             CONSTRAINTS:
@@ -370,17 +374,61 @@ export const repairProgramWithAI = async (
   constraints: { minRestHours: number }
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  // 1. Calculate Context (Dates & Credits)
+  const sortedPrograms = [...currentPrograms].sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
+  const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
+  const numDays = sortedPrograms.length || 7;
+
+  // Calculate Capacity Stats for Prompt
+  let totalSupply = 0;
   
+  const staffContext = data.staff.map(s => {
+    const credits = calculateCredits(s, startDate, numDays, data.leaveRequests || []);
+    totalSupply += credits;
+    
+    const skills = [
+        s.isLoadControl?'LC':'', 
+        s.isShiftLeader?'SL':'', 
+        s.isOps?'OPS':'', 
+        s.isRamp?'RMP':'',
+        s.isLostFound?'LF':''
+    ].filter(Boolean).join(',');
+
+    return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|Credits:${credits}`;
+  }).join('\n');
+
+  // Calculate Demand
+  let totalDemand = 0;
+  const programEnd = new Date(startDate);
+  programEnd.setDate(programEnd.getDate() + numDays - 1);
+  const endStr = programEnd.toISOString().split('T')[0];
+
+  data.shifts.forEach(s => {
+      if (s.pickupDate >= startDate && s.pickupDate <= endStr) {
+          totalDemand += s.minStaff;
+      }
+  });
+
+  const balance = totalSupply - totalDemand;
+  const capacitySummary = `Total Supply: ${totalSupply} | Total Min Demand: ${totalDemand} | Balance: ${balance} | Status: ${balance >= 0 ? 'Healthy' : 'Critical'}`;
+
   const prompt = `
     FIX VIOLATIONS in Roster.
     Errors:
     ${auditReport}
     
+    CAPACITY FORECAST:
+    ${capacitySummary}
+
+    STAFF LIMITS (Credits = Max Shifts):
+    ${staffContext}
+    
     Data:
     ROSTER: ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
-    STAFF: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials, s: s.isShiftLeader?'SL':'AGT'})))}
     
-    TASK: Reassign staff to solve issues. Keep structure.
+    TASK: Reassign staff to solve issues.
+    CRITICAL: YOU MUST FILL ALL SHIFTS. If a staff member has 0 credits but is the only option to meet MinStaff, ASSIGN THEM. Do not leave empty slots.
     Return strictly: { "programs": [ ...full updated programs array... ] }
   `;
 

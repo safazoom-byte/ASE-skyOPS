@@ -1,7 +1,7 @@
 import { DailyProgram, Flight, Staff, ShiftConfig, Assignment, LeaveType, LeaveRequest, IncomingDuty, Skill } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { repairProgramWithAI } from '../services/geminiService';
+import { repairProgramWithAI, calculateCredits } from '../services/geminiService';
 import { 
   FileText, 
   Plane, 
@@ -157,7 +157,57 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return stats;
   }, [filteredPrograms, staff, leaveRequests, startDate, endDate]);
 
-  const getFullRegistryForDay = (program: DailyProgram): Record<string, string[]> => {
+  const getStatusForDay = (s: Staff, dateStr: string, program: DailyProgram): string => {
+    const assigned = program.assignments.some(a => a.staffId === s.id);
+    if (assigned) return 'WORK';
+    
+    // Check incoming duties (Resting)
+    const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
+    if (restLock) return 'RESTING (POST-DUTY)';
+
+    // Check leaves
+    const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
+    if (leave) {
+        if (leave.type === 'Day off') return 'DAYS OFF';
+        if (leave.type === 'Roster leave') return 'ROSTER LEAVE';
+        return 'ANNUAL LEAVE';
+    }
+
+    if (s.type === 'Roster') {
+         const isOutside = s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate);
+         return isOutside ? 'ROSTER LEAVE' : 'STANDBY (RESERVE)';
+    }
+    
+    // Default for local if not assigned and not on specific leave is usually 'DAYS OFF' (since locals work 5/2)
+    // or 'STANDBY' if they are supposed to work but not assigned.
+    // However, for Registry display, unassigned locals are usually grouped as Days Off or Standby.
+    // Let's assume Standby if not strictly blocked, but simplify for consecutive count logic.
+    return 'DAYS OFF'; 
+  };
+
+  const getConsecutiveCount = (s: Staff, currentDateStr: string, category: string): number => {
+    let count = 1;
+    const d = new Date(currentDateStr);
+    
+    // Look back up to 30 days
+    for (let i = 1; i < 30; i++) { 
+        d.setDate(d.getDate() - 1);
+        const prevDateStr = d.toISOString().split('T')[0];
+        const prevProg = programs.find(p => p.dateString === prevDateStr);
+        
+        if (!prevProg) break; // End of data
+        
+        const prevStatus = getStatusForDay(s, prevDateStr, prevProg);
+        if (prevStatus === category) {
+            count++;
+        } else {
+            break;
+        }
+    }
+    return count;
+  };
+
+  const getFullRegistryForDay = (program: DailyProgram, includeCounts = false): Record<string, string[]> => {
       const dateStr = program.dateString;
       if (!dateStr) return {};
       const assignedIds = new Set(program.assignments.map(a => a.staffId));
@@ -170,35 +220,33 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       };
       
       staff.forEach(s => {
-         // If they are working, skip
          if (assignedIds.has(s.id)) return;
-
-         // Check specific conditions
          const restLock = incomingDuties.find(d => d.staffId === s.id && d.date === dateStr);
          const leave = leaveRequests.find(r => r.staffId === s.id && dateStr >= r.startDate && dateStr <= r.endDate);
          
          let category = '';
-
          if (leave) {
-            // Map leave types to categories
             if (leave.type === 'Day off') category = 'DAYS OFF';
             else if (leave.type === 'Roster leave') category = 'ROSTER LEAVE';
             else category = 'ANNUAL LEAVE'; 
          } else if (restLock) {
             category = 'RESTING (POST-DUTY)';
          } else if (s.type === 'Roster') {
-             // If Roster staff is outside contract dates, they are Roster Leave (Contract)
              const isOutside = s.workFromDate && s.workToDate && (dateStr < s.workFromDate || dateStr > s.workToDate);
              category = isOutside ? 'ROSTER LEAVE' : 'STANDBY (RESERVE)';
          } else if (s.type === 'Local') {
-             // If Local staff is not working and not on leave, they are on their "Day Off"
              category = 'DAYS OFF';
          } else {
              category = 'STANDBY (RESERVE)';
          }
 
          if (registryGroups[category]) {
-             registryGroups[category].push(s.initials);
+             if (includeCounts) {
+                 const count = getConsecutiveCount(s, dateStr, category);
+                 registryGroups[category].push(`${s.initials} (${count})`);
+             } else {
+                 registryGroups[category].push(s.initials);
+             }
          }
       });
       return registryGroups;
@@ -207,23 +255,15 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r) return '';
-    
-    // STRICT HIERARCHY DISPLAY
-    // Only show these specific roles. Hide generic AGT/STAFF/FILLER.
     if (r.includes('SHIFT LEADER') || r === 'SL') return 'SL';
     if (r.includes('LOAD CONTROL') || r === 'LC') return 'LC';
     if (r.includes('RAMP') || r === 'RMP') return 'RMP';
     if (r.includes('OPERATIONS') || r.includes('OPS') || r === 'OPS') return 'OPS';
     if (r.includes('LOST') || r === 'LF' || r === 'L&F') return 'LF';
-    
-    // Catch combined roles like LC/SL
     if (r.includes('LC') && r.includes('SL')) return 'LC/SL';
-
-    // Explicitly return empty for generic roles so they show as just Initials in the boxes
     const genericRoles = ['AGT', 'AGENT', 'STAFF', 'MEMBER', 'CREW', 'GEN', 'FILLER', 'GHA'];
     if (genericRoles.some(gr => r === gr || r.includes(gr))) return '';
-
-    return ''; // Default to empty if not a specialist role
+    return '';
   };
 
   const formatRoleLabel = (role: string | undefined) => {
@@ -231,19 +271,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
     return code ? `(${code})` : '';
   };
 
-  // --- Audit Logic ---
   const runAudit = () => {
     setIsRepairing(true);
     setTimeout(() => {
       const violations: string[] = [];
-
-      // 1. Max Shifts Check (Local Staff) - DYNAMIC CREDIT LOGIC
       staff.forEach(s => {
         if (s.type === 'Local') {
            const count = staffStats[s.id]?.work || 0;
-           let limit = 5; // Base limit
-           
-           // Deduct leaves from limit to avoid false negatives
+           let limit = 5;
            if (startDate && endDate) {
              const progStart = new Date(startDate);
              const progEnd = new Date(endDate);
@@ -256,14 +291,9 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
              });
              limit = Math.max(0, 5 - leaveDays);
            }
-           
-           if (count > limit) {
-             violations.push(`MAX SHIFTS: ${s.name} is assigned ${count} shifts (Max allowed: ${limit}, adjusted for leave).`);
-           }
+           if (count > limit) violations.push(`MAX SHIFTS: ${s.name} is assigned ${count} shifts (Max allowed: ${limit}, adjusted for leave).`);
         }
       });
-      
-      // 2. Roster Contract Dates
       staff.forEach(s => {
         if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
           filteredPrograms.forEach(p => {
@@ -275,19 +305,13 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           });
         }
       });
-
-      // 3. Rest & Qualifications
       filteredPrograms.forEach(p => {
         p.assignments.forEach(a => {
           const s = getStaffById(a.staffId);
           if (!s) return;
-          
-          // Qualification Checks
           const roleCode = formatRoleCode(a.role || '');
           if (roleCode === 'SL' && !s.isShiftLeader) violations.push(`QUALIFICATION: ${s.initials} assigned SL on ${p.dateString} but lacks qualification.`);
           if (roleCode === 'LC' && !s.isLoadControl) violations.push(`QUALIFICATION: ${s.initials} assigned LC on ${p.dateString} but lacks qualification.`);
-          
-          // Rest Checks
           const sh = getShiftById(a.shiftId);
           if (sh) {
             const rest = calculateRestHours(a.staffId, p.dateString!, sh.pickupTime);
@@ -297,7 +321,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
           }
         });
       });
-
       if (violations.length === 0) {
         alert("Audit Complete: No critical violations found.");
         setIsRepairing(false);
@@ -314,9 +337,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
      if (selectedViolationIndices.size === 0) return;
      setIsRepairing(true);
      setAuditModalOpen(false);
-     
      const report = auditViolations.filter((_, i) => selectedViolationIndices.has(i)).join('\n');
-     
      try {
        const result = await repairProgramWithAI(programs, report, { flights, staff, shifts, programs: [], leaveRequests, incomingDuties }, { minRestHours });
        if (onUpdatePrograms && result.programs) {
@@ -338,6 +359,28 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const exportPDF = () => {
     if (filteredPrograms.length === 0) return;
+    
+    // --- 1. CALCULATE FORECAST STATS ---
+    let totalSupply = 0;
+    let totalDemand = 0;
+    const duration = filteredPrograms.length;
+    
+    // Demand
+    shifts.forEach(s => {
+       if (startDate && endDate && s.pickupDate >= startDate && s.pickupDate <= endDate) {
+          totalDemand += s.minStaff || 0;
+       }
+    });
+
+    // Supply
+    staff.forEach(s => {
+       totalSupply += calculateCredits(s, startDate || '', duration, leaveRequests);
+    });
+
+    const balance = totalSupply - totalDemand;
+    const health = balance >= 0 ? "HEALTHY" : "CRITICAL";
+    
+    // --- 2. GENERATE PDF ---
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
     const headerBlack = [0, 0, 0] as [number, number, number];
     const auditBlue = [2, 6, 23] as [number, number, number];
@@ -345,9 +388,43 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
     filteredPrograms.forEach((program, idx) => {
       if (idx > 0) doc.addPage('l', 'mm', 'a4');
+      
+      // Header Info
       doc.setFont('helvetica', 'bold').setFontSize(20).text(`SkyOPS Station Handling Program`, 14, 15);
       doc.setFontSize(10).setFont('helvetica', 'normal').setTextColor(100).text(`Target Period: ${startDate} to ${endDate}`, 14, 22);
+      
+      // EXECUTIVE SUMMARY BOX (Only on First Page)
+      if (idx === 0) {
+          const startX = 200;
+          const startY = 5;
+          const boxWidth = 80;
+          const boxHeight = 25;
+          
+          doc.setFillColor(245, 245, 245);
+          doc.rect(startX, startY, boxWidth, boxHeight, 'F');
+          doc.setDrawColor(200, 200, 200);
+          doc.rect(startX, startY, boxWidth, boxHeight, 'S');
+
+          doc.setFontSize(8).setFont('helvetica', 'bold').setTextColor(0);
+          doc.text("MANPOWER CAPACITY FORECAST", startX + 5, startY + 5);
+
+          doc.setFontSize(7).setFont('helvetica', 'normal').setTextColor(50);
+          doc.text(`Total Supply: ${totalSupply} Shifts`, startX + 5, startY + 10);
+          doc.text(`Total Demand: ${totalDemand} Shifts (Min)`, startX + 5, startY + 14);
+          
+          doc.setFont('helvetica', 'bold');
+          if (balance < 0) doc.setTextColor(220, 38, 38); // Red
+          else doc.setTextColor(22, 163, 74); // Green
+          doc.text(`Net Balance: ${balance > 0 ? '+' : ''}${balance}`, startX + 5, startY + 18);
+          doc.text(`Status: ${health}`, startX + 45, startY + 18);
+          
+          // Reset colors
+          doc.setTextColor(0); 
+      }
+
       doc.setFontSize(14).setFont('helvetica', 'bold').setTextColor(0).text(getDayLabel(program), 14, 32);
+      
+      // Program Table
       const shiftsMap: Record<string, Assignment[]> = {};
       program.assignments.forEach(a => {
         if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
@@ -359,15 +436,12 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
       const tableData = sortedShiftIds.map((shiftId, i) => {
         const sh = getShiftById(shiftId);
-        // Fallback info if shift ID missing
         const pickupTime = sh?.pickupTime || 'UNK';
         const endTime = sh?.endTime || 'UNK';
         const maxStaff = sh?.maxStaff || sh?.minStaff || '?';
-        
         const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join('/') || 'NIL';
         const personnelStr = shiftsMap[shiftId].map(a => {
           const st = getStaffById(a.staffId);
-          // Explicitly format all roles (RAMP, OPS, etc.)
           const roleLabel = formatRoleLabel(a.role);
           const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
           const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
@@ -382,9 +456,11 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 30 }, 4: { cellWidth: 20 }, 5: { cellWidth: 'auto' } },
         styles: { lineColor: [220, 220, 220], lineWidth: 0.1 }
       });
+      
+      // Registry Table
       const currentY = (doc as any).lastAutoTable.finalY + 12;
       doc.setFontSize(12).setFont('helvetica', 'bold').text("ABSENCE AND REST REGISTRY", 14, currentY);
-      const registryGroups = getFullRegistryForDay(program);
+      const registryGroups = getFullRegistryForDay(program, true); // Pass true to include counts
       const registryBody = [
          ['RESTING (POST-DUTY)', registryGroups['RESTING (POST-DUTY)'].join(', ') || 'NONE'],
          ['DAYS OFF', registryGroups['DAYS OFF'].join(', ') || 'NONE'],
@@ -400,6 +476,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       });
     });
 
+    // Audits & Matrix Pages (Unchanged)
     doc.addPage('l', 'mm', 'a4');
     doc.setFontSize(20).setTextColor(0).text("Weekly Personnel Utilization Audit (Local)", 14, 20);
     const localAuditRows = staff.filter(s => s.type === 'Local').map((s, i) => {
@@ -549,7 +626,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                  <div className="mt-4 pt-6 border-t border-slate-100">
                     <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><CircleAlert size={12} className="text-slate-300"/> Absence & Rest Registry</h5>
                     <div className="flex flex-wrap gap-8">
-                       {Object.entries(getFullRegistryForDay(program)).map(([cat, agents]) => (
+                       {Object.entries(getFullRegistryForDay(program, true)).map(([cat, agents]) => (
                           agents.length > 0 && (
                             <div key={cat} className="space-y-1">
                                <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter block">{cat}</span>
