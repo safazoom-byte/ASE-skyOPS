@@ -98,12 +98,16 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
   const programEndStr = programEnd.toISOString().split('T')[0];
 
+  // --- STRICT ACTIVE POOL FILTERING ---
+  // Completely ignore staff whose contract has not started or has ended.
   const validStaff = data.staff.filter(s => {
       if (s.type === 'Local') return true;
       if (s.type === 'Roster') {
         if (!s.workFromDate || !s.workToDate) return true;
-        if (s.workToDate < config.startDate) return false; 
-        if (s.workFromDate > programEndStr) return false;
+        const sStart = s.workFromDate;
+        const sEnd = s.workToDate;
+        // Staff must be active for at least one day within the target period
+        return (sStart <= programEndStr && sEnd >= config.startDate);
       }
       return true;
   });
@@ -111,8 +115,39 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const staffMap: Record<string, string> = {};
   validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
+  // --- STRATEGIC ANALYSIS: DEMAND HEATMAP ---
+  // We calculate the load for every day to guide the "Light Day" off-day strategy
+  const dailyLoad: Record<string, { total: number, sl: number, lc: number, rmp: number, ops: number, lf: number }> = {};
+  
+  for(let i=0; i<config.numDays; i++) {
+    const d = new Date(config.startDate);
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
+    
+    let dayTotal = 0;
+    let daySL = 0;
+    let dayLC = 0;
+    let dayRMP = 0;
+    let dayOPS = 0;
+    let dayLF = 0;
+
+    data.shifts.filter(s => s.pickupDate === dateStr).forEach(s => {
+       dayTotal += s.minStaff || 0;
+       daySL += s.roleCounts?.['Shift Leader'] || 0;
+       dayLC += s.roleCounts?.['Load Control'] || 0;
+       dayRMP += s.roleCounts?.['Ramp'] || 0;
+       dayOPS += s.roleCounts?.['Operations'] || 0;
+       dayLF += s.roleCounts?.['Lost and Found'] || 0;
+    });
+
+    dailyLoad[dateStr] = { total: dayTotal, sl: daySL, lc: dayLC, rmp: dayRMP, ops: dayOPS, lf: dayLF };
+  }
+
+  // Identify "Light Days" (lowest total demand) to suggest as off-days for Locals
+  const sortedDaysByLoad = Object.entries(dailyLoad).sort(([,a], [,b]) => a.total - b.total);
+  const lightDays = sortedDaysByLoad.slice(0, 3).map(([date]) => date); // Top 3 lightest days
+
   // --- SEMANTIC CONTEXT GENERATION ---
-  // We use human-readable descriptions instead of minified codes to help Pro reasoning.
   const staffContext = validStaff.map(s => {
     const skills = [
         s.isLoadControl?'LC':'', 
@@ -131,11 +166,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const shiftContext = sortedShifts.map((s, idx) => {
     const originalIdx = data.shifts.findIndex(os => os.id === s.id);
     const rcStr = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => {
-        const shortK = k === 'Shift Leader' ? 'SL' : k === 'Load Control' ? 'LC' : k === 'Ramp' ? 'RMP' : k === 'Operations' ? 'OPS' : 'LF';
+        const shortK = k === 'Shift Leader' ? 'SL' : k === 'Load Control' ? 'LC' : k === 'Ramp' ? 'RMP' : k === 'Operations' ? 'OPS' : 'Lost and Found' ? 'LF' : k;
         return `${shortK}: ${v}`;
     }).join(', ');
 
-    return `ID: ${originalIdx}, DayOffset: ${s.day}, Start: ${s.pickupTime}, End: ${s.endTime}, MinStaffNeeded: ${s.minStaff}, SpecialistRoles: [${rcStr}]`;
+    return `ID: ${originalIdx}, Date: ${s.pickupDate}, Start: ${s.pickupTime}, End: ${s.endTime}, MinStaff: ${s.minStaff}, Needs: [${rcStr}]`;
   }).join('\n');
 
   // --- EXPLICIT CONSTRAINTS ---
@@ -147,7 +182,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     if (lEnd >= programStart && lStart <= programEnd) {
-       explicitConstraints.push(`- ${staffMember.initials} is NOT AVAILABLE from ${leave.startDate} to ${leave.endDate}.`);
+       explicitConstraints.push(`- ${staffMember.initials} is NOT AVAILABLE (Leave) from ${leave.startDate} to ${leave.endDate}.`);
     }
   });
 
@@ -161,13 +196,13 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   (data.incomingDuties || []).forEach(d => {
       const staffMember = validStaff.find(s => s.id === d.staffId);
       if (!staffMember) return;
-      explicitConstraints.push(`- ${staffMember.initials} finished a shift on ${d.date} at ${d.shiftEndTime}. They MUST rest for ${config.minRestHours} hours before their next start.`);
+      explicitConstraints.push(`- ${staffMember.initials} finished a previous duty on ${d.date} at ${d.shiftEndTime}. They MUST rest for ${config.minRestHours} hours.`);
   });
 
-  // Execute Gemini 3 Pro
+  // Execute Gemini
   const strategies = [
-    { model: 'gemini-3-pro-preview', temp: 0.1, limit: 32000 },
-    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 32000 }
+    { model: 'gemini-3-pro-preview', temp: 0.1, limit: 60000 },
+    { model: 'gemini-3-flash-preview', temp: 0.1, limit: 30000 }
   ];
 
   let parsed: any = null;
@@ -175,41 +210,51 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   for (const strategy of strategies) {
       try {
         const prompt = `
-            ROLE: Professional Aviation Resource Planner.
-            GOAL: Generate a 7-day Handling Program.
+            ROLE: Senior Aviation Operations Strategist.
+            MISSION: Construct a 7-day master operations schedule using a GLOBAL MATRIX STRATEGY.
             
-            OPERATIONAL PRIORITIES:
-            1. FATIGUE SAFETY (CRITICAL): Ensure EXACTLY ${config.minRestHours} hours of rest between shifts. 
-               - If a shift ends at 00:00 or 08:00, calculate rest hours across midnights correctly.
-            2. SPECIALIST COVERAGE: Prioritize qualified agents for SpecialistRoles (SL, LC, RMP).
-               - If a shift requires 1 SL, you MUST assign 1 agent with the SL skill.
-            3. WORKLOAD BALANCING: Distribute shifts FAIRLY. 
-               - If you have plenty of staff, do not assign 7 shifts to one person while another has 0.
-               - Aim for even utilization across the available manpower.
-            4. STAFF LIMITS: Respect 'MaxShiftsAllowed' for each agent.
+            STRATEGIC BRIEFING:
+            1. HEAVY DAYS vs LIGHT DAYS:
+               - Calculated Light Days (Ideal for Local Off-Days): ${lightDays.join(', ')}.
+               - Heavy Days (Maximize Staff): The remaining days.
             
-            BEST EFFORT MODE:
-            - If you run out of qualified staff for a slot, leave it empty.
-            - Do not crash. Do not return an error. Provide the best possible schedule.
+            2. EXECUTION PROTOCOL (The 4-Phase Matrix Solver):
             
-            INPUT DATA:
-            Target Period: ${config.startDate} to ${programEndStr}
+               PHASE A: SPECIALIST MAPPING (CRITICAL)
+               - Map [SL, LC, RMP, OPS, LF] roles to shifts FIRST. 
+               - These are scarce resources. DO NOT waste a specialist on a generic 'AGT' role if a specialist role is open.
+               - Ensure every 'Needs' requirement in the shift list is met by a qualified person.
+               
+               PHASE B: OFF-DAY TARGETING
+               - Local Staff (Type: Local) need 2 days off per 7 days.
+               - STRATEGY: Assign their off-days primarily on the "Light Days" listed above.
+               - This preserves maximum workforce for the Heavy Days.
+               
+               PHASE C: ROSTER STAFF FILL
+               - Roster Staff (Type: Roster) work continuously within their contract dates.
+               - Use them to cover the bulk of the "General" slots.
+               
+               PHASE D: LOCAL STAFF FILL
+               - Use remaining Local Staff to fill gaps.
+               - Ensure NO shift is left below 'MinStaff'.
             
-            PERSONNEL REGISTRY:
+            OPERATIONAL RULES:
+            - REST MANDATE: Minimum ${config.minRestHours} hours rest between any two shifts.
+            - SKILL ASSIGNMENT: Only assign SL/LC/RMP/OPS/LF roles to staff with those skills.
+            - ACTIVE POOL ONLY: Use only the provided active personnel.
+            
+            INPUT:
+            Period: ${config.startDate} to ${programEndStr}
+            ACTIVE PERSONNEL POOL:
             ${staffContext}
-
-            SHIFT REQUIREMENTS:
+            SHIFTS TO COVER:
             ${shiftContext}
-
-            HARD BLOCKS (LEAVE & CONTRACTS):
+            HARD CONSTRAINTS:
             ${explicitConstraints.join('\n')}
 
-            OUTPUT SPECIFICATION:
-            Return a JSON array of assignment arrays.
-            Format: [[DayOffset, ShiftID, "AgentInitials", "AssignedRole"], ...]
-            - DayOffset: 0 for the first day, 1 for second, etc.
-            - ShiftID: The ID number from the SHIFT REQUIREMENTS list.
-            - AssignedRole: The role the agent is performing (e.g., SL, LC, OPS, AGT).
+            OUTPUT FORMAT:
+            JSON array of arrays: [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
+            Example: [[0, 5, "AB-HMB", "SL"], [0, 12, "NK-ATZ", "LC"], [0, 5, "JJ-HMB", "AGT"]]
         `;
 
         const response = await ai.models.generateContent({
@@ -229,72 +274,50 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
   }
   
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-      const fallbackPrograms: DailyProgram[] = [];
-      for(let i=0; i<config.numDays; i++) {
-          const d = new Date(config.startDate);
-          d.setDate(d.getDate() + i);
-          fallbackPrograms.push({ day: i, dateString: d.toISOString().split('T')[0], assignments: [], offDuty: [] });
-      }
-      return {
-        programs: fallbackPrograms,
-        stationHealth: 0,
-        alerts: [{ type: 'danger', message: 'AI Engine failed to generate data. Please check your inputs or try again.' }],
-        isCompliant: false
-      };
-  }
-
-  const programs: DailyProgram[] = [];
+  const finalPrograms: DailyProgram[] = [];
   for(let i=0; i<config.numDays; i++) {
       const d = new Date(config.startDate);
       d.setDate(d.getDate() + i);
-      programs.push({
-          day: i,
-          dateString: d.toISOString().split('T')[0],
-          assignments: [],
-          offDuty: []
-      });
+      finalPrograms.push({ day: i, dateString: d.toISOString().split('T')[0], assignments: [], offDuty: [] });
   }
 
-  parsed.forEach((item: any) => {
-      let dayOffset, shiftIdx, staffInitials, role;
-      if (Array.isArray(item)) {
-        [dayOffset, shiftIdx, staffInitials, role] = item;
-      } else {
-        dayOffset = item.dayOffset ?? item.d;
-        shiftIdx = item.shiftIdx ?? item.s;
-        staffInitials = item.staffInitials ?? item.st;
-        role = item.role ?? item.r;
-      }
+  if (Array.isArray(parsed)) {
+    parsed.forEach((item: any) => {
+        let dayOffset, shiftIdx, staffInitials, role;
+        if (Array.isArray(item)) {
+          [dayOffset, shiftIdx, staffInitials, role] = item;
+        } else {
+          dayOffset = item.dayOffset ?? item.d;
+          shiftIdx = item.shiftIdx ?? item.s;
+          staffInitials = item.staffInitials ?? item.st;
+          role = item.role ?? item.r;
+        }
 
-      dayOffset = Number(dayOffset);
-      shiftIdx = Number(shiftIdx);
-      staffInitials = String(staffInitials || '').toUpperCase().trim();
-      role = String(role || 'AGT');
+        dayOffset = Number(dayOffset);
+        shiftIdx = Number(shiftIdx);
+        staffInitials = String(staffInitials || '').toUpperCase().trim();
+        role = String(role || 'AGT');
 
-      if (
-          !isNaN(dayOffset) && programs[dayOffset] && 
-          !isNaN(shiftIdx) && data.shifts[shiftIdx] &&
-          staffMap[staffInitials]
-      ) {
-          const exists = programs[dayOffset].assignments.find(a => a.staffId === staffMap[staffInitials]);
-          if (!exists) {
-              programs[dayOffset].assignments.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  staffId: staffMap[staffInitials],
-                  shiftId: data.shifts[shiftIdx].id,
-                  role: role,
-                  flightId: '' 
-              });
-          }
-      }
-  });
+        if (!isNaN(dayOffset) && finalPrograms[dayOffset] && !isNaN(shiftIdx) && data.shifts[shiftIdx] && staffMap[staffInitials]) {
+            const exists = finalPrograms[dayOffset].assignments.find(a => a.staffId === staffMap[staffInitials]);
+            if (!exists) {
+                finalPrograms[dayOffset].assignments.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    staffId: staffMap[staffInitials],
+                    shiftId: data.shifts[shiftIdx].id,
+                    role: role,
+                    flightId: '' 
+                });
+            }
+        }
+    });
+  }
   
   return {
-    programs,
-    stationHealth: 98,
-    alerts: [],
-    isCompliant: true
+    programs: finalPrograms,
+    stationHealth: parsed ? 100 : 0,
+    alerts: parsed ? [] : [{ type: 'danger', message: 'The AI could not generate a complete roster. Please check staffing availability.' }],
+    isCompliant: !!parsed
   };
 };
 
@@ -316,7 +339,7 @@ export const extractDataFromContent = async (params: {
   
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-3-flash-preview',
     contents: { parts },
     config: { responseMimeType: "application/json" }
   });
