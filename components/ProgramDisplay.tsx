@@ -214,8 +214,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                  const isOutside = (prevDateStr < s.workFromDate || prevDateStr > s.workToDate);
                  if (isOutside) prevStatus = 'ROSTER LEAVE';
             }
-            // For inferred 'DAYS OFF' (Local staff), we cannot safely assume status without roster data,
-            // so prevStatus remains empty and loop breaks naturally.
         }
         
         if (prevStatus === category) {
@@ -275,7 +273,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
   const formatRoleCode = (role: string) => {
     const r = String(role || '').trim().toUpperCase();
     if (!r) return '';
-    // Correctly map LS (typo) to SL
     if (r.includes('SHIFT LEADER') || r === 'SL' || r === 'LS') return 'SL';
     if (r.includes('LOAD CONTROL') || r === 'LC') return 'LC';
     if (r.includes('RAMP') || r === 'RMP') return 'RMP';
@@ -289,7 +286,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formatRoleLabel = (role: string | undefined) => {
     const code = formatRoleCode(role || '');
-    // Display all specialist codes including RMP, hide generic agents (empty string)
     return code ? `(${code})` : '';
   };
 
@@ -623,15 +619,28 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                 if (reqCount === 0) {
                     row.push({ content: '-', styles: { halign: 'center', textColor: 150 } });
                 } else {
-                    // Find assignments for this shift with this role
+                    // Find assignments for this shift who POSSESS the required skill
+                    // We don't just check the assigned 'role' string (e.g. SL), we check the staff capability.
                     const assigned = shiftAssignments[sid].filter(a => {
-                        const assignedCode = formatRoleCode(a.role); // e.g. SL
-                        const targetCode = formatRoleCode(skill);    // e.g. SL
-                        return assignedCode === targetCode;
+                        const s = getStaffById(a.staffId);
+                        if (!s) return false;
+                        
+                        // Check if the staff member has the qualification
+                        if (skill === 'Shift Leader') return s.isShiftLeader;
+                        if (skill === 'Load Control') return s.isLoadControl;
+                        if (skill === 'Ramp') return s.isRamp;
+                        if (skill === 'Operations') return s.isOps;
+                        if (skill === 'Lost and Found') return s.isLostFound;
+                        return false;
                     });
                     
                     const isMet = assigned.length >= reqCount;
-                    const assignedInitials = assigned.map(a => getStaffById(a.staffId)?.initials).filter(Boolean).join(', ');
+                    const assignedInitials = assigned.map(a => {
+                       const s = getStaffById(a.staffId);
+                       // Append assigned role if different from skill column to avoid confusion?
+                       // Actually, just showing initials is cleaner for matrix.
+                       return s?.initials;
+                    }).filter(Boolean).join(', ');
                     
                     row.push({
                         content: assignedInitials || 'MISSING',
