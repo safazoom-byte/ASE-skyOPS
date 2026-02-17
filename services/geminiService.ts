@@ -28,21 +28,15 @@ const safeParseJson = (text: string | undefined): any => {
     // Repair common AI JSON truncation or wrapping issues
     try {
       if (clean.startsWith('[') && !clean.endsWith(']')) {
-        const variants = [']', '}]', '"}]', '"]', '0}]', 'T"}]']; 
+        const variants = [']', ']]', '"-"]]']; 
         for (const suffix of variants) {
             try { return JSON.parse(clean + suffix); } catch (err) {}
         }
-        // Last resort: cut to last closing brace
-        const lastObjectEnd = clean.lastIndexOf('}');
-        if (lastObjectEnd > 0) {
-            return JSON.parse(clean.substring(0, lastObjectEnd + 1) + ']');
+        // Last resort: cut to last closing brace/bracket
+        const lastArrayEnd = clean.lastIndexOf(']');
+        if (lastArrayEnd > 0) {
+            return JSON.parse(clean.substring(0, lastArrayEnd + 1));
         }
-      }
-      // Try finding the array inside text
-      const startIdx = clean.indexOf('[');
-      const endIdx = clean.lastIndexOf(']');
-      if (startIdx !== -1 && endIdx !== -1) {
-          return JSON.parse(clean.substring(startIdx, endIdx + 1));
       }
     } catch (finalErr) {
       console.error("JSON Repair Failed", finalErr);
@@ -136,71 +130,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const staffMap: Record<string, string> = {}; // Initials -> ID
   validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
-  // --- GLOBAL STRATEGIC PLANNING (The "Brain") ---
-  const dailyPlans: string[] = [];
-  const localStaffCount = validStaff.filter(s => s.type === 'Local').length;
-  
-  // Analyze each day in the cycle
-  for (let i = 0; i < config.numDays; i++) {
-     const currentDate = new Date(config.startDate);
-     currentDate.setDate(currentDate.getDate() + i);
-     const dateStr = currentDate.toISOString().split('T')[0];
-     const dayOffset = getDayOffset(config.startDate, dateStr);
-
-     // A. Calculate Demand
-     let dayTotalMin = 0;
-     const dayRoleDemand: Record<string, number> = { 'Shift Leader': 0, 'Load Control': 0, 'Ramp': 0, 'Operations': 0, 'Lost and Found': 0 };
-     
-     const activeShifts = data.shifts.filter(s => {
-        return s.pickupDate === dateStr || (s.day === dayOffset && !s.pickupDate);
-     });
-
-     activeShifts.forEach(s => {
-        dayTotalMin += s.minStaff;
-        Object.entries(s.roleCounts || {}).forEach(([role, count]) => {
-           if (dayRoleDemand[role] !== undefined) dayRoleDemand[role] += (count || 0);
-        });
-     });
-
-     // B. Calculate Roster Supply (Priority 1)
-     const availRoster = validStaff.filter(s => s.type === 'Roster' && (!s.workFromDate || s.workFromDate <= dateStr) && (!s.workToDate || s.workToDate >= dateStr));
-     const rosterSupply = {
-        total: availRoster.length,
-        sl: availRoster.filter(s => s.isShiftLeader).length,
-        lc: availRoster.filter(s => s.isLoadControl).length,
-        rmp: availRoster.filter(s => s.isRamp).length,
-        ops: availRoster.filter(s => s.isOps).length,
-        lf: availRoster.filter(s => s.isLostFound).length
-     };
-
-     // C. Calculate Gap (What Locals MUST cover)
-     const gap = {
-        total: Math.max(0, dayTotalMin - rosterSupply.total),
-        sl: Math.max(0, dayRoleDemand['Shift Leader'] - rosterSupply.sl),
-        lc: Math.max(0, dayRoleDemand['Load Control'] - rosterSupply.lc),
-        rmp: Math.max(0, dayRoleDemand['Ramp'] - rosterSupply.rmp),
-        ops: Math.max(0, dayRoleDemand['Operations'] - rosterSupply.ops),
-        lf: Math.max(0, dayRoleDemand['Lost and Found'] - rosterSupply.lf),
-     };
-
-     // D. Strategic Note
-     // If gap is small, this is a good day to give Locals "OFF"
-     const loadFactor = dayTotalMin / (availRoster.length + localStaffCount);
-     const dayType = loadFactor > 0.8 ? "HEAVY" : (loadFactor < 0.5 ? "LIGHT" : "NORMAL");
-     
-     dailyPlans.push(`
-       DAY ${i} (${dateStr}) - STATUS: ${dayType}
-       - DEMAND: Total ${dayTotalMin} (SL:${dayRoleDemand['Shift Leader']}, LC:${dayRoleDemand['Load Control']}, RMP:${dayRoleDemand['Ramp']}, OPS:${dayRoleDemand['Operations']}, LF:${dayRoleDemand['Lost and Found']})
-       - ROSTER SUPPLY: ${rosterSupply.total} Available (Maximize usage).
-       - LOCAL GAP TO FILL: Need approx ${gap.total} Locals.
-       - CRITICAL SKILL GAPS (Must use skilled Locals): SL:${gap.sl}, LC:${gap.lc}, RMP:${gap.rmp}, OPS:${gap.ops}, LF:${gap.lf}
-       - STRATEGY: ${dayType === 'LIGHT' ? 'Perfect day to assign OFF days to Locals.' : 'Maximize Local attendance. NO OFF days for skilled locals needed for Gaps.'}
-     `);
-  }
-
-  const strategicBriefing = dailyPlans.join('\n');
-
-  // 3. Prepare Contexts
+  // --- TOKEN COMPRESSION (The "Minifier") ---
+  // To prevent truncated JSON on long weeks, we shorten keys for the AI.
+  // i=initials, t=type (L/R), sk=skills, c=credits (days cap)
   const staffContext = validStaff.map(s => {
     const skills = [
         s.isLoadControl?'LC':'', 
@@ -213,13 +145,22 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     // Credits = How many shifts they SHOULD work this week
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
     
-    return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|DaysCap:${credits}`; 
-  }).join('\n');
+    // Format: "MS-ATZ|L|SL,LC|5"
+    return `${s.initials}|${s.type === 'Local'?'L':'R'}|${skills}|${credits}`; 
+  }).join(';');
 
   const sortedShifts = [...data.shifts].sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime));
+  
+  // ix=index, d=day, dt=date, pt=pickupTime, et=endTime, mn=minStaff, rc=roleCounts
   const shiftContext = sortedShifts.map((s, idx) => {
     const originalIdx = data.shifts.findIndex(os => os.id === s.id);
-    return `Index:${originalIdx}|Day:${s.day}|Date:${s.pickupDate}|Time:${s.pickupTime}|Min:${s.minStaff}|Roles:${JSON.stringify(s.roleCounts)}`;
+    // Minify role counts: "SL:1,LC:1"
+    const rcStr = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => {
+        const shortK = k === 'Shift Leader' ? 'SL' : k === 'Load Control' ? 'LC' : k === 'Ramp' ? 'RMP' : k === 'Operations' ? 'OPS' : 'LF';
+        return `${shortK}:${v}`;
+    }).join(',');
+
+    return `{ix:${originalIdx},d:${s.day},pt:"${s.pickupTime}",et:"${s.endTime}",mn:${s.minStaff},rc:"${rcStr}"}`;
   }).join('\n');
 
   // 4. Prepare Explicit Constraints (Rest & Leave)
@@ -232,7 +173,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     if (lEnd >= programStart && lStart <= programEnd) {
-       explicitConstraints.push(`- ${staffMember.initials} is UNAVAILABLE from ${leave.startDate} to ${leave.endDate} (Reason: ${leave.type}).`);
+       explicitConstraints.push(`- ${staffMember.initials} OFF ${leave.startDate} to ${leave.endDate}.`);
     }
   });
 
@@ -240,10 +181,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   validStaff.forEach(s => {
       if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
           if (s.workFromDate > config.startDate) {
-              explicitConstraints.push(`- ${s.initials} CONTRACT STARTS ${s.workFromDate}. DO NOT ASSIGN BEFORE.`);
+              explicitConstraints.push(`- ${s.initials} STARTS ${s.workFromDate}.`);
           }
           if (s.workToDate < programEndStr) {
-              explicitConstraints.push(`- ${s.initials} CONTRACT ENDS ${s.workToDate}. DO NOT ASSIGN AFTER.`);
+              explicitConstraints.push(`- ${s.initials} ENDS ${s.workToDate}.`);
           }
       }
   });
@@ -256,14 +197,16 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       const freeAt = new Date(shiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
       if (freeAt > programStart) {
           const freeAtStr = freeAt.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
-          explicitConstraints.push(`- ${staffMember.initials} is RESTING until ${freeAtStr}. ABSOLUTELY NO SHIFTS BEFORE THIS TIME.`);
+          // CRITICAL: Explicitly tell AI the PREVIOUS END TIME
+          explicitConstraints.push(`- ${staffMember.initials} PREVIOUSLY WORKED until ${d.date} ${d.shiftEndTime}. MUST REST ${config.minRestHours}H.`);
       }
   });
 
   // 5. Execute Strategy
+  // We prioritize gemini-2.0-flash-exp because it handles large contexts/output better.
   const strategies = [
-    { model: 'gemini-3-pro-preview', temp: 0.2 },
-    { model: 'gemini-2.0-flash-exp', temp: 0.2 }
+    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 65000 },
+    { model: 'gemini-3-flash-preview', temp: 0.1, limit: 8192 }
   ];
 
   let parsed: any = null;
@@ -271,45 +214,46 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   for (const strategy of strategies) {
       try {
         const prompt = `
-            ROLE: Master Aviation Scheduler.
-            MISSION: Build the Ideal Program. Perfect 5-Day Local Schedule. Maximum Roster Efficiency.
+            ROLE: Aviation Scheduler.
+            MISSION: 100% COVERAGE. NO FATIGUE. NO HOLES.
             
-            GLOBAL STRATEGIC BRIEFING (THE BATTLE PLAN):
-            ${strategicBriefing}
-
-            EXECUTION ALGORITHM (MUST FOLLOW SEQUENCE):
-            1. **ROSTER FIRST:** For every shift, assign available ROSTER staff first. Maximize their usage.
-            2. **ROLE MATCHING:** 
-               - If a shift needs LC/SL/RMP/OPS/LF, use Roster staff with those skills first.
-               - If Roster is exhausted, use Local staff with those skills.
-               - CRITICAL: If a Local staff has a skill (e.g., LC) required for a Gap on a "HEAVY" day, they MUST work.
-               - **SPECIAL RULE (SL/LC):** For 'Shift Leader' (SL) and 'Load Control' (LC), a requirement of 1 is standard. Assigning exactly 1 qualified staff member satisfies the role. Prioritize filling this single skilled slot over general headcount. Do not perceive a shortage if only 1 is assigned when 1 is required.
-            3. **LOCAL FILL & 5/7 RULE:** 
-               - Assign Local staff to remaining slots to meet 'Min' count.
-               - STRICT CONSTRAINT: Every Local staff member MUST have exactly 2 Days Off (if period >= 7 days).
-               - TARGET OFF DAYS: Give locals off days on 'LIGHT' days identified in the Briefing.
+            PRIORITY RULE #1 (COVERAGE):
+            For EVERY shift, Assigned Count MUST BE >= 'mn' (MinStaff).
+            If a day is "LIGHT", do NOT aggressively assign Days Off to Locals if it means missing 'mn'.
+            Instead, use available ROSTER ('R') staff (Standby) to fill the gap.
             
-            INPUT DATA:
+            PRIORITY RULE #2 (FATIGUE SAFETY):
+            Check the 'et' (End Time) of a staff member's previous shift (including incoming duties).
+            The gap to the new 'pt' (Pickup Time) MUST be >= ${config.minRestHours} hours.
+            
+            HIERARCHY OF ASSIGNMENT:
+            1. MANDATORY ROLES: Assign staff with required skills (SL, LC, RMP, OPS, LF) to meet 'rc'.
+               - NOTE: For SL/LC/RMP/OPS, if 'rc' is 1, assigning 1 qualified person is enough. Prioritize the skill.
+            2. HEADCOUNT FILL (ROSTER): Use available Roster ('R') staff to reach 'mn'. They have unlimited availability inside contract dates.
+            3. HEADCOUNT FILL (LOCAL): Assign Local ('L') staff to remaining slots.
+               - Constraint: Locals generally need 2 days off. BUT if 'mn' is not met, you CANNOT give them a day off. You must fill the shift first. 
+            
+            INPUT (Minified):
             Period: ${config.startDate} to ${programEndStr}.
             
-            STAFF POOL (ID | Type | Skills | DaysCap):
+            STAFF (Initials|Type|Skills|DaysCap):
             ${staffContext}
 
-            SHIFTS TO FILL (Index | Day | Date | Time | Min | Roles):
+            SHIFTS (ix=Index, d=DayOffset, pt=StartTime, et=EndTime, mn=MinStaff, rc=RoleCounts):
             ${shiftContext}
 
-            HARD CONSTRAINTS (Do Not Violate):
+            CONSTRAINTS:
             ${explicitConstraints.join('\n')}
 
-            OUTPUT FORMAT:
-            JSON Array ONLY. Use Initials for 'staff'.
-            [
-              { "day": 0, "shift": 0, "staff": "MS-ATZ", "role": "LC" },
-              { "day": 0, "shift": 0, "staff": "AG-HMB", "role": "AGT" }
-            ]
+            OUTPUT JSON:
+            Return a COMPACT ARRAY of ARRAYS to save space.
+            Format: [[dayOffset, shiftIndex, "StaffInitials", "Role"], ...]
+            Example: [[0, 0, "MS-ATZ", "LC"], [0, 0, "AG-HMB", "AGT"]]
             
-            Ensure EVERY shift meets its Min count and Role counts.
-            Return ONLY valid JSON.
+            CRITICAL: 
+            - DO NOT USE OBJECT KEYS (like "d":0). USE ARRAYS ONLY.
+            - DO NOT LEAVE EMPTY SLOTS. If 'mn' is 12, assignments must be >= 12.
+            - CALCULATE REST HOURS BETWEEN SHIFTS.
         `;
 
         const response = await ai.models.generateContent({
@@ -317,7 +261,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
             contents: prompt,
             config: {
                 temperature: strategy.temp,
-                maxOutputTokens: 20000, 
+                maxOutputTokens: strategy.limit, 
                 responseMimeType: 'application/json'
             }
         });
@@ -348,10 +292,28 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
 
   parsed.forEach((item: any) => {
-      const dayOffset = typeof item.day === 'string' ? parseInt(item.day) : item.day;
-      const shiftIdx = typeof item.shift === 'string' ? parseInt(item.shift) : item.shift;
-      const staffInitials = String(item.staff || '').toUpperCase().trim();
-      const role = String(item.role || 'AGT');
+      // Handle both object format (legacy backup) and array format (new compact)
+      let dayOffset, shiftIdx, staffInitials, role;
+
+      if (Array.isArray(item)) {
+        // Compact Format: [d, s, st, r]
+        dayOffset = item[0];
+        shiftIdx = item[1];
+        staffInitials = item[2];
+        role = item[3];
+      } else {
+        // Legacy Object Format: {d, s, st, r}
+        dayOffset = item.d;
+        shiftIdx = item.s;
+        staffInitials = item.st;
+        role = item.r;
+      }
+
+      // Convert types if string
+      if (typeof dayOffset === 'string') dayOffset = parseInt(dayOffset);
+      if (typeof shiftIdx === 'string') shiftIdx = parseInt(shiftIdx);
+      staffInitials = String(staffInitials || '').toUpperCase().trim();
+      role = String(role || 'AGT');
 
       if (
           !isNaN(dayOffset) && programs[dayOffset] && 
@@ -395,11 +357,11 @@ export const extractDataFromContent = async (params: {
   
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.0-flash-exp',
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      maxOutputTokens: 8192 
+      maxOutputTokens: 20000 
     }
   });
   return safeParseJson(response.text);
@@ -408,12 +370,19 @@ export const extractDataFromContent = async (params: {
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
+  // Compressing context for modify as well
+  const staffContext = data.staff.map(s => `${s.initials}|${s.id}`).join(';');
+  const rosterContext = data.programs.map(p => ({
+      d: p.dateString,
+      a: p.assignments.map(a => `${a.staffId}:${a.role}:${a.shiftId}`)
+  }));
+
   const prompt = `
     ROSTER MODIFICATION.
     Instruction: ${instruction}
     
-    Current Roster: ${JSON.stringify(data.programs.map(p => ({d: p.dateString, a: p.assignments})))}
-    Staff Map: ${JSON.stringify(data.staff.map(s => ({id: s.id, i: s.initials})))}
+    Current Roster (Minified): ${JSON.stringify(rosterContext)}
+    Staff Map: ${staffContext}
     
     Return strict JSON: { "programs": [ ...updated programs... ], "explanation": "string" }
   `;
@@ -426,7 +395,7 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
     contents: { parts },
     config: { 
       responseMimeType: "application/json",
-      maxOutputTokens: 8192 
+      maxOutputTokens: 20000 
     }
   });
   return safeParseJson(response.text);
@@ -519,7 +488,7 @@ export const repairProgramWithAI = async (
       contents: prompt,
       config: { 
         responseMimeType: 'application/json',
-        maxOutputTokens: 8192
+        maxOutputTokens: 65000
       }
     });
     const parsed = safeParseJson(response.text);
