@@ -267,6 +267,8 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const formatRoleLabel = (role: string | undefined) => {
     const code = formatRoleCode(role || '');
+    // Requested Change: Hide RMP and AGT tags for General Agents
+    if (code === 'RMP') return ''; 
     return code ? `(${code})` : '';
   };
 
@@ -540,25 +542,97 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       bodyStyles: { fontSize: 7, cellPadding: 2 },
       styles: { halign: 'center' },
       columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 30, halign: 'left' } },
-      didParseCell: (data) => {
+      didParseCell: (data: any) => {
         // Detect Rest Hours Violation in Matrix Cells
-        // Column 0 is S/N, Column 1 is Name, Column Last is Audit.
-        // Data columns are index 2 to (length-2).
         if (data.section === 'body' && data.column.index >= 2 && data.column.index < data.table.columns.length - 1) {
            const text = data.cell.text[0] || '';
-           // Look for pattern [12.5H] or similar
            const match = text.match(/\[(\d+(\.\d+)?)H\]/);
            if (match) {
               const restHours = parseFloat(match[1]);
               if (restHours < minRestHours!) {
-                 // VIOLATION: Set Background Red, Text White
-                 data.cell.styles.fillColor = [220, 38, 38]; // Red
-                 data.cell.styles.textColor = [255, 255, 255]; // White
+                 data.cell.styles.fillColor = [220, 38, 38]; 
+                 data.cell.styles.textColor = [255, 255, 255]; 
                  data.cell.styles.fontStyle = 'bold';
               }
            }
         }
       }
+    });
+
+    // --- NEW: Specialist Role Fulfillment Matrix ---
+    doc.addPage('l', 'mm', 'a4');
+    doc.setFontSize(20).setTextColor(0).text("Specialist Role Fulfillment Matrix", 14, 20);
+    
+    const fulfillmentRows: any[] = [];
+    filteredPrograms.forEach(p => {
+        // Group by shift
+        const shiftAssignments: Record<string, Assignment[]> = {};
+        p.assignments.forEach(a => {
+            if(a.shiftId) {
+                if(!shiftAssignments[a.shiftId]) shiftAssignments[a.shiftId] = [];
+                shiftAssignments[a.shiftId].push(a);
+            }
+        });
+
+        // Use same sort order as other tables
+        const sortedShiftIds = Object.keys(shiftAssignments).sort((a,b) => {
+            const sA = getShiftById(a); const sB = getShiftById(b);
+            return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
+        });
+
+        sortedShiftIds.forEach(sid => {
+            const sh = getShiftById(sid);
+            if(!sh || !sh.roleCounts) return;
+
+            // Iterate requested specialist roles
+            Object.entries(sh.roleCounts).forEach(([skill, reqCount]) => {
+                // If 0 required, skip
+                if (!reqCount || reqCount === 0) return;
+                
+                // Find assignments that MATCH this role code
+                const assigned = shiftAssignments[sid].filter(a => {
+                    const assignedCode = formatRoleCode(a.role);
+                    const targetCode = formatRoleCode(skill);
+                    return assignedCode === targetCode;
+                });
+                
+                const assignedInitials = assigned.map(a => getStaffById(a.staffId)?.initials).filter(Boolean).join(', ');
+                const isMet = assigned.length >= (reqCount as number);
+                
+                const d = new Date(p.dateString || '');
+                const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+
+                fulfillmentRows.push([
+                    dateLabel,
+                    `${sh.pickupTime}-${sh.endTime}`,
+                    sh.flightIds?.map(fid => getFlightById(fid)?.flightNumber).join('/') || 'NIL',
+                    skill,
+                    reqCount.toString(),
+                    isMet ? 'OK' : 'FAIL', // Text status
+                    assignedInitials || '-'
+                ]);
+            });
+        });
+    });
+
+    autoTable(doc, { 
+        startY: 25, 
+        head: [['DATE', 'SHIFT', 'FLIGHTS', 'REQUESTED ROLE', 'REQ', 'STATUS', 'ASSIGNED TO']], 
+        body: fulfillmentRows, 
+        theme: 'grid', 
+        headStyles: { fillColor: headerBlack },
+        bodyStyles: { fontSize: 8, cellPadding: 3 },
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index === 5) {
+                if (data.cell.text[0] === 'OK') {
+                    data.cell.styles.textColor = [22, 163, 74]; // Green
+                    data.cell.styles.fontStyle = 'bold';
+                } else {
+                    data.cell.styles.textColor = [220, 38, 38]; // Red
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
+        }
     });
 
     doc.save(`SkyOPS_Program_${startDate}.pdf`);
@@ -683,7 +757,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                                       return (
                                         <div key={idx} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm ${isFatigued ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-white border-slate-100 text-slate-700'}`}>
                                           <span>{s?.initials}</span>
-                                          {formatRoleCode(assign.role) && (
+                                          {formatRoleCode(assign.role) && formatRoleCode(assign.role) !== 'RMP' && (
                                             <span className="px-1 py-0.5 bg-slate-900 text-white rounded-[4px] text-[7px] tracking-tight">{formatRoleCode(assign.role)}</span>
                                           )}
                                           {rest !== null && (
