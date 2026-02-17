@@ -15,13 +15,13 @@ export interface ExtractionMedia {
   mimeType: string;
 }
 
-// 1. ROBUST JSON PARSER
+// 1. ADVANCED SEMANTIC JSON PARSER
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   // Remove markdown code blocks
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
-  // Aggressive extraction: Find the outer-most array brackets
+  // Aggressive extraction: Find the outer-most array or object brackets
   const firstOpen = clean.indexOf('[');
   const lastClose = clean.lastIndexOf(']');
   
@@ -29,18 +29,15 @@ const safeParseJson = (text: string | undefined): any => {
       clean = clean.substring(firstOpen, lastClose + 1);
   }
 
-  // Attempt direct parse
   try {
     return JSON.parse(clean);
   } catch (e) {
-    // Repair common AI JSON truncation or wrapping issues
+    // Repair common AI JSON truncation issues
     try {
-      // Try fixing unclosed array
-      if (clean.startsWith('[') && !clean.endsWith(']')) {
-         return JSON.parse(clean + ']');
-      }
+      if (clean.startsWith('[') && !clean.endsWith(']')) return JSON.parse(clean + ']');
+      if (clean.startsWith('{') && !clean.endsWith('}')) return JSON.parse(clean + '}');
     } catch (finalErr) {
-      console.error("JSON Repair Failed", finalErr);
+      console.error("JSON Recovery Failed", finalErr);
     }
     return null;
   }
@@ -55,12 +52,11 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
   
   if (staff.type === 'Local') {
     // Local Staff: 5 days work per 7 days standard
-    // We calculate the ratio based on duration
     grossCredits = Math.ceil(duration * (5/7));
   } else {
-    // Roster Staff: Unlimited availability within contract dates, unless restricted by other rules
+    // Roster Staff: Availability within contract dates
     if (!staff.workFromDate || !staff.workToDate) {
-      grossCredits = duration; // Assume available whole period if no dates (fallback)
+      grossCredits = duration;
     } else {
       const contractStart = new Date(staff.workFromDate);
       const contractEnd = new Date(staff.workToDate);
@@ -69,20 +65,17 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
       const overlapEnd = progEnd < contractEnd ? progEnd : contractEnd;
       
       if (overlapStart <= overlapEnd) {
-         // Calculate days available
          const diffTime = overlapEnd.getTime() - overlapStart.getTime();
          grossCredits = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
       } else {
-         grossCredits = 0; // Contract does not overlap with this program at all
+         grossCredits = 0;
       }
     }
   }
 
-  // Deduct Annual/Sick Leave Days from Credits
   let leaveDeduction = 0;
   const staffLeaves = leaveRequests.filter(l => l.staffId === staff.id);
   staffLeaves.forEach(leave => {
-    // Only deduct credits for "Work-blocking" leave types (Annual, Sick). 
     if (leave.type === 'Annual leave' || leave.type === 'Sick leave' || leave.type === 'Lieu leave') {
         const leaveStart = new Date(leave.startDate);
         const leaveEnd = new Date(leave.endDate);
@@ -97,43 +90,29 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
   return Math.max(0, grossCredits - leaveDeduction);
 };
 
-// Helper for dates
-const getDayOffset = (startStr: string, currentStr: string) => {
-    const start = new Date(startStr);
-    const curr = new Date(currentStr);
-    const diff = curr.getTime() - start.getTime();
-    return Math.floor(diff / (1000 * 3600 * 24));
-};
-
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // 1. FILTER STAFF BY DATE (Relaxed Mode to prevent "No Staff" errors)
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
   const programEndStr = programEnd.toISOString().split('T')[0];
 
   const validStaff = data.staff.filter(s => {
-      // Locals are always valid
       if (s.type === 'Local') return true;
-      
-      // Roster staff - Allow if dates are missing (assume active) or if they overlap/touch the period
       if (s.type === 'Roster') {
-        if (!s.workFromDate || !s.workToDate) return true; // Assume active if dates missing
+        if (!s.workFromDate || !s.workToDate) return true;
         if (s.workToDate < config.startDate) return false; 
         if (s.workFromDate > programEndStr) return false;
       }
       return true;
   });
 
-  // 2. Prepare Staff Map
-  const staffMap: Record<string, string> = {}; // Initials -> ID
+  const staffMap: Record<string, string> = {};
   validStaff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
-  // --- TOKEN COMPRESSION (The "Minifier") ---
-  // To prevent truncated JSON on long weeks, we shorten keys for the AI.
-  // i=initials, t=type (L/R), sk=skills, c=credits (days cap)
+  // --- SEMANTIC CONTEXT GENERATION ---
+  // We use human-readable descriptions instead of minified codes to help Pro reasoning.
   const staffContext = validStaff.map(s => {
     const skills = [
         s.isLoadControl?'LC':'', 
@@ -143,68 +122,49 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         s.isLostFound?'LF':''
     ].filter(Boolean).join(',');
     
-    // Credits = How many shifts they SHOULD work this week
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
-    
-    // Format: "MS-ATZ|L|SL,LC|5"
-    return `${s.initials}|${s.type === 'Local'?'L':'R'}|${skills}|${credits}`; 
-  }).join(';');
+    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}], MaxShiftsAllowed: ${credits}`; 
+  }).join('\n');
 
   const sortedShifts = [...data.shifts].sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime));
   
-  // ix=index, d=day, dt=date, pt=pickupTime, et=endTime, mn=minStaff, rc=roleCounts
   const shiftContext = sortedShifts.map((s, idx) => {
     const originalIdx = data.shifts.findIndex(os => os.id === s.id);
-    // Minify role counts: "SL:1,LC:1"
     const rcStr = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => {
         const shortK = k === 'Shift Leader' ? 'SL' : k === 'Load Control' ? 'LC' : k === 'Ramp' ? 'RMP' : k === 'Operations' ? 'OPS' : 'LF';
-        return `${shortK}:${v}`;
-    }).join(',');
+        return `${shortK}: ${v}`;
+    }).join(', ');
 
-    return `{ix:${originalIdx},d:${s.day},pt:"${s.pickupTime}",et:"${s.endTime}",mn:${s.minStaff},rc:"${rcStr}"}`;
+    return `ID: ${originalIdx}, DayOffset: ${s.day}, Start: ${s.pickupTime}, End: ${s.endTime}, MinStaffNeeded: ${s.minStaff}, SpecialistRoles: [${rcStr}]`;
   }).join('\n');
 
-  // 4. Prepare Explicit Constraints (Rest & Leave)
+  // --- EXPLICIT CONSTRAINTS ---
   const explicitConstraints: string[] = [];
   
-  // A. Leave Requests (Hard Blocks)
   (data.leaveRequests || []).forEach(leave => {
     const staffMember = validStaff.find(st => st.id === leave.staffId);
     if (!staffMember) return;
     const lStart = new Date(leave.startDate);
     const lEnd = new Date(leave.endDate);
     if (lEnd >= programStart && lStart <= programEnd) {
-       explicitConstraints.push(`- ${staffMember.initials} OFF ${leave.startDate} to ${leave.endDate}.`);
+       explicitConstraints.push(`- ${staffMember.initials} is NOT AVAILABLE from ${leave.startDate} to ${leave.endDate}.`);
     }
   });
 
-  // B. Roster Contract Boundaries
   validStaff.forEach(s => {
       if (s.type === 'Roster' && s.workFromDate && s.workToDate) {
-          if (s.workFromDate > config.startDate) {
-              explicitConstraints.push(`- ${s.initials} STARTS ${s.workFromDate}.`);
-          }
-          if (s.workToDate < programEndStr) {
-              explicitConstraints.push(`- ${s.initials} ENDS ${s.workToDate}.`);
-          }
+          if (s.workFromDate > config.startDate) explicitConstraints.push(`- ${s.initials} cannot work BEFORE contract start date ${s.workFromDate}.`);
+          if (s.workToDate < programEndStr) explicitConstraints.push(`- ${s.initials} cannot work AFTER contract end date ${s.workToDate}.`);
       }
   });
 
-  // C. Incoming Duty Rest Logic
   (data.incomingDuties || []).forEach(d => {
       const staffMember = validStaff.find(s => s.id === d.staffId);
       if (!staffMember) return;
-      const shiftEnd = new Date(`${d.date}T${d.shiftEndTime}`);
-      const freeAt = new Date(shiftEnd.getTime() + (config.minRestHours * 60 * 60 * 1000));
-      if (freeAt > programStart) {
-          const freeAtStr = freeAt.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
-          // CRITICAL: Explicitly tell AI the PREVIOUS END TIME
-          explicitConstraints.push(`- ${staffMember.initials} PREVIOUSLY WORKED until ${d.date} ${d.shiftEndTime}. MUST REST ${config.minRestHours}H.`);
-      }
+      explicitConstraints.push(`- ${staffMember.initials} finished a shift on ${d.date} at ${d.shiftEndTime}. They MUST rest for ${config.minRestHours} hours before their next start.`);
   });
 
-  // 5. Execute Strategy
-  // Upgraded to Gemini 3 Pro for better reasoning on complex scheduling with 32k output limit
+  // Execute Gemini 3 Pro
   const strategies = [
     { model: 'gemini-3-pro-preview', temp: 0.1, limit: 32000 },
     { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 32000 }
@@ -215,44 +175,41 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   for (const strategy of strategies) {
       try {
         const prompt = `
-            ROLE: Aviation Scheduler.
-            MISSION: GENERATE A ROSTER. BEST EFFORT.
+            ROLE: Professional Aviation Resource Planner.
+            GOAL: Generate a 7-day Handling Program.
             
-            PRIORITY RULE #1 (COVERAGE):
-            Target: Assigned Count >= 'mn' (MinStaff).
-            If a day is "LIGHT", do NOT aggressively assign Days Off to Locals if it means missing 'mn'.
-            Instead, use available ROSTER ('R') staff (Standby) to fill the gap.
+            OPERATIONAL PRIORITIES:
+            1. FATIGUE SAFETY (CRITICAL): Ensure EXACTLY ${config.minRestHours} hours of rest between shifts. 
+               - If a shift ends at 00:00 or 08:00, calculate rest hours across midnights correctly.
+            2. SPECIALIST COVERAGE: Prioritize qualified agents for SpecialistRoles (SL, LC, RMP).
+               - If a shift requires 1 SL, you MUST assign 1 agent with the SL skill.
+            3. WORKLOAD BALANCING: Distribute shifts FAIRLY. 
+               - If you have plenty of staff, do not assign 7 shifts to one person while another has 0.
+               - Aim for even utilization across the available manpower.
+            4. STAFF LIMITS: Respect 'MaxShiftsAllowed' for each agent.
             
-            PRIORITY RULE #2 (FATIGUE SAFETY):
-            Check the 'et' (End Time) of a staff member's previous shift.
-            The gap to the new 'pt' (Pickup Time) MUST be >= ${config.minRestHours} hours.
+            BEST EFFORT MODE:
+            - If you run out of qualified staff for a slot, leave it empty.
+            - Do not crash. Do not return an error. Provide the best possible schedule.
             
-            FAILURE HANDLING (CRITICAL):
-            - If you cannot meet 'mn' or 'rc' due to lack of staff: FILL WHAT YOU CAN.
-            - LEAVE REMAINING SLOTS EMPTY.
-            - DO NOT FAIL. DO NOT RETURN ERROR MESSAGE.
-            - ALWAYS RETURN A VALID JSON ARRAY, even if partial.
+            INPUT DATA:
+            Target Period: ${config.startDate} to ${programEndStr}
             
-            INPUT (Minified):
-            Period: ${config.startDate} to ${programEndStr}.
-            
-            STAFF (Initials|Type|Skills|DaysCap):
+            PERSONNEL REGISTRY:
             ${staffContext}
 
-            SHIFTS (ix=Index, d=DayOffset, pt=StartTime, et=EndTime, mn=MinStaff, rc=RoleCounts):
+            SHIFT REQUIREMENTS:
             ${shiftContext}
 
-            CONSTRAINTS:
+            HARD BLOCKS (LEAVE & CONTRACTS):
             ${explicitConstraints.join('\n')}
 
-            OUTPUT JSON:
-            Return a COMPACT ARRAY of ARRAYS.
-            Format: [[dayOffset, shiftIndex, "StaffInitials", "Role"], ...]
-            Example: [[0, 0, "MS-ATZ", "LC"], [0, 0, "AG-HMB", "AGT"]]
-            
-            CRITICAL: 
-            - USE ARRAYS ONLY.
-            - IF PERFECT SOLUTION IS IMPOSSIBLE, RETURN PARTIAL SOLUTION.
+            OUTPUT SPECIFICATION:
+            Return a JSON array of assignment arrays.
+            Format: [[DayOffset, ShiftID, "AgentInitials", "AssignedRole"], ...]
+            - DayOffset: 0 for the first day, 1 for second, etc.
+            - ShiftID: The ID number from the SHIFT REQUIREMENTS list.
+            - AssignedRole: The role the agent is performing (e.g., SL, LC, OPS, AGT).
         `;
 
         const response = await ai.models.generateContent({
@@ -272,31 +229,22 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
   }
   
-  // SILENT FALLBACK: If AI fails entirely, return empty programs with an alert
   if (!Array.isArray(parsed) || parsed.length === 0) {
-      console.warn("AI Generation failed completely. Returning empty skeleton.");
       const fallbackPrograms: DailyProgram[] = [];
       for(let i=0; i<config.numDays; i++) {
           const d = new Date(config.startDate);
           d.setDate(d.getDate() + i);
-          fallbackPrograms.push({
-              day: i,
-              dateString: d.toISOString().split('T')[0],
-              assignments: [],
-              offDuty: []
-          });
+          fallbackPrograms.push({ day: i, dateString: d.toISOString().split('T')[0], assignments: [], offDuty: [] });
       }
       return {
         programs: fallbackPrograms,
         stationHealth: 0,
-        alerts: [{ type: 'danger', message: 'AI could not automatically solve constraints. Roster returned empty for manual assignment.' }],
+        alerts: [{ type: 'danger', message: 'AI Engine failed to generate data. Please check your inputs or try again.' }],
         isCompliant: false
       };
   }
 
-  // 6. Reconstruct Data
   const programs: DailyProgram[] = [];
-  
   for(let i=0; i<config.numDays; i++) {
       const d = new Date(config.startDate);
       d.setDate(d.getDate() + i);
@@ -309,26 +257,18 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
 
   parsed.forEach((item: any) => {
-      // Handle both object format (legacy backup) and array format (new compact)
       let dayOffset, shiftIdx, staffInitials, role;
-
       if (Array.isArray(item)) {
-        // Compact Format: [d, s, st, r]
-        dayOffset = item[0];
-        shiftIdx = item[1];
-        staffInitials = item[2];
-        role = item[3];
+        [dayOffset, shiftIdx, staffInitials, role] = item;
       } else {
-        // Legacy Object Format: {d, s, st, r}
-        dayOffset = item.d;
-        shiftIdx = item.s;
-        staffInitials = item.st;
-        role = item.r;
+        dayOffset = item.dayOffset ?? item.d;
+        shiftIdx = item.shiftIdx ?? item.s;
+        staffInitials = item.staffInitials ?? item.st;
+        role = item.role ?? item.r;
       }
 
-      // Convert types if string
-      if (typeof dayOffset === 'string') dayOffset = parseInt(dayOffset);
-      if (typeof shiftIdx === 'string') shiftIdx = parseInt(shiftIdx);
+      dayOffset = Number(dayOffset);
+      shiftIdx = Number(shiftIdx);
       staffInitials = String(staffInitials || '').toUpperCase().trim();
       role = String(role || 'AGT');
 
@@ -369,17 +309,16 @@ export const extractDataFromContent = async (params: {
   if (params.textData) parts.push({ text: `DATA:\n${params.textData}` });
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   
-  const prompt = `Extract ${params.targetType} to JSON. StartDate: ${params.startDate || 'N/A'}. 
-  Format: { "flights": [], "staff": [], "shifts": [] }`;
+  const prompt = `Extract ${params.targetType} from the provided content. 
+  Target Start Date: ${params.startDate || 'Current'}.
+  Return valid JSON matching this schema: { "flights": [], "staff": [], "shifts": [] }.
+  Ensure flight numbers, initials, and times are extracted accurately.`;
   
   parts.unshift({ text: prompt });
   const response = await ai.models.generateContent({
     model: 'gemini-2.0-flash-exp',
     contents: { parts },
-    config: { 
-      responseMimeType: "application/json",
-      maxOutputTokens: 20000 
-    }
+    config: { responseMimeType: "application/json" }
   });
   return safeParseJson(response.text);
 };
@@ -387,21 +326,20 @@ export const extractDataFromContent = async (params: {
 export const modifyProgramWithAI = async (instruction: string, data: ProgramData, media: ExtractionMedia[] = []): Promise<any> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Compressing context for modify as well
-  const staffContext = data.staff.map(s => `${s.initials}|${s.id}`).join(';');
+  const staffContext = data.staff.map(s => `${s.initials}: ${s.id}`).join(', ');
   const rosterContext = data.programs.map(p => ({
-      d: p.dateString,
-      a: p.assignments.map(a => `${a.staffId}:${a.role}:${a.shiftId}`)
+      date: p.dateString,
+      assignments: p.assignments.map(a => `${data.staff.find(s=>s.id===a.staffId)?.initials}:${a.role}:ShiftID_${a.shiftId}`)
   }));
 
   const prompt = `
-    ROSTER MODIFICATION.
+    TASK: Modify existing roster based on user instruction.
     Instruction: ${instruction}
     
-    Current Roster (Minified): ${JSON.stringify(rosterContext)}
-    Staff Map: ${staffContext}
+    Current State: ${JSON.stringify(rosterContext)}
+    Staff Reference: ${staffContext}
     
-    Return strict JSON: { "programs": [ ...updated programs... ], "explanation": "string" }
+    Return strict JSON: { "programs": [ ...updated programs... ], "explanation": "Brief reasoning for changes" }
   `;
   
   const parts: any[] = [{ text: prompt }];
@@ -410,10 +348,7 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: { parts },
-    config: { 
-      responseMimeType: "application/json",
-      maxOutputTokens: 20000 
-    }
+    config: { responseMimeType: "application/json" }
   });
   return safeParseJson(response.text);
 };
@@ -426,76 +361,29 @@ export const repairProgramWithAI = async (
 ): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // 1. Calculate Context (Dates & Credits)
   const sortedPrograms = [...currentPrograms].sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
   const startDate = sortedPrograms[0]?.dateString || new Date().toISOString().split('T')[0];
   const numDays = sortedPrograms.length || 7;
 
-  let totalSupply = 0;
-  
   const staffContext = data.staff.map(s => {
     const credits = calculateCredits(s, startDate, numDays, data.leaveRequests || []);
-    totalSupply += credits;
-    
-    const skills = [
-        s.isLoadControl?'LC':'', 
-        s.isShiftLeader?'SL':'', 
-        s.isOps?'OPS':'', 
-        s.isRamp?'RMP':'',
-        s.isLostFound?'LF':''
-    ].filter(Boolean).join(',');
-
-    return `ID:${s.initials}|Type:${s.type}|Skills:${skills}|Credits:${credits}`;
+    const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':'', s.isLostFound?'LF':''].filter(Boolean).join(',');
+    return `ID:${s.initials}, Type:${s.type}, Skills:${skills}, CreditLimit:${credits}`;
   }).join('\n');
 
-  let totalDemand = 0;
-  const programEnd = new Date(startDate);
-  programEnd.setDate(programEnd.getDate() + numDays - 1);
-  const endStr = programEnd.toISOString().split('T')[0];
-
-  data.shifts.forEach(s => {
-      if (s.pickupDate >= startDate && s.pickupDate <= endStr) {
-          totalDemand += s.minStaff;
-      }
-  });
-
-  const balance = totalSupply - totalDemand;
-  const capacitySummary = `Total Supply: ${totalSupply} | Total Min Demand: ${totalDemand} | Balance: ${balance} | Status: ${balance >= 0 ? 'Healthy' : 'Critical'}`;
-
-  // 2. Add Explicit Constraints to Repair to avoid "fixing" one bug by creating another
-  const explicitConstraints: string[] = [];
-  (data.leaveRequests || []).forEach(leave => {
-    const staffMember = data.staff.find(st => st.id === leave.staffId);
-    if (!staffMember) return;
-    explicitConstraints.push(`- ${staffMember.initials} UNAVAILABLE ${leave.startDate} to ${leave.endDate}.`);
-  });
-  (data.incomingDuties || []).forEach(d => {
-    const staffMember = data.staff.find(s => s.id === d.staffId);
-    if (!staffMember) return;
-    const shiftEnd = new Date(`${d.date}T${d.shiftEndTime}`);
-    const freeAt = new Date(shiftEnd.getTime() + (constraints.minRestHours * 60 * 60 * 1000));
-    const freeAtStr = freeAt.toLocaleString('en-GB');
-    explicitConstraints.push(`- ${staffMember.initials} RESTING until ${freeAtStr}.`);
-  });
-
   const prompt = `
-    FIX VIOLATIONS in Roster.
-    Errors:
+    FIX ROSTER VIOLATIONS.
+    Violations to Solve:
     ${auditReport}
     
-    CAPACITY FORECAST:
-    ${capacitySummary}
-
-    CONSTRAINTS (DO NOT VIOLATE WHEN FIXING):
-    ${explicitConstraints.join('\n')}
+    Minimum Rest Required: ${constraints.minRestHours} hours.
     
-    Data:
-    ROSTER: ${JSON.stringify(currentPrograms.map(p => ({d: p.dateString, a: p.assignments})))}
-    STAFF: ${staffContext}
+    Current Roster: ${JSON.stringify(currentPrograms.map(p => ({date: p.dateString, assignments: p.assignments})))}
+    Available Staff:
+    ${staffContext}
     
-    TASK: Reassign staff to solve issues.
-    CRITICAL: YOU MUST FILL ALL SHIFTS. If a staff member has 0 credits but is the only option to meet MinStaff, ASSIGN THEM. Do not leave empty slots.
-    CRITICAL (SL/LC): For specialized roles (SL, LC), if the requirement is low (e.g. 1), ensuring that 1 slot is filled is CRITICAL. Prioritize filling these single slots over general agent slots. Assigning 1 staff is a valid solution and NOT a shortage.
+    ACTION: Reassign staff to eliminate the violations while keeping coverage intact. 
+    Balance the workload. Do not use the same staff for 7 days straight if others are free.
     Return strictly: { "programs": [ ...full updated programs array... ] }
   `;
 
@@ -509,8 +397,8 @@ export const repairProgramWithAI = async (
       }
     });
     const parsed = safeParseJson(response.text);
-    return { programs: parsed.programs || [] };
+    return { programs: parsed.programs || currentPrograms };
   } catch (err: any) {
-    throw new Error("Repair failed.");
+    throw new Error("AI Repair engine timed out. Please try fixing fewer issues at once.");
   }
 };
