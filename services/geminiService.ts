@@ -204,10 +204,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   // 5. Execute Strategy
-  // Prioritize Gemini 3 Flash for stability, fallback to 2.0 Flash Exp for context window
+  // Upgraded to Gemini 3 Pro for better reasoning on complex scheduling with 32k output limit
   const strategies = [
-    { model: 'gemini-3-flash-preview', temp: 0.1, limit: 8192 },
-    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 65000 }
+    { model: 'gemini-3-pro-preview', temp: 0.1, limit: 32000 },
+    { model: 'gemini-2.0-flash-exp', temp: 0.1, limit: 32000 }
   ];
 
   let parsed: any = null;
@@ -272,8 +272,26 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
   }
   
+  // SILENT FALLBACK: If AI fails entirely, return empty programs with an alert
   if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error("AI failed to generate a valid roster. Please try a shorter date range or check staff availability.");
+      console.warn("AI Generation failed completely. Returning empty skeleton.");
+      const fallbackPrograms: DailyProgram[] = [];
+      for(let i=0; i<config.numDays; i++) {
+          const d = new Date(config.startDate);
+          d.setDate(d.getDate() + i);
+          fallbackPrograms.push({
+              day: i,
+              dateString: d.toISOString().split('T')[0],
+              assignments: [],
+              offDuty: []
+          });
+      }
+      return {
+        programs: fallbackPrograms,
+        stationHealth: 0,
+        alerts: [{ type: 'danger', message: 'AI could not automatically solve constraints. Roster returned empty for manual assignment.' }],
+        isCompliant: false
+      };
   }
 
   // 6. Reconstruct Data
