@@ -89,6 +89,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
 
   const getPreviousShiftEnd = (staffId: string, currentProgramDate: string): Date | null => {
     const currentIdx = filteredPrograms.findIndex(p => p.dateString === currentProgramDate);
+    // Look back in current program
     for (let i = currentIdx - 1; i >= 0; i--) {
         const p = filteredPrograms[i];
         const assign = p.assignments.find(a => a.staffId === staffId);
@@ -98,12 +99,14 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
                 let baseDate = new Date(p.dateString!);
                 const [ph, pm] = sh.pickupTime.split(':').map(Number);
                 const [eh, em] = sh.endTime.split(':').map(Number);
+                // If end time is smaller than pickup, assume next day
                 if (eh < ph) baseDate.setDate(baseDate.getDate() + 1);
                 const endStr = baseDate.toISOString().split('T')[0];
                 return new Date(`${endStr}T${sh.endTime}:00`);
             }
         }
     }
+    // Look back in incoming duties (history)
     const history = incomingDuties
       .filter(d => d.staffId === staffId && d.date < currentProgramDate)
       .sort((a, b) => b.date.localeCompare(a.date) || (b.shiftEndTime || '').localeCompare(a.shiftEndTime || ''));
@@ -178,10 +181,6 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          return isOutside ? 'ROSTER LEAVE' : 'STANDBY (RESERVE)';
     }
     
-    // Default for local if not assigned and not on specific leave is usually 'DAYS OFF' (since locals work 5/2)
-    // or 'STANDBY' if they are supposed to work but not assigned.
-    // However, for Registry display, unassigned locals are usually grouped as Days Off or Standby.
-    // Let's assume Standby if not strictly blocked, but simplify for consecutive count logic.
     return 'DAYS OFF'; 
   };
 
@@ -195,7 +194,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
         const prevDateStr = d.toISOString().split('T')[0];
         const prevProg = programs.find(p => p.dateString === prevDateStr);
         
-        if (!prevProg) break; // End of data
+        if (!prevProg) break; // End of data or start of program
         
         const prevStatus = getStatusForDay(s, prevDateStr, prevProg);
         if (prevStatus === category) {
@@ -462,6 +461,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
       doc.setFontSize(12).setFont('helvetica', 'bold').text("ABSENCE AND REST REGISTRY", 14, currentY);
       const registryGroups = getFullRegistryForDay(program, true); // Pass true to include counts
       const registryBody = [
+         ['STATUS CATEGORY', 'PERSONNEL INITIALS'],
          ['RESTING (POST-DUTY)', registryGroups['RESTING (POST-DUTY)'].join(', ') || 'NONE'],
          ['DAYS OFF', registryGroups['DAYS OFF'].join(', ') || 'NONE'],
          ['ROSTER LEAVE', registryGroups['ROSTER LEAVE'].join(', ') || 'NONE'],
@@ -469,7 +469,7 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
          ['STANDBY (RESERVE)', registryGroups['STANDBY (RESERVE)'].join(', ') || 'NONE'],
       ];
       autoTable(doc, {
-        startY: currentY + 3, head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']], body: registryBody, theme: 'grid',
+        startY: currentY + 3, head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']], body: registryBody.slice(1), theme: 'grid',
         headStyles: { fillColor: [60, 70, 80], textColor: 255, fontSize: 9, fontStyle: 'bold' },
         bodyStyles: { fontSize: 8, cellPadding: 3 },
         columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' } }
@@ -483,204 +483,267 @@ export const ProgramDisplay: React.FC<Props> = ({ programs, flights, staff, shif
        const st = staffStats[s.id];
        return [(i+1).toString(), s.name, s.initials, st.work.toString(), st.off.toString(), st.work === 5 ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditRows, theme: 'grid', headStyles: { fillColor: auditBlue } });
+    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditRows, theme: 'grid', headStyles: { fillColor: headerBlack } });
 
     doc.addPage('l', 'mm', 'a4');
-    doc.setFontSize(20).text("Weekly Personnel Utilization Audit (Roster)", 14, 20);
+    doc.setFontSize(20).setTextColor(0).text("Weekly Personnel Utilization Audit (Roster)", 14, 20);
     const rosterAuditRows = staff.filter(s => s.type === 'Roster').map((s, i) => {
        const st = staffStats[s.id];
-       return [(i+1).toString(), s.name, s.initials, s.workFromDate || '?', s.workToDate || '?', st.rosterPotential.toString(), st.work.toString(), st.work === st.rosterPotential ? 'MATCH' : 'CHECK'];
+       return [
+         (i+1).toString(), s.name, s.initials, s.workFromDate || '-', s.workToDate || '-',
+         st.rosterPotential.toString(), st.work.toString(), st.work === st.rosterPotential ? 'MATCH' : 'CHECK'
+       ];
     });
-    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditRows, theme: 'grid', headStyles: { fillColor: auditBlue } });
+    autoTable(doc, { startY: 25, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditRows, theme: 'grid', headStyles: { fillColor: headerBlack } });
 
+    // Matrix View
     doc.addPage('l', 'mm', 'a4');
-    doc.setFontSize(20).text("Weekly Operations Matrix View", 14, 20);
-    const dates = filteredPrograms.map(p => { const d = new Date(p.dateString!); return `${d.getDate()}/${d.getMonth()+1}`; });
-    const matrixRows = staff.map((s, i) => {
+    doc.setFontSize(20).setTextColor(0).text("Weekly Operations Matrix View", 14, 20);
+    
+    // Matrix Headers
+    const dateHeaders = filteredPrograms.map(p => {
+        const d = new Date(p.dateString || '');
+        return `${d.getDate()}/${d.getMonth()+1}`;
+    });
+    const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
+    
+    // Matrix Body
+    const matrixBody = staff.map((s, i) => {
        const row = [(i+1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
+       let workCount = 0;
+       
        filteredPrograms.forEach(p => {
           const assign = p.assignments.find(a => a.staffId === s.id);
           if (assign) {
              const sh = getShiftById(assign.shiftId);
-             if (sh) {
-                const rest = calculateRestHours(s.id, p.dateString!, sh.pickupTime);
-                row.push(`${sh.pickupTime}\n${rest !== null ? '(' + rest.toFixed(1) + 'H REST)' : ''}`);
-             } else row.push('UNK SHIFT');
-          } else row.push('-');
+             row.push(sh?.pickupTime || 'WORK');
+             workCount++;
+          } else {
+             row.push('-');
+          }
        });
-       const st = staffStats[s.id];
-       row.push(`${st.work}/${s.type === 'Local' ? 5 : st.rosterPotential}`);
+       
+       row.push(`${workCount}/${filteredPrograms.length}`);
        return row;
     });
-    autoTable(doc, { startY: 30, head: [['S/N', 'AGENT', ...dates, 'AUDIT']], body: matrixRows, theme: 'grid', headStyles: { fillColor: matrixOrange } });
-    doc.save(`SkyOPS_Master_Report_${startDate}.pdf`);
+
+    autoTable(doc, { 
+      startY: 25, 
+      head: matrixHead, 
+      body: matrixBody, 
+      theme: 'grid',
+      headStyles: { fillColor: matrixOrange, fontSize: 8 },
+      bodyStyles: { fontSize: 7, cellPadding: 2 },
+      styles: { halign: 'center' },
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 30, halign: 'left' } }
+    });
+
+    doc.save(`SkyOPS_Program_${startDate}.pdf`);
   };
 
   const getDayLabel = (program: DailyProgram) => {
-    if (program.dateString) {
-      const d = new Date(program.dateString);
-      return d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase() + ' - ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    }
-    return `DAY ${program.day + 1}`;
+    if (!program.dateString) return `Day ${program.day + 1}`;
+    const date = new Date(program.dateString);
+    const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    return `${days[date.getDay()]} - ${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
   };
+
+  if (!filteredPrograms.length) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-[3rem]">
+         <CalendarDays size={64} className="text-slate-200 mb-6" />
+         <h3 className="text-xl font-black italic uppercase text-slate-300 tracking-tighter">Program Matrix Empty</h3>
+         <p className="text-[10px] font-black uppercase text-slate-300 tracking-widest mt-2">Generate a schedule to view results</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
-      <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col xl:flex-row items-center justify-between gap-8 relative overflow-hidden">
-        <div className="flex items-center gap-6 md:gap-8 relative z-10 flex-col md:flex-row text-center xl:text-left">
-          <div className="w-16 h-16 md:w-24 md:h-24 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/40 border-4 border-white/10">
-            <CalendarDays size={32} className="md:w-10 md:h-10 text-white" />
+      <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600/10 blur-[100px] pointer-events-none"></div>
+        <div className="flex items-center gap-6 md:gap-8 relative z-10 flex-col md:flex-row text-center md:text-left">
+          <div className="w-16 h-16 md:w-20 md:h-20 bg-emerald-600 rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-lg shadow-emerald-600/20">
+            <LayoutGrid size={28} className="md:w-9 md:h-9" />
           </div>
           <div>
-            <h3 className="text-2xl md:text-4xl font-black uppercase italic tracking-tighter text-white leading-none">Weekly Program</h3>
-            <p className="text-blue-300 text-[9px] md:text-xs font-black uppercase tracking-[0.3em] mt-2 flex items-center justify-center xl:justify-start gap-2">
-              <CheckCircle2 size={14} className="text-emerald-400" /> {filteredPrograms.length} Days Generated
+            <h3 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter text-white">Master Program</h3>
+            <p className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] mt-2 flex items-center justify-center md:justify-start gap-2">
+              <ShieldCheck size={14} className="text-blue-500" /> Authorized Schedule
             </p>
           </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto relative z-10">
-           <button onClick={runAudit} className="flex-1 px-8 py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-amber-500/20 group">
-             {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} className="group-hover:animate-pulse" />}
-             <span className="text-[10px] font-black uppercase tracking-widest italic">Start Audit</span>
-           </button>
-           <button onClick={exportPDF} className="flex-1 px-8 py-5 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-lg">
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto relative z-10">
+          <button onClick={runAudit} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-indigo-600/20 group">
+             <Activity size={18} className="group-hover:animate-pulse"/>
+             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Safety Audit</span>
+          </button>
+          <button onClick={exportPDF} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white text-slate-950 hover:bg-slate-100 rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl">
              <Printer size={18} />
-             <span className="text-[10px] font-black uppercase tracking-widest italic">Print Master PDF</span>
-           </button>
+             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Export PDF</span>
+          </button>
         </div>
       </div>
 
-      <div className="space-y-8">
-        {filteredPrograms.length === 0 ? (
-          <div className="py-20 md:py-32 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
-             <LayoutGrid size={48} className="mx-auto text-slate-200 mb-6" />
-             <h4 className="text-xl font-black uppercase italic text-slate-300">No Program Generated</h4>
-          </div>
-        ) : (
-          filteredPrograms.map((program) => (
-             <div key={program.day} className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col gap-6">
-                 <div className="flex justify-between items-center pb-6 border-b border-slate-50">
-                    <div className="flex items-center gap-4">
-                       <div className="w-12 h-12 bg-slate-950 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-lg">
-                          {new Date(program.dateString || '').getDate()}
-                       </div>
-                       <div>
-                          <h4 className="text-xl font-black italic uppercase text-slate-900">{getDayLabel(program)}</h4>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Daily Operations Log</p>
-                       </div>
-                    </div>
-                 </div>
+      <div className="space-y-8 md:space-y-12">
+        {filteredPrograms.map((program) => {
+           const registryGroups = getFullRegistryForDay(program, true);
 
-                 <div className="grid grid-cols-1 gap-4">
-                    {(() => {
-                        const shiftsMap: Record<string, Assignment[]> = {};
-                        program.assignments.forEach(a => {
-                          if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
-                          shiftsMap[a.shiftId || ''].push(a);
-                        });
-                        return Object.entries(shiftsMap).sort(([idA], [idB]) => {
-                          const sA = getShiftById(idA); const sB = getShiftById(idB);
-                          return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
-                        }).map(([shiftId, group]) => {
-                           const sh = getShiftById(shiftId);
-                           // Visual fallback if shift data missing
-                           const pickupTime = sh?.pickupTime || 'UNK';
-                           const endTime = sh?.endTime || 'UNK';
-                           
-                           const fls = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ');
-                           return (
-                             <div key={shiftId} className="flex flex-col md:flex-row gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
-                                <div className="w-full md:w-48 shrink-0 space-y-2">
-                                   <div className="flex items-center gap-2">
-                                      <Clock size={14} className="text-blue-500" />
-                                      <span className="text-sm font-black italic text-slate-900">{pickupTime} - {endTime}</span>
-                                   </div>
-                                   {fls && <div className="flex items-center gap-2"><Plane size={12} className="text-slate-400" /><span className="text-[9px] font-bold text-slate-500">{fls}</span></div>}
-                                   {!sh && <span className="text-[8px] font-bold bg-rose-100 text-rose-500 px-2 py-0.5 rounded-full">ID Mismatch</span>}
-                                </div>
-                                <div className="flex-1 flex flex-wrap gap-2">
-                                   {group.map(a => {
-                                      const st = getStaffById(a.staffId);
-                                      const roleCode = formatRoleCode(a.role || '');
-                                      const rest = calculateRestHours(a.staffId, program.dateString!, sh?.pickupTime || '');
-                                      const restViolated = rest !== null && rest < (minRestHours || 12);
+           return (
+            <div key={program.day} className="bg-white rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
+               <div className="bg-slate-50/50 p-6 md:p-10 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div className="flex items-center gap-4 md:gap-6">
+                    <div className="w-12 h-12 md:w-14 md:h-14 bg-white rounded-2xl flex items-center justify-center font-black italic text-lg md:text-xl shadow-sm text-slate-900 border border-slate-100">
+                      {new Date(program.dateString!).getDate()}
+                    </div>
+                    <div>
+                      <h4 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 leading-none">{getDayLabel(program).split(' - ')[0]}</h4>
+                      <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1.5">{program.dateString}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-xl border border-slate-100 shadow-sm">
+                     <Users size={14} className="text-blue-500" />
+                     <span className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest">
+                       {program.assignments.length} Active Personnel
+                     </span>
+                  </div>
+               </div>
+
+               <div className="p-6 md:p-10">
+                  <div className="overflow-x-auto no-scrollbar pb-4">
+                    <table className="w-full min-w-[800px]">
+                      <thead>
+                        <tr className="text-left border-b-2 border-slate-100">
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest w-16">S/N</th>
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest w-24">Pickup</th>
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest w-24">Release</th>
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest w-48">Flights</th>
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest w-24">HC / Max</th>
+                          <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Personnel & Roles</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-sm font-medium text-slate-700">
+                        {(() => {
+                          const shiftsMap: Record<string, Assignment[]> = {};
+                          program.assignments.forEach(a => {
+                            if (!shiftsMap[a.shiftId || '']) shiftsMap[a.shiftId || ''] = [];
+                            shiftsMap[a.shiftId || ''].push(a);
+                          });
+                          const sortedShiftIds = Object.keys(shiftsMap).sort((a,b) => {
+                            const sA = getShiftById(a); const sB = getShiftById(b);
+                            return (sA?.pickupTime || '').localeCompare(sB?.pickupTime || '');
+                          });
+
+                          return sortedShiftIds.map((shiftId, i) => {
+                            const sh = getShiftById(shiftId);
+                            const activeCount = shiftsMap[shiftId].length;
+                            const max = sh?.maxStaff || sh?.minStaff || '?';
+                            const flightList = sh?.flightIds?.map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(' / ') || '-';
+                            
+                            return (
+                              <tr key={shiftId} className="border-b border-slate-50 group hover:bg-slate-50/50 transition-colors">
+                                <td className="py-6 font-black text-slate-300">{i + 1}</td>
+                                <td className="py-6 font-black italic">{sh?.pickupTime}</td>
+                                <td className="py-6 font-black italic text-slate-500">{sh?.endTime}</td>
+                                <td className="py-6 font-bold text-xs uppercase tracking-tight text-blue-600">{flightList}</td>
+                                <td className="py-6 font-black text-xs">
+                                  <span className={activeCount < (sh?.minStaff || 0) ? 'text-rose-500' : 'text-emerald-500'}>{activeCount}</span>
+                                  <span className="text-slate-300"> / {max}</span>
+                                </td>
+                                <td className="py-6">
+                                  <div className="flex flex-wrap gap-2">
+                                    {shiftsMap[shiftId].map((assign, idx) => {
+                                      const s = getStaffById(assign.staffId);
+                                      const rest = calculateRestHours(assign.staffId, program.dateString!, sh?.pickupTime || '');
+                                      const isFatigued = rest !== null && rest < minRestHours;
+                                      
                                       return (
-                                        <div key={a.id} className={`px-3 py-2 rounded-xl border flex items-center gap-2 transition-all hover:scale-105 ${roleCode ? 'bg-white border-blue-100 shadow-sm' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
-                                           <span className="text-[10px] font-black uppercase text-slate-900">{st?.initials || 'UNK'}</span>
-                                           {roleCode && <span className="text-[8px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-md">{roleCode}</span>}
-                                           {rest !== null && (
-                                              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[7px] font-black ${restViolated ? 'bg-rose-100 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                                                <Timer size={8} /> {rest.toFixed(1)}H
-                                              </div>
-                                           )}
+                                        <div key={idx} className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase flex items-center gap-1.5 shadow-sm ${isFatigued ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-white border-slate-100 text-slate-700'}`}>
+                                          <span>{s?.initials}</span>
+                                          {formatRoleCode(assign.role) && (
+                                            <span className="px-1 py-0.5 bg-slate-900 text-white rounded-[4px] text-[7px] tracking-tight">{formatRoleCode(assign.role)}</span>
+                                          )}
+                                          {rest !== null && (
+                                            <span className={`text-[8px] ${isFatigued ? 'text-rose-400' : 'text-slate-400'}`}>[{rest.toFixed(1)}H]</span>
+                                          )}
                                         </div>
-                                      )
-                                   })}
-                                </div>
-                             </div>
-                           );
-                        });
-                    })()}
-                 </div>
+                                      );
+                                    })}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
 
-                 <div className="mt-4 pt-6 border-t border-slate-100">
-                    <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"><CircleAlert size={12} className="text-slate-300"/> Absence & Rest Registry</h5>
-                    <div className="flex flex-wrap gap-8">
-                       {Object.entries(getFullRegistryForDay(program, true)).map(([cat, agents]) => (
-                          agents.length > 0 && (
-                            <div key={cat} className="space-y-1">
-                               <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter block">{cat}</span>
-                               <div className="text-[10px] font-black text-slate-600 uppercase leading-relaxed max-w-xs">{agents.join(', ')}</div>
-                            </div>
-                          )
-                       ))}
-                    </div>
-                 </div>
-             </div>
-          ))
-        )}
+                  {/* Registry Section */}
+                  <div className="mt-8 bg-slate-50 rounded-2xl p-6 md:p-8 border border-slate-100">
+                     <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                       <Moon size={14} className="text-indigo-400"/> Absence & Rest Registry
+                     </h5>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+                        {Object.entries(registryGroups).map(([category, names]) => (
+                          <div key={category} className="flex flex-col gap-1">
+                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{category}</span>
+                             {names.length > 0 ? (
+                               <p className="text-xs font-medium text-slate-700 leading-relaxed">{names.join(', ')}</p>
+                             ) : (
+                               <span className="text-[9px] italic text-slate-300">None</span>
+                             )}
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+               </div>
+            </div>
+           );
+        })}
       </div>
 
       {auditModalOpen && (
-         <div className="fixed inset-0 z-[1600] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-            <div className="bg-white rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95">
-               <div className="p-8 bg-slate-50 border-b border-slate-100 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-4">
-                     <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500">
-                        <AlertTriangle size={24} />
-                     </div>
-                     <div>
-                        <h4 className="text-xl font-black italic uppercase text-slate-900 leading-none">Compliance Audit</h4>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
-                           {auditViolations.length} Issues Detected
-                        </p>
-                     </div>
-                  </div>
-                  <button onClick={() => setAuditModalOpen(false)} className="p-2 bg-white rounded-full hover:bg-slate-200"><X size={20}/></button>
-               </div>
-               
-               <div className="flex-1 overflow-y-auto p-8 space-y-4">
-                  {auditViolations.map((violation, i) => {
-                     const isSelected = selectedViolationIndices.has(i);
-                     return (
-                        <div key={i} onClick={() => toggleViolation(i)} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-start gap-4 ${isSelected ? 'border-amber-400 bg-amber-50' : 'border-slate-100 hover:border-slate-200'}`}>
-                           <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${isSelected ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200'}`}>
-                              {isSelected && <Check size={14} />}
-                           </div>
-                           <p className="text-xs font-bold text-slate-700 leading-relaxed uppercase">{violation}</p>
-                        </div>
-                     );
-                  })}
-               </div>
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+           <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+              <div className="p-8 bg-rose-50 border-b border-rose-100 flex justify-between items-center">
+                 <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center text-rose-600">
+                       <ShieldAlert size={24} />
+                    </div>
+                    <div>
+                       <h3 className="text-xl font-black italic text-rose-600 uppercase tracking-tighter">Safety Violations</h3>
+                       <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mt-1">Found {auditViolations.length} Issues</p>
+                    </div>
+                 </div>
+                 <button onClick={() => setAuditModalOpen(false)} className="p-2 text-rose-300 hover:text-rose-600 transition-colors"><X size={24}/></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8 space-y-4">
+                 {auditViolations.map((v, i) => (
+                   <div key={i} onClick={() => toggleViolation(i)} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-start gap-3 ${selectedViolationIndices.has(i) ? 'bg-rose-50 border-rose-500' : 'bg-white border-slate-100 opacity-50 hover:opacity-100'}`}>
+                      <div className={`w-5 h-5 rounded-md flex items-center justify-center border ${selectedViolationIndices.has(i) ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 bg-white'}`}>
+                        {selectedViolationIndices.has(i) && <Check size={12} />}
+                      </div>
+                      <p className="text-xs font-bold text-slate-700 leading-relaxed pt-0.5">{v}</p>
+                   </div>
+                 ))}
+              </div>
+              <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-4">
+                 <button onClick={() => setAuditModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:text-slate-600">Dismiss</button>
+                 <button onClick={handleRepairConfirm} disabled={selectedViolationIndices.size === 0 || isRepairing} className="flex-[2] py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-rose-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                    {isRepairing ? <Loader2 className="animate-spin" /> : <Hammer size={16} />}
+                    {isRepairing ? 'AI Repairing...' : 'Auto-Fix Selected'}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
 
-               <div className="p-6 border-t border-slate-100 flex gap-4 shrink-0 bg-white">
-                  <button onClick={() => setAuditModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-2xl">Dismiss</button>
-                  <button onClick={handleRepairConfirm} disabled={selectedViolationIndices.size === 0} className="flex-[2] py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-amber-500 hover:text-slate-900 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                     <Hammer size={16} /> Auto-Repair Selected
-                  </button>
-               </div>
-            </div>
-         </div>
+      {isRepairing && !auditModalOpen && (
+        <div className="fixed inset-0 z-[2100] flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+           <Loader2 size={48} className="text-white animate-spin mb-4" />
+           <p className="text-white font-black uppercase italic tracking-widest animate-pulse">AI Re-Balancing Roster...</p>
+        </div>
       )}
     </div>
   );
