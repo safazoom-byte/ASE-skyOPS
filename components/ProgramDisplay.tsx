@@ -1,13 +1,22 @@
 
 import React, { useMemo, useState } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Assignment, Skill } from '../types';
-import { calculateCredits } from '../services/geminiService';
+import { calculateCredits, repairProgramWithAI } from '../services/geminiService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
   Printer, 
   Activity,
-  FileText
+  FileText,
+  Sparkles,
+  Loader2,
+  GripHorizontal,
+  Plus,
+  X,
+  AlertTriangle,
+  Check,
+  ShieldAlert,
+  Wrench
 } from 'lucide-react';
 import { AVAILABLE_SKILLS } from '../constants';
 
@@ -26,6 +35,13 @@ interface Props {
   minRestHours?: number;
 }
 
+interface RepairIssue {
+  id: string;
+  type: 'coverage' | 'rest' | 'role';
+  description: string;
+  severity: 'high' | 'medium';
+}
+
 export const ProgramDisplay: React.FC<Props> = ({ 
   programs, 
   flights, 
@@ -35,9 +51,17 @@ export const ProgramDisplay: React.FC<Props> = ({
   incomingDuties = [], 
   startDate, 
   endDate, 
+  onUpdatePrograms,
   minRestHours = 12
 }) => {
   const [attachAnalytics, setAttachAnalytics] = useState(true);
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [draggedAssignment, setDraggedAssignment] = useState<{ id: string, day: number, shiftId: string } | null>(null);
+  
+  // Repair Dialog State
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [detectedIssues, setDetectedIssues] = useState<RepairIssue[]>([]);
+  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set());
 
   const filteredPrograms = useMemo(() => {
     if (!Array.isArray(programs) || !startDate || !endDate) return [];
@@ -48,15 +72,6 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const getStaffById = (id: string) => staff.find(s => s.id === id);
   const getFlightById = (id: string) => flights.find(f => f.id === id);
-
-  const getSkillCodeShort = (role: string) => {
-    if (role.includes('Leader')) return 'SL';
-    if (role.includes('Load')) return 'LC';
-    if (role.includes('Ramp')) return 'RMP';
-    if (role.includes('Ops')) return 'OPS';
-    if (role.includes('Lost')) return 'LF';
-    return role;
-  };
 
   const stats = useMemo(() => {
     if (!startDate || !endDate) return null;
@@ -70,273 +85,126 @@ export const ProgramDisplay: React.FC<Props> = ({
     return { totalSupply, totalDemand, balance: totalSupply - totalDemand, status: (totalSupply - totalDemand) >= 0 ? 'HEALTHY' : 'CRITICAL' };
   }, [startDate, endDate, staff, shifts, leaveRequests, filteredPrograms]);
 
-  const generatePDF = () => {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-
-    // Helper for Page Headers (REPLICA STYLE)
-    const drawPageHeader = (title: string, showStats: boolean = false) => {
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(24);
-      doc.setFont('helvetica', 'bold');
-      doc.text("SkyOPS Station Handling Program", 14, 20);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 28);
-
-      if (showStats && stats) {
-        const boxWidth = 80;
-        const boxX = pageWidth - boxWidth - 14;
-        doc.setDrawColor(200, 200, 200);
-        doc.setFillColor(245, 245, 245);
-        doc.rect(boxX, 10, boxWidth, 25, 'FD'); // Fill and Draw
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.text("MANPOWER CAPACITY FORECAST", boxX + 5, 16);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Total Supply: ${stats.totalSupply} Shifts`, boxX + 5, 22);
-        doc.text(`Total Demand: ${stats.totalDemand} Shifts (Min)`, boxX + 5, 27);
-        
-        doc.setFont('helvetica', 'bold');
-        if (stats.balance >= 0) doc.setTextColor(16, 185, 129); // Green
-        else doc.setTextColor(225, 29, 72); // Red
-        
-        doc.text(`Net Balance: ${stats.balance > 0 ? '+' : ''}${stats.balance}`, boxX + 5, 32);
-        doc.text(`Status: ${stats.status}`, boxX + 40, 32);
-        doc.setTextColor(0, 0, 0);
-      }
-
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text(title.toUpperCase(), 14, 45);
-    };
-
-    // 1. DAILY PAGES (REPLICA)
-    filteredPrograms.forEach((p, idx) => {
-      if (idx > 0) doc.addPage();
-      const dateObj = new Date(p.dateString!);
-      const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'long' }).toUpperCase();
-      const formattedDate = `${dayName} - ${dateObj.getDate()}/${dateObj.getMonth() + 1}/${dateObj.getFullYear()}`;
-      
-      drawPageHeader(formattedDate, idx === 0);
-
-      const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
-      const body = dayShifts.map((s, si) => {
-        const assigned = p.assignments.filter(a => a.shiftId === s.id);
-        const flts = (s.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
-        const prs = assigned.map(a => {
-            const st = getStaffById(a.staffId);
-            const roleCode = getSkillCodeShort(a.role);
-            const duration = getShiftDuration(s);
-            const rolePart = roleCode ? ` (${roleCode})` : '';
-            const durPart = duration !== "8.0" ? ` [${duration}H]` : '';
-            return `${st?.initials}${rolePart}${durPart}`;
-        }).join(' | ');
-        return [si + 1, s.pickupTime, s.endTime, flts, `${assigned.length} / ${s.maxStaff}`, prs];
-      });
-
-      autoTable(doc, {
-        startY: 52,
-        head: [['S/N', 'PICKUP', 'RELEAS\nE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
-        body,
-        theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 8, cellPadding: 3, textColor: [40, 40, 40], valign: 'middle' },
-        columnStyles: { 
-            0: { cellWidth: 10 }, 
-            1: { cellWidth: 18 }, 
-            2: { cellWidth: 18 }, 
-            3: { cellWidth: 30 }, 
-            4: { cellWidth: 18 } 
-        }
-      });
-
-      // ABSENCE REGISTRY (REPLICA)
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text("ABSENCE AND REST REGISTRY", 14, (doc as any).lastAutoTable.finalY + 12);
-      
-      const dayLeaves = leaveRequests.filter(l => l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-      
-      const getInitialsWithCount = (list: string[]) => {
-          const counts: Record<string, number> = {};
-          list.forEach(i => counts[i] = (counts[i] || 0) + 1);
-          return Object.entries(counts).map(([init, count]) => `${init} (${count})`).join(', ') || 'NONE';
-      };
-
-      const regBody = [
-        ['RESTING (POST-DUTY)', getInitialsWithCount([])], // Placeholder
-        ['DAYS OFF', getInitialsWithCount(dayLeaves.filter(l => l.type === 'Day off').map(l => getStaffById(l.staffId)?.initials || ''))],
-        ['ROSTER LEAVE', getInitialsWithCount(dayLeaves.filter(l => l.type === 'Roster leave').map(l => getStaffById(l.staffId)?.initials || ''))],
-        ['ANNUAL LEAVE', getInitialsWithCount(dayLeaves.filter(l => l.type === 'Annual leave').map(l => getStaffById(l.staffId)?.initials || ''))],
-        ['STANDBY (RESERVE)', 'NONE']
-      ];
-
-      autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 16,
-        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
-        body: regBody,
-        theme: 'grid',
-        headStyles: { fillColor: [51, 65, 85], fontSize: 9, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 8, cellPadding: 3, valign: 'middle' },
-        columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', fillColor: [240, 240, 240] } }
-      });
+  const runDiagnosis = () => {
+    const issues: RepairIssue[] = [];
+    filteredPrograms.forEach(p => {
+       const dayShifts = shifts.filter(s => s.pickupDate === p.dateString);
+       dayShifts.forEach(s => {
+          const assignedCount = p.assignments.filter(a => a.shiftId === s.id).length;
+          if (assignedCount < s.minStaff) {
+             issues.push({ id: `cov-${s.id}`, type: 'coverage', description: `${p.dateString} - Shift ${s.pickupTime}: Understaffed (${assignedCount}/${s.minStaff})`, severity: 'high' });
+          }
+       });
     });
 
-    if (attachAnalytics) {
-      // 2. UTILIZATION AUDIT (LOCAL)
-      doc.addPage();
-      doc.setFontSize(22);
-      doc.setFont('helvetica', 'bold');
-      doc.text("Weekly Personnel Utilization Audit (Local)", 14, 20);
-      
-      const localStaff = staff.filter(s => s.type === 'Local');
-      const localRows = localStaff.map((s, i) => {
-        const workShifts = programs.reduce((acc, p) => acc + p.assignments.filter(a => a.staffId === s.id).length, 0);
-        const offDays = filteredPrograms.length - workShifts;
-        // Logic from screenshot: 5 shifts = MATCH, else CHECK (Red for CHECK, Green for MATCH)
-        const status = workShifts === 5 ? 'MATCH' : 'CHECK';
-        const rowColor = status === 'MATCH' ? [16, 185, 129] : [220, 38, 38]; // Green : Red
-        
-        return [
-            { content: i + 1, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.name.toUpperCase(), styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.initials, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: workShifts, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: offDays, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: status, styles: { fillColor: rowColor, textColor: [255, 255, 255], fontStyle: 'bold' } }
-        ];
-      });
+    staff.forEach(s => {
+       const staffAssignments = filteredPrograms.flatMap(p => 
+          p.assignments.filter(a => a.staffId === s.id).map(a => ({ ...a, date: p.dateString }))
+       );
+       staffAssignments.sort((a, b) => {
+          const shiftA = shifts.find(sh => sh.id === a.shiftId);
+          const shiftB = shifts.find(sh => sh.id === b.shiftId);
+          if (!shiftA || !shiftB) return 0;
+          return (shiftA.pickupDate + shiftA.pickupTime).localeCompare(shiftB.pickupDate + shiftB.pickupTime);
+       });
+       for (let i = 1; i < staffAssignments.length; i++) {
+          const prev = shifts.find(sh => sh.id === staffAssignments[i-1].shiftId);
+          const curr = shifts.find(sh => sh.id === staffAssignments[i].shiftId);
+          if (prev && curr) {
+             const prevEnd = new Date(`${prev.pickupDate}T${prev.endTime}`); 
+             if (prev.endTime < prev.pickupTime) prevEnd.setDate(prevEnd.getDate() + 1);
+             const currStart = new Date(`${curr.pickupDate}T${curr.pickupTime}`);
+             const diffHours = (currStart.getTime() - prevEnd.getTime()) / (1000 * 60 * 60);
+             if (diffHours < minRestHours) {
+                issues.push({ id: `rest-${s.id}-${curr.id}`, type: 'rest', description: `${s.initials} - Rest Violation on ${curr.pickupDate} (Only ${diffHours.toFixed(1)}h)`, severity: 'high' });
+             }
+          }
+       }
+    });
+    setDetectedIssues(issues);
+    setSelectedIssueIds(new Set(issues.map(i => i.id)));
+    setShowRepairModal(true);
+  };
 
-      autoTable(doc, {
-        startY: 30,
-        head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']],
-        body: localRows,
-        theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 10, fontStyle: 'bold' },
-        styles: { fontSize: 9, fontStyle: 'bold' },
-      });
+  const confirmRepair = async () => {
+    if (!onUpdatePrograms) return;
+    setIsRepairing(true);
+    setShowRepairModal(false);
+    try {
+      const activeIssues = detectedIssues.filter(i => selectedIssueIds.has(i.id));
+      const issueReport = activeIssues.map(i => i.description).join('; ');
+      const dataObj = { flights, staff, shifts, programs, leaveRequests, incomingDuties };
+      const result = await repairProgramWithAI(programs, `Fix these specific issues: ${issueReport}`, dataObj, { minRestHours });
+      if (result && result.programs) onUpdatePrograms(result.programs);
+    } catch (e: any) { alert("AI Repair Failed: " + e.message); } finally { setIsRepairing(false); }
+  };
 
-      // 3. UTILIZATION AUDIT (ROSTER)
-      doc.addPage();
-      doc.setFontSize(22);
-      doc.text("Weekly Personnel Utilization Audit (Roster)", 14, 20);
-      
-      const rosterStaff = staff.filter(s => s.type === 'Roster');
-      const rosterRows = rosterStaff.map((s, i) => {
-        const potential = calculateCredits(s, startDate!, filteredPrograms.length, []);
-        const actual = programs.reduce((acc, p) => acc + p.assignments.filter(a => a.staffId === s.id).length, 0);
-        // Logic from screenshot: actual == potential -> MATCH, else CHECK
-        const status = actual === potential ? 'MATCH' : 'CHECK';
-        const rowColor = status === 'MATCH' ? [16, 185, 129] : [220, 38, 38];
+  const toggleIssue = (id: string) => {
+    const next = new Set(selectedIssueIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIssueIds(next);
+  };
 
-        return [
-            { content: i + 1, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.name.toUpperCase(), styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.initials, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.workFromDate || '?', styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: s.workToDate || '?', styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: potential, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: actual, styles: { fillColor: rowColor, textColor: [255, 255, 255] } },
-            { content: status, styles: { fillColor: rowColor, textColor: [255, 255, 255], fontStyle: 'bold' } }
-        ];
-      });
-
-      autoTable(doc, {
-        startY: 30,
-        head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']],
-        body: rosterRows,
-        theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold' },
-        styles: { fontSize: 8, fontStyle: 'bold' },
-      });
-
-      // 4. OPERATIONS MATRIX VIEW (ORANGE)
-      doc.addPage();
-      doc.setFontSize(22);
-      doc.text("Weekly Operations Matrix View", 14, 20);
-      
-      const matrixDates = filteredPrograms.map(p => {
-          const d = new Date(p.dateString!);
-          return `${d.getDate()}/${d.getMonth() + 1}`;
-      });
-      
-      const matrixRows = staff.map((s, i) => {
-        const rowData: any[] = [i + 1, `${s.initials} (${s.type[0]})`];
-        let count = 0;
-        
-        filteredPrograms.forEach(p => {
-            const ass = p.assignments.find(a => a.staffId === s.id);
-            if (ass) {
-                const sh = shifts.find(sh => sh.id === ass.shiftId);
-                const dur = getShiftDuration(sh);
-                const cellText = `${sh?.pickupTime} [${dur}H]`;
-                
-                // Highlight [0.0H] in RED (as per screenshot 12 for AB-HMB 00:00 [0.0H])
-                if (dur === "0.0") {
-                    rowData.push({ content: cellText, styles: { fillColor: [220, 38, 38], textColor: [255, 255, 255], fontStyle: 'bold' } });
-                } else {
-                    rowData.push(cellText);
-                }
-                count++;
-            } else {
-                rowData.push("-");
-            }
-        });
-        rowData.push(`${count}/${filteredPrograms.length}`);
-        return rowData;
-      });
-
-      autoTable(doc, {
-        startY: 30,
-        head: [['S/N', 'AGENT', ...matrixDates, 'AUDIT']],
-        body: matrixRows,
-        theme: 'grid',
-        headStyles: { fillColor: [234, 88, 12], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold' }, // Orange Header
-        styles: { fontSize: 7, halign: 'center' },
-        columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } }
-      });
-
-      // 5. ROLE FULFILLMENT MATRIX (GREEN)
-      doc.addPage();
-      doc.setFontSize(22);
-      doc.text("Specialist Role Fulfillment Matrix", 14, 20);
-      
-      const roleMatrixRows: any[] = [];
-      filteredPrograms.forEach(p => {
-          const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
-          dayShifts.forEach(s => {
-              const assigned = p.assignments.filter(a => a.shiftId === s.id);
-              const getP = (skill: string) => assigned.filter(a => a.role.includes(getSkillCodeShort(skill))).map(a => getStaffById(a.staffId)?.initials).join(', ') || '-';
-              const d = new Date(p.dateString!);
-              
-              // Per screenshot 15/16: Green background for ALL body rows
-              const rowStyle = { fillColor: [16, 185, 129], textColor: [255, 255, 255] };
-              
-              roleMatrixRows.push([
-                  { content: `${d.getDate()}/${d.getMonth()+1}`, styles: rowStyle },
-                  { content: `${s.pickupTime}-${s.endTime}`, styles: rowStyle },
-                  { content: getP('Shift Leader'), styles: rowStyle },
-                  { content: getP('Load Control'), styles: rowStyle },
-                  { content: getP('Ramp'), styles: rowStyle },
-                  { content: getP('Operations'), styles: rowStyle },
-                  { content: getP('Lost and Found'), styles: rowStyle }
-              ]);
-          });
-      });
-
-      autoTable(doc, {
-        startY: 30,
-        head: [['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF']],
-        body: roleMatrixRows,
-        theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold' },
-        styles: { fontSize: 8, fontStyle: 'bold', halign: 'center' }
-      });
+  const handleDrop = (targetShiftId: string, targetDay: number) => {
+    if (!draggedAssignment || !onUpdatePrograms) return;
+    if (draggedAssignment.day !== targetDay) return; 
+    const newPrograms = [...programs];
+    const dayProg = newPrograms.find(p => p.day === targetDay);
+    if (dayProg) {
+      const assignment = dayProg.assignments.find(a => a.id === draggedAssignment.id);
+      if (assignment) {
+        assignment.shiftId = targetShiftId;
+        onUpdatePrograms(newPrograms);
+      }
     }
+    setDraggedAssignment(null);
+  };
 
-    doc.save(`SkyOPS_Station_Handling_Program_${startDate}.pdf`);
+  const handleManualAdd = (day: number, shiftId: string) => {
+    if (!onUpdatePrograms) return;
+    const initials = prompt("Enter Staff Initials to Assign:");
+    if (!initials) return;
+    const matchedStaff = staff.find(s => s.initials.toUpperCase() === initials.toUpperCase());
+    if (!matchedStaff) { alert("Staff not found!"); return; }
+    const newPrograms = [...programs];
+    const dayProg = newPrograms.find(p => p.day === day);
+    if (dayProg) {
+      dayProg.assignments.push({ id: Math.random().toString(36).substr(2, 9), staffId: matchedStaff.id, shiftId: shiftId, role: 'AGT', flightId: '' });
+      onUpdatePrograms(newPrograms);
+    }
+  };
+
+  const handleManualRemove = (day: number, assignmentId: string) => {
+    if (!onUpdatePrograms) return;
+    if (!confirm("Remove this assignment?")) return;
+    const newPrograms = [...programs];
+    const dayProg = newPrograms.find(p => p.day === day);
+    if (dayProg) {
+      dayProg.assignments = dayProg.assignments.filter(a => a.id !== assignmentId);
+      onUpdatePrograms(newPrograms);
+    }
+  };
+
+  const isRoleMatch = (roleStr: string, targetSkill: string) => {
+    const r = (roleStr || '').toLowerCase();
+    const t = targetSkill.toLowerCase();
+    if (t === 'operations' || t === 'ops') return r.includes('op') || r.includes('ops');
+    if (t === 'shift leader' || t === 'sl') return r.includes('leader') || r.includes('sl');
+    if (t === 'load control' || t === 'lc') return r.includes('load') || r.includes('lc');
+    if (t === 'ramp' || t === 'rmp') return r.includes('ramp') || r.includes('rmp');
+    if (t === 'lost and found' || t === 'lf') return r.includes('lost') || r.includes('lf');
+    return r.includes(t);
+  };
+
+  const getSkillCodeShort = (role: string) => {
+    const r = (role || '').toLowerCase();
+    if (r.includes('leader') || r.includes('sl')) return 'SL';
+    if (r.includes('load') || r.includes('lc')) return 'LC';
+    if (r.includes('ramp') || r.includes('rmp')) return 'RMP';
+    if (r.includes('op')) return 'OPS'; 
+    if (r.includes('lost') || r.includes('lf')) return 'LF';
+    return '';
   };
 
   const getShiftDuration = (shift?: ShiftConfig) => {
@@ -349,47 +217,105 @@ export const ProgramDisplay: React.FC<Props> = ({
     return ((end - start) / 60).toFixed(1);
   };
 
+  const generatePDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const drawPageHeader = (title: string, showStats: boolean = false) => {
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(24);
+      doc.setFont('helvetica', 'bold');
+      doc.text("SkyOPS Station Handling Program", 14, 20);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 28);
+      if (showStats && stats) {
+        const boxWidth = 80;
+        const boxX = pageWidth - boxWidth - 14;
+        doc.setDrawColor(200, 200, 200);
+        doc.setFillColor(245, 245, 245);
+        doc.rect(boxX, 10, boxWidth, 25, 'FD'); 
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.text("MANPOWER CAPACITY FORECAST", boxX + 5, 16);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Total Supply: ${stats.totalSupply} Shifts`, boxX + 5, 22);
+        doc.text(`Total Demand: ${stats.totalDemand} Shifts (Min)`, boxX + 5, 27);
+        doc.setFont('helvetica', 'bold');
+        if (stats.balance >= 0) doc.setTextColor(16, 185, 129); else doc.setTextColor(225, 29, 72); 
+        doc.text(`Net Balance: ${stats.balance > 0 ? '+' : ''}${stats.balance}`, boxX + 5, 32);
+        doc.text(`Status: ${stats.status}`, boxX + 40, 32);
+        doc.setTextColor(0, 0, 0);
+      }
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(title.toUpperCase(), 14, 45);
+    };
+
+    filteredPrograms.forEach((p, idx) => {
+      if (idx > 0) doc.addPage();
+      const dateObj = new Date(p.dateString!);
+      const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'long' }).toUpperCase();
+      const formattedDate = `${dayName} - ${dateObj.getDate()}/${dateObj.getMonth() + 1}/${dateObj.getFullYear()}`;
+      drawPageHeader(formattedDate, idx === 0);
+      const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
+      const body = dayShifts.map((s, si) => {
+        const assigned = p.assignments.filter(a => a.shiftId === s.id);
+        const flts = (s.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
+        const prs = assigned.map(a => {
+            const st = getStaffById(a.staffId);
+            const roleCode = getSkillCodeShort(a.role);
+            const duration = getShiftDuration(s);
+            const rolePart = roleCode ? ` (${roleCode})` : '';
+            return `${st?.initials}${rolePart}`;
+        }).join(' | ');
+        return [si + 1, s.pickupTime, s.endTime, flts, `${assigned.length} / ${s.maxStaff}`, prs];
+      });
+      autoTable(doc, {
+        startY: 52,
+        head: [['S/N', 'PICKUP', 'RELEAS\nE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
+        body,
+        theme: 'grid',
+        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold', halign: 'left' },
+        styles: { fontSize: 8, cellPadding: 3, textColor: [40, 40, 40], valign: 'middle' },
+        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 18 }, 2: { cellWidth: 18 }, 3: { cellWidth: 30 }, 4: { cellWidth: 18 } }
+      });
+    });
+    doc.save(`SkyOPS_Station_Handling_Program_${startDate}.pdf`);
+  };
+
   const getFormatDate = (dateStr?: string) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' }).toUpperCase().replace(',', ' -');
   };
 
   return (
-    <div className="space-y-8 pb-32 animate-in fade-in duration-500">
+    <div className="space-y-8 pb-32 animate-in fade-in duration-500 relative">
       <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
         <div>
            <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter">Operational Program</h2>
            <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2 flex items-center gap-2">
              <Activity size={14} className="text-blue-500" /> Professional Handling Roster
            </p>
-           <label className="flex items-center gap-3 mt-4 cursor-pointer group">
-              <input type="checkbox" className="w-5 h-5 rounded border-slate-200" checked={attachAnalytics} onChange={e => setAttachAnalytics(e.target.checked)} />
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 group-hover:text-slate-900">Include Audit Pages & Matrix View in PDF</span>
-           </label>
+           <div className="flex items-center gap-4 mt-4">
+              <label className="flex items-center gap-2 cursor-pointer group">
+                  <input type="checkbox" className="w-5 h-5 rounded border-slate-200" checked={attachAnalytics} onChange={e => setAttachAnalytics(e.target.checked)} />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 group-hover:text-slate-900">With Audit</span>
+              </label>
+           </div>
         </div>
-        <button onClick={generatePDF} className="px-10 py-5 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl hover:bg-blue-600 transition-all active:scale-95">
-           <Printer size={18} /> Download Program PDF
-        </button>
+        <div className="flex gap-3">
+           <button onClick={runDiagnosis} disabled={isRepairing} className="px-8 py-5 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50">
+              {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {isRepairing ? 'Fixing...' : 'AI Repair'}
+           </button>
+           <button onClick={generatePDF} className="px-10 py-5 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl hover:bg-blue-600 transition-all active:scale-95">
+              <Printer size={18} /> Download PDF
+           </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-8 md:p-12 space-y-12">
-            {stats && (
-              <div className="flex justify-end">
-                <div className="bg-slate-50 p-8 rounded-2xl border border-slate-200 shadow-sm w-full max-w-md">
-                   <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest border-b border-slate-100 pb-3 mb-4">Production Audit</h4>
-                   <div className="space-y-2 text-[11px] font-medium text-slate-600">
-                      <p>Active Supply: <span className="font-black text-slate-950">{stats.totalSupply} Shifts</span></p>
-                      <p>Station Demand: <span className="font-black text-slate-950">{stats.totalDemand} Shifts</span></p>
-                      <div className="pt-4 flex justify-between items-center">
-                         <span className="text-emerald-500 font-black italic">NET BALANCE: {stats.balance > 0 ? '+' : ''}{stats.balance}</span>
-                         <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase ${stats.balance >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600 animate-pulse'}`}>{stats.status}</span>
-                      </div>
-                   </div>
-                </div>
-              </div>
-            )}
-
             {filteredPrograms.map((p) => {
               const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
               return (
@@ -425,14 +351,22 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   </div>
                                 </td>
                                 <td className="p-4 font-black text-slate-600">{assigned.length} / {s.maxStaff}</td>
-                                <td className="p-4">
-                                   <div className="flex flex-wrap gap-2 text-[10px]">
-                                      {assigned.map(a => (
-                                        <span key={a.id} className="text-slate-900 font-medium">
-                                           {getStaffById(a.staffId)?.initials} ({getSkillCodeShort(a.role)})
-                                           {si < dayShifts.length - 1 && <span className="mx-2 text-slate-200">|</span>}
-                                        </span>
-                                      ))}
+                                <td className={`p-4 transition-all ${draggedAssignment?.day === p.day && draggedAssignment.shiftId !== s.id ? 'bg-blue-50 ring-2 ring-blue-200 ring-inset' : ''}`} onDragOver={(e) => e.preventDefault()} onDrop={() => handleDrop(s.id, p.day)}>
+                                   <div className="flex flex-wrap gap-2 text-[10px] items-center">
+                                      {assigned.map(a => {
+                                        const roleCode = getSkillCodeShort(a.role);
+                                        return (
+                                          <div key={a.id} draggable onDragStart={() => setDraggedAssignment({ id: a.id, day: p.day, shiftId: s.id })} onDragEnd={() => setDraggedAssignment(null)} className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing group">
+                                             <GripHorizontal size={12} className="text-slate-300" />
+                                             <span className="text-slate-900 font-bold">
+                                                {getStaffById(a.staffId)?.initials}
+                                                {roleCode && <span className="text-blue-600 ml-1 font-black">({roleCode})</span>}
+                                             </span>
+                                             <button onClick={(e) => { e.stopPropagation(); handleManualRemove(p.day, a.id); }} className="p-1 rounded-full hover:bg-rose-100 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><X size={10} /></button>
+                                          </div>
+                                        );
+                                      })}
+                                      <button onClick={() => handleManualAdd(p.day, s.id)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-300 hover:text-blue-500 hover:border-blue-500 transition-all"><Plus size={14} /></button>
                                    </div>
                                 </td>
                               </tr>
@@ -446,6 +380,41 @@ export const ProgramDisplay: React.FC<Props> = ({
             })}
         </div>
       </div>
+
+      {showRepairModal && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[85vh]">
+             <div className="bg-indigo-600 p-8 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-lg"><Wrench size={24} className="text-indigo-600" /></div>
+                   <div>
+                     <h3 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Diagnostic Repair</h3>
+                     <p className="text-[10px] font-black text-indigo-100 uppercase tracking-widest mt-1">Review & Fix Violations</p>
+                   </div>
+                </div>
+                <button onClick={() => setShowRepairModal(false)} className="text-indigo-100 hover:text-white transition-colors bg-white/10 p-2 rounded-full"><X size={20}/></button>
+             </div>
+             <div className="flex-1 overflow-y-auto p-8 space-y-4">
+                {detectedIssues.length === 0 ? (
+                  <div className="text-center py-12 space-y-4">
+                     <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-500"><Check size={32} /></div>
+                     <h4 className="text-lg font-black text-slate-900">No Critical Issues Detected</h4>
+                  </div>
+                ) : (
+                  detectedIssues.map(issue => (
+                     <div key={issue.id} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-start gap-4 ${selectedIssueIds.has(issue.id) ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-slate-300'}`} onClick={() => toggleIssue(issue.id)}>
+                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${selectedIssueIds.has(issue.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}><Check size={14} strokeWidth={4} /></div>
+                        <div className="flex-1"><p className="text-sm font-bold text-slate-900">{issue.description}</p></div>
+                     </div>
+                  ))
+                )}
+             </div>
+             <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0">
+                <button onClick={confirmRepair} disabled={selectedIssueIds.size === 0} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest shadow-xl hover:bg-indigo-500 transition-all disabled:opacity-50 flex items-center justify-center gap-3"><Sparkles size={18} /> Auto-Fix Selected ({selectedIssueIds.size})</button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

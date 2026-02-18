@@ -91,12 +91,56 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const staffMap: Record<string, string> = {};
   data.staff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
-  // PRE-CALCULATE PER-DAY AVAILABILITY MATRIX
+  // --- PHASE 1: CAPACITY HEATMAP & STRATEGIC BRIEFING ---
+  const dailyDemand: Record<number, number> = {};
+  const dailyRosterSupply: Record<number, number> = {};
+  
+  for(let i=0; i<config.numDays; i++) {
+    const d = new Date(config.startDate);
+    d.setDate(d.getDate() + i);
+    const dStr = d.toISOString().split('T')[0];
+    
+    // Demand
+    dailyDemand[i] = data.shifts
+      .filter(s => s.pickupDate === dStr)
+      .reduce((acc, curr) => acc + curr.minStaff, 0);
+
+    // Roster Supply
+    dailyRosterSupply[i] = data.staff
+      .filter(s => {
+        if (s.type !== 'Roster') return false;
+        const outOfContract = s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate);
+        const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+        return !outOfContract && !onLeave;
+      }).length;
+  }
+
+  const lightDays = Object.entries(dailyDemand)
+    .sort(([,a], [,b]) => a - b)
+    .slice(0, 2)
+    .map(([day]) => day);
+
+  const operationalBriefing = `
+    WEEKLY STRATEGIC PLAN:
+    - Target: Exactly 5 work days for Local staff.
+    - Light Days (Low Demand): DayOffsets ${lightDays.join(', ')}. Force Local Off-Days here.
+    - Heavy Days: All other days. Prioritize full deployment.
+    - Specialist Priority: Assign Roster Specialists first. 
+    - LC+SL Optimization: If an agent has both LC and SL skills, assign them to LC. This automatically satisfies 1 SL requirement for that shift.
+  `;
+
+  // --- PHASE 2: STAFF CONTEXT ---
   const staffContext = data.staff.map(s => {
-    const skills = [s.isLoadControl?'LC':'', s.isShiftLeader?'SL':'', s.isOps?'OPS':'', s.isRamp?'RMP':'', s.isLostFound?'LF':''].filter(Boolean).join(',');
+    const skills = [
+      s.isLoadControl?'LC':'', 
+      s.isShiftLeader?'SL':'', 
+      s.isOps?'OPS':'', 
+      s.isRamp?'RMP':'', 
+      s.isLostFound?'LF':''
+    ].filter(Boolean).join(',');
+    
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
     
-    // Day-by-Day availability string for AI: 0101101 (1=Available, 0=Leave/Outside Contract)
     let dailyAvail = "";
     for(let i=0; i<config.numDays; i++) {
         const d = new Date(config.startDate);
@@ -107,13 +151,13 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         dailyAvail += (onLeave || outOfContract) ? "0" : "1";
     }
 
-    // Historical Rest Context
     const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
-    const restContext = lastDuty ? `[PREV_DUTY_END: ${lastDuty.date}T${lastDuty.shiftEndTime}]` : "";
+    const restContext = lastDuty ? `[REST_LOG: Ended ${lastDuty.date} at ${lastDuty.shiftEndTime}]` : "[REST_LOG: None]";
 
-    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}], MaxShifts: ${credits}, DailyMap: ${dailyAvail} ${restContext}`; 
+    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}], MaxShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
   }).join('\n');
 
+  // --- PHASE 3: SHIFT CONTEXT ---
   const shiftContext = [...data.shifts]
     .sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime))
     .map((s, idx) => {
@@ -127,24 +171,21 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   }
 
   const prompt = `
-    ROLE: Lead Aviation Scheduler
-    MISSION: Generate a GROUND HANDLING ROSTER that is 100% compliant with labor laws and station safety.
+    ROLE: Global Strategic Roster Architect
+    MISSION: Create a weekly program using a "Big Basket" approach.
     
-    CRITICAL ZERO-TOLERANCE RULES:
-    1. STICK TO THE DAILY MAP: If an Agent's DailyMap has a '0' at index N, DO NOT assign them on DayOffset N. 
-       0 means they are ON LEAVE or OUTSIDE CONTRACT. Assignment here is a SEVERE ERROR.
-    2. ONE SHIFT PER DAY: An agent CANNOT work two shifts on the same DayOffset. 
-    3. THE 5/2 FATIGUE RULE: Local staff MUST NOT exceed their "MaxShifts" limit (usually 5). If they hit the limit, they are BANNED from more shifts.
-    4. 12H REST MANDATE: If an agent finishes a shift at Time T1, their next shift start time must be at least T1 + 12 HOURS. 
-       - Take PREV_DUTY_END into account for DayOffset 0.
-    5. SKILL MATCHING: Only assign roles (SL, LC, OPS, RMP, LF) to agents who possess those skills.
-    
-    LOGIC:
-    - ROSTER staff (Contractors) are your primary force. Maximize their utilization first.
-    - LOCAL staff are backup. Do not overwork them.
-    - If a shift needs 1 Shift Leader (SL), you MUST assign an agent with 'SL' skill to that shift.
+    ${operationalBriefing}
 
-    OUTPUT: JSON Array of arrays [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
+    PHASED EXECUTION RULES:
+    1. EXHAUST ROSTER FIRST: Fill all specialist needs (LC, SL, OPS, RMP, LF) with Roster staff before using Locals.
+    2. LOCAL 5/2 BALANCING: Ensure Local staff work exactly their MaxShifts. Use Light Days (DayOffsets ${lightDays.join(',')}) as their primary OFF days.
+    3. LC+SL SYNERGY: If an agent has both skills, one person can cover BOTH roles. If you assign them to LC, deduct 1 from the SL requirement for that shift.
+    4. REST MANDATE: Minimum ${config.minRestHours}h gap. Use REST_LOG for Day 0 calculations.
+    5. NO GO ZONES: DailyMap '0' means NO WORK allowed (Leave/Contract).
+
+    OUTPUT FORMAT: JSON Array of arrays [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
+    Note: "AssignedRole" must be one of: LC, SL, OPS, RMP, LF, or AGT (for general).
+
     DATA:
     Period: ${config.startDate} to ${programEndStr}
     STAFF:
@@ -156,7 +197,11 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: prompt,
-      config: { temperature: 0.1, responseMimeType: 'application/json' }
+      config: { 
+        temperature: 0.1, 
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 4000 } 
+      }
   });
 
   const parsed = safeParseJson(response.text);
@@ -185,7 +230,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   return {
     programs: finalPrograms,
     stationHealth: parsed ? 100 : 0,
-    alerts: parsed ? [] : [{ type: 'danger', message: 'Logic engine timeout. Check manpower supply.' }],
+    alerts: parsed ? [] : [{ type: 'danger', message: 'Strategic Engine timeout. Check logic constraints.' }],
     isCompliant: !!parsed
   };
 };
