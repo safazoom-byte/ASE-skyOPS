@@ -1,45 +1,35 @@
 
-import React, { useMemo, useState } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Assignment, Skill } from '../types';
-import { calculateCredits, repairProgramWithAI } from '../services/geminiService';
+import React, { useState } from 'react';
+import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Skill } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
-  Printer, 
-  Activity,
-  FileText,
-  Sparkles,
-  Loader2,
-  GripHorizontal,
-  Plus,
-  X,
+  FileDown, 
+  CalendarDays, 
+  Users, 
+  Plane, 
+  ShieldAlert, 
+  CheckCircle2, 
   AlertTriangle,
-  Check,
-  ShieldAlert,
-  Wrench
+  MapPin,
+  Printer,
+  Clock
 } from 'lucide-react';
-import { AVAILABLE_SKILLS } from '../constants';
+import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from '../constants';
 
 interface Props {
   programs: DailyProgram[];
   flights: Flight[];
   staff: Staff[];
   shifts: ShiftConfig[];
-  leaveRequests?: LeaveRequest[];
-  incomingDuties?: IncomingDuty[];
-  startDate?: string;
-  endDate?: string;
-  onUpdatePrograms?: (updatedPrograms: DailyProgram[]) => void;
-  stationHealth?: number;
-  alerts?: { type: 'danger' | 'warning', message: string }[];
-  minRestHours?: number;
-}
-
-interface RepairIssue {
-  id: string;
-  type: 'coverage' | 'rest' | 'role';
-  description: string;
-  severity: 'high' | 'medium';
+  leaveRequests: LeaveRequest[];
+  incomingDuties: IncomingDuty[];
+  startDate: string;
+  endDate: string;
+  stationHealth: number;
+  alerts: { type: 'danger' | 'warning', message: string }[];
+  minRestHours: number;
+  onUpdatePrograms: (p: DailyProgram[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({ 
@@ -47,374 +37,642 @@ export const ProgramDisplay: React.FC<Props> = ({
   flights, 
   staff, 
   shifts, 
-  leaveRequests = [], 
-  incomingDuties = [], 
+  leaveRequests, 
+  incomingDuties,
   startDate, 
-  endDate, 
-  onUpdatePrograms,
-  minRestHours = 12
+  endDate,
+  stationHealth,
+  minRestHours
 }) => {
-  const [attachAnalytics, setAttachAnalytics] = useState(true);
-  const [isRepairing, setIsRepairing] = useState(false);
-  const [draggedAssignment, setDraggedAssignment] = useState<{ id: string, day: number, shiftId: string } | null>(null);
-  
-  // Repair Dialog State
-  const [showRepairModal, setShowRepairModal] = useState(false);
-  const [detectedIssues, setDetectedIssues] = useState<RepairIssue[]>([]);
-  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set());
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  const filteredPrograms = useMemo(() => {
-    if (!Array.isArray(programs) || !startDate || !endDate) return [];
-    return [...programs]
-      .filter(p => p.dateString && p.dateString >= startDate && p.dateString <= endDate)
-      .sort((a, b) => (a.dateString || '').localeCompare(b.dateString || ''));
-  }, [programs, startDate, endDate]);
+  const getStaff = (id: string) => staff.find(s => s.id === id);
+  const getFlight = (id: string) => flights.find(f => f.id === id);
+  const getShift = (id: string) => shifts.find(s => s.id === id);
 
-  const getStaffById = (id: string) => staff.find(s => s.id === id);
-  const getFlightById = (id: string) => flights.find(f => f.id === id);
+  // --- HELPER: Calculate Rest Hours ---
+  const calculateRestHours = (staffId: string, currentShiftStart: Date): number | null => {
+    let lastEndTime: Date | null = null;
 
-  const stats = useMemo(() => {
-    if (!startDate || !endDate) return null;
-    const duration = filteredPrograms.length;
-    let totalSupply = 0;
-    let totalDemand = 0;
-    
-    staff.forEach(s => totalSupply += calculateCredits(s, startDate, duration, leaveRequests));
-    shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate).forEach(s => totalDemand += s.minStaff);
-    
-    return { totalSupply, totalDemand, balance: totalSupply - totalDemand, status: (totalSupply - totalDemand) >= 0 ? 'HEALTHY' : 'CRITICAL' };
-  }, [startDate, endDate, staff, shifts, leaveRequests, filteredPrograms]);
-
-  const runDiagnosis = () => {
-    const issues: RepairIssue[] = [];
-    filteredPrograms.forEach(p => {
-       const dayShifts = shifts.filter(s => s.pickupDate === p.dateString);
-       dayShifts.forEach(s => {
-          const assignedCount = p.assignments.filter(a => a.shiftId === s.id).length;
-          if (assignedCount < s.minStaff) {
-             issues.push({ id: `cov-${s.id}`, type: 'coverage', description: `${p.dateString} - Shift ${s.pickupTime}: Understaffed (${assignedCount}/${s.minStaff})`, severity: 'high' });
-          }
-       });
+    // 1. Check Incoming Duties (Log)
+    const staffIncoming = incomingDuties.filter(d => d.staffId === staffId);
+    staffIncoming.forEach(d => {
+        const dt = new Date(`${d.date}T${d.shiftEndTime}`);
+        if (dt < currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
+            lastEndTime = dt;
+        }
     });
 
-    staff.forEach(s => {
-       const staffAssignments = filteredPrograms.flatMap(p => 
-          p.assignments.filter(a => a.staffId === s.id).map(a => ({ ...a, date: p.dateString }))
-       );
-       staffAssignments.sort((a, b) => {
-          const shiftA = shifts.find(sh => sh.id === a.shiftId);
-          const shiftB = shifts.find(sh => sh.id === b.shiftId);
-          if (!shiftA || !shiftB) return 0;
-          return (shiftA.pickupDate + shiftA.pickupTime).localeCompare(shiftB.pickupDate + shiftB.pickupTime);
-       });
-       for (let i = 1; i < staffAssignments.length; i++) {
-          const prev = shifts.find(sh => sh.id === staffAssignments[i-1].shiftId);
-          const curr = shifts.find(sh => sh.id === staffAssignments[i].shiftId);
-          if (prev && curr) {
-             const prevEnd = new Date(`${prev.pickupDate}T${prev.endTime}`); 
-             if (prev.endTime < prev.pickupTime) prevEnd.setDate(prevEnd.getDate() + 1);
-             const currStart = new Date(`${curr.pickupDate}T${curr.pickupTime}`);
-             const diffHours = (currStart.getTime() - prevEnd.getTime()) / (1000 * 60 * 60);
-             if (diffHours < minRestHours) {
-                issues.push({ id: `rest-${s.id}-${curr.id}`, type: 'rest', description: `${s.initials} - Rest Violation on ${curr.pickupDate} (Only ${diffHours.toFixed(1)}h)`, severity: 'high' });
-             }
-          }
-       }
+    // 2. Check Previous Program Assignments
+    programs.forEach(p => {
+        p.assignments.filter(a => a.staffId === staffId).forEach(a => {
+            const s = getShift(a.shiftId || '');
+            if (s) {
+               const pDate = new Date(p.dateString || startDate);
+               const [sh, sm] = s.endTime.split(':').map(Number);
+               const [ph, pm] = s.pickupTime.split(':').map(Number);
+               
+               const endDt = new Date(pDate);
+               endDt.setHours(sh, sm, 0, 0);
+               // Handle overnight
+               if (sh < ph) endDt.setDate(endDt.getDate() + 1);
+
+               if (endDt < currentShiftStart && (!lastEndTime || endDt > lastEndTime)) {
+                   lastEndTime = endDt;
+               }
+            }
+        });
     });
-    setDetectedIssues(issues);
-    setSelectedIssueIds(new Set(issues.map(i => i.id)));
-    setShowRepairModal(true);
+
+    if (!lastEndTime) return null;
+    const diffMs = currentShiftStart.getTime() - (lastEndTime as Date).getTime();
+    return parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
   };
 
-  const confirmRepair = async () => {
-    if (!onUpdatePrograms) return;
-    setIsRepairing(true);
-    setShowRepairModal(false);
-    try {
-      const activeIssues = detectedIssues.filter(i => selectedIssueIds.has(i.id));
-      const issueReport = activeIssues.map(i => i.description).join('; ');
-      const dataObj = { flights, staff, shifts, programs, leaveRequests, incomingDuties };
-      const result = await repairProgramWithAI(programs, `Fix these specific issues: ${issueReport}`, dataObj, { minRestHours });
-      if (result && result.programs) onUpdatePrograms(result.programs);
-    } catch (e: any) { alert("AI Repair Failed: " + e.message); } finally { setIsRepairing(false); }
-  };
+  const generateFullReport = () => {
+    setIsGeneratingPdf(true);
+    const doc = new jsPDF('l', 'mm', 'a4');
+    
+    // --- 1. DAILY PROGRAM PAGES ---
+    programs.forEach((prog, index) => {
+      if (index > 0) doc.addPage();
+      
+      const currentDate = new Date(prog.dateString || startDate);
+      const dateStr = `${DAYS_OF_WEEK_FULL[currentDate.getDay()].toUpperCase()} - ${currentDate.getDate()}/${currentDate.getMonth()+1}/${currentDate.getFullYear()}`;
 
-  const toggleIssue = (id: string) => {
-    const next = new Set(selectedIssueIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIssueIds(next);
-  };
-
-  const handleDrop = (targetShiftId: string, targetDay: number) => {
-    if (!draggedAssignment || !onUpdatePrograms) return;
-    if (draggedAssignment.day !== targetDay) return; 
-    const newPrograms = [...programs];
-    const dayProg = newPrograms.find(p => p.day === targetDay);
-    if (dayProg) {
-      const assignment = dayProg.assignments.find(a => a.id === draggedAssignment.id);
-      if (assignment) {
-        assignment.shiftId = targetShiftId;
-        onUpdatePrograms(newPrograms);
-      }
-    }
-    setDraggedAssignment(null);
-  };
-
-  const handleManualAdd = (day: number, shiftId: string) => {
-    if (!onUpdatePrograms) return;
-    const initials = prompt("Enter Staff Initials to Assign:");
-    if (!initials) return;
-    const matchedStaff = staff.find(s => s.initials.toUpperCase() === initials.toUpperCase());
-    if (!matchedStaff) { alert("Staff not found!"); return; }
-    const newPrograms = [...programs];
-    const dayProg = newPrograms.find(p => p.day === day);
-    if (dayProg) {
-      dayProg.assignments.push({ id: Math.random().toString(36).substr(2, 9), staffId: matchedStaff.id, shiftId: shiftId, role: 'AGT', flightId: '' });
-      onUpdatePrograms(newPrograms);
-    }
-  };
-
-  const handleManualRemove = (day: number, assignmentId: string) => {
-    if (!onUpdatePrograms) return;
-    if (!confirm("Remove this assignment?")) return;
-    const newPrograms = [...programs];
-    const dayProg = newPrograms.find(p => p.day === day);
-    if (dayProg) {
-      dayProg.assignments = dayProg.assignments.filter(a => a.id !== assignmentId);
-      onUpdatePrograms(newPrograms);
-    }
-  };
-
-  const isRoleMatch = (roleStr: string, targetSkill: string) => {
-    const r = (roleStr || '').toLowerCase();
-    const t = targetSkill.toLowerCase();
-    if (t === 'operations' || t === 'ops') return r.includes('op') || r.includes('ops');
-    if (t === 'shift leader' || t === 'sl') return r.includes('leader') || r.includes('sl');
-    if (t === 'load control' || t === 'lc') return r.includes('load') || r.includes('lc');
-    if (t === 'ramp' || t === 'rmp') return r.includes('ramp') || r.includes('rmp');
-    if (t === 'lost and found' || t === 'lf') return r.includes('lost') || r.includes('lf');
-    return r.includes(t);
-  };
-
-  const getSkillCodeShort = (role: string) => {
-    const r = (role || '').toLowerCase();
-    if (r.includes('leader') || r.includes('sl')) return 'SL';
-    if (r.includes('load') || r.includes('lc')) return 'LC';
-    if (r.includes('ramp') || r.includes('rmp')) return 'RMP';
-    if (r.includes('op')) return 'OPS'; 
-    if (r.includes('lost') || r.includes('lf')) return 'LF';
-    return '';
-  };
-
-  const getShiftDuration = (shift?: ShiftConfig) => {
-    if (!shift) return "0.0";
-    const [h1, m1] = shift.pickupTime.split(':').map(Number);
-    const [h2, m2] = shift.endTime.split(':').map(Number);
-    let start = h1 * 60 + (m1 || 0);
-    let end = h2 * 60 + (m2 || 0);
-    if (end < start) end += 1440;
-    return ((end - start) / 60).toFixed(1);
-  };
-
-  const generatePDF = () => {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const drawPageHeader = (title: string, showStats: boolean = false) => {
+      // Header
+      doc.setFillColor(255, 255, 255);
       doc.setTextColor(0, 0, 0);
-      doc.setFontSize(24);
+      doc.setFontSize(22);
       doc.setFont('helvetica', 'bold');
-      doc.text("SkyOPS Station Handling Program", 14, 20);
+      doc.text("SkyOPS Station Handling Program", 14, 15);
+      
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 28);
-      if (showStats && stats) {
-        const boxWidth = 80;
-        const boxX = pageWidth - boxWidth - 14;
-        doc.setDrawColor(200, 200, 200);
-        doc.setFillColor(245, 245, 245);
-        doc.rect(boxX, 10, boxWidth, 25, 'FD'); 
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.text("MANPOWER CAPACITY FORECAST", boxX + 5, 16);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Total Supply: ${stats.totalSupply} Shifts`, boxX + 5, 22);
-        doc.text(`Total Demand: ${stats.totalDemand} Shifts (Min)`, boxX + 5, 27);
-        doc.setFont('helvetica', 'bold');
-        if (stats.balance >= 0) doc.setTextColor(16, 185, 129); else doc.setTextColor(225, 29, 72); 
-        doc.text(`Net Balance: ${stats.balance > 0 ? '+' : ''}${stats.balance}`, boxX + 5, 32);
-        doc.text(`Status: ${stats.status}`, boxX + 40, 32);
-        doc.setTextColor(0, 0, 0);
+      doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 22);
+
+      // Manpower Forecast Box
+      doc.setDrawColor(200, 200, 200);
+      doc.setFillColor(245, 245, 245);
+      doc.rect(190, 5, 95, 25, 'F');
+      doc.rect(190, 5, 95, 25, 'S'); // Border
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text("MANPOWER CAPACITY FORECAST", 195, 10);
+      
+      // Calculate daily capacity
+      const shiftsToday = shifts.filter(s => s.pickupDate === prog.dateString);
+      const minDemand = shiftsToday.reduce((sum, s) => sum + (s.minStaff || 0), 0);
+      const assignedCount = prog.assignments.length;
+      
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Total Supply: ${staff.length} Active Staff`, 195, 16);
+      doc.text(`Total Demand: ${minDemand} Shifts (Min)`, 195, 21);
+      
+      const balance = assignedCount - minDemand;
+      doc.setFont('helvetica', 'bold');
+      if (balance >= 0) doc.setTextColor(0, 150, 0); else doc.setTextColor(200, 0, 0);
+      doc.text(`Net Balance: ${balance > 0 ? '+' : ''}${balance}`, 195, 26);
+      doc.text(`Status: ${balance >= 0 ? 'HEALTHY' : 'CRITICAL'}`, 245, 26);
+
+      let contentStartY = 35;
+
+      // --- REST LOG TABLE (Inserted on First Page) ---
+      if (index === 0 && incomingDuties.length > 0) {
+          const groupedMap = new Map<string, string[]>(); // key: "date|time", value: [initials]
+          
+          incomingDuties.forEach(d => {
+              const key = `${d.date}|${d.shiftEndTime}`;
+              const st = getStaff(d.staffId);
+              if (st) {
+                  const existing = groupedMap.get(key) || [];
+                  existing.push(st.initials);
+                  groupedMap.set(key, existing);
+              }
+          });
+
+          const sortedKeys = Array.from(groupedMap.keys()).sort();
+
+          const restRows = sortedKeys.map((key, i) => {
+              const [dDate, dTime] = key.split('|');
+              const endDt = new Date(`${dDate}T${dTime}`);
+              const releaseDt = new Date(endDt.getTime() + minRestHours * 60 * 60 * 1000);
+              
+              const isPrevDay = new Date(dDate) < new Date(startDate);
+              const dateLabel = isPrevDay ? "Prev Day" : `${endDt.getDate()}/${endDt.getMonth()+1}`;
+              
+              const releaseDateLabel = releaseDt.getDate() !== endDt.getDate() 
+                  ? (releaseDt.getDate() === new Date(startDate).getDate() ? "Day 1" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
+                  : ""; 
+
+              const initials = groupedMap.get(key)?.join(' - ');
+              const hc = groupedMap.get(key)?.length || 0;
+
+              return [
+                  (i + 1).toString(),
+                  `${dTime} (${dateLabel})`,
+                  `${releaseDt.getHours().toString().padStart(2,'0')}:${releaseDt.getMinutes().toString().padStart(2,'0')} ${releaseDateLabel}`,
+                  hc.toString(),
+                  initials
+              ];
+          });
+
+          if (restRows.length > 0) {
+              autoTable(doc, {
+                  startY: contentStartY,
+                  head: [['S/N', 'SHIFT END', 'RELEASE', 'HC', 'PERSONNEL (REST LOG)']],
+                  body: restRows,
+                  theme: 'grid',
+                  headStyles: { 
+                      fillColor: [255, 204, 0], // Yellow Header
+                      textColor: [0, 0, 0],
+                      fontStyle: 'bold',
+                      fontSize: 8,
+                      lineWidth: 0.1,
+                      lineColor: [0, 0, 0]
+                  },
+                  styles: { 
+                      fontSize: 8, 
+                      cellPadding: 1.5,
+                      textColor: [0, 0, 0],
+                      lineColor: [0, 0, 0],
+                      lineWidth: 0.1,
+                      fillColor: [255, 255, 235], // Very Light Yellow Body
+                      valign: 'middle'
+                  },
+                  columnStyles: {
+                      0: { cellWidth: 10, halign: 'center' },
+                      1: { cellWidth: 35 },
+                      2: { cellWidth: 35 },
+                      3: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
+                      4: { cellWidth: 'auto' }
+                  },
+                  margin: { left: 14, right: 14 }
+              });
+              contentStartY = (doc as any).lastAutoTable.finalY + 10;
+          }
       }
+
+      doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text(title.toUpperCase(), 14, 45);
-    };
+      doc.text(dateStr, 14, contentStartY);
 
-    filteredPrograms.forEach((p, idx) => {
-      if (idx > 0) doc.addPage();
-      const dateObj = new Date(p.dateString!);
-      const dayName = dateObj.toLocaleDateString('en-GB', { weekday: 'long' }).toUpperCase();
-      const formattedDate = `${dayName} - ${dateObj.getDate()}/${dateObj.getMonth() + 1}/${dateObj.getFullYear()}`;
-      drawPageHeader(formattedDate, idx === 0);
-      const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
-      const body = dayShifts.map((s, si) => {
-        const assigned = p.assignments.filter(a => a.shiftId === s.id);
-        const flts = (s.flightIds || []).map(fid => getFlightById(fid)?.flightNumber).filter(Boolean).join(', ') || 'NIL';
-        const prs = assigned.map(a => {
-            const st = getStaffById(a.staffId);
-            const roleCode = getSkillCodeShort(a.role);
-            const duration = getShiftDuration(s);
-            const rolePart = roleCode ? ` (${roleCode})` : '';
-            return `${st?.initials}${rolePart}`;
+      // Main Table Data
+      const tableData = shiftsToday.map((shift, idx) => {
+        const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
+        
+        // Build Flight String (Just Number)
+        const flightStrs = (shift.flightIds || []).map(fid => {
+           const f = getFlight(fid);
+           return f ? f.flightNumber : '';
+        }).filter(Boolean).join(' / ') || 'NIL';
+
+        // Build Personnel String
+        const personnelStrs = assignments.map(a => {
+           const st = getStaff(a.staffId);
+           if (!st) return '';
+           
+           // Calculate Rest
+           const [ph, pm] = shift.pickupTime.split(':').map(Number);
+           const shiftStart = new Date(currentDate);
+           shiftStart.setHours(ph, pm, 0, 0);
+           
+           const rest = calculateRestHours(st.id, shiftStart);
+           const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
+           
+           return `${st.initials} (${a.role})${restStr}`;
         }).join(' | ');
-        return [si + 1, s.pickupTime, s.endTime, flts, `${assigned.length} / ${s.maxStaff}`, prs];
+
+        return [
+           (idx + 1).toString(),
+           shift.pickupTime,
+           shift.endTime,
+           flightStrs,
+           `${assignments.length} / ${shift.maxStaff}`,
+           personnelStrs
+        ];
       });
+
       autoTable(doc, {
-        startY: 52,
-        head: [['S/N', 'PICKUP', 'RELEAS\nE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
-        body,
+        startY: contentStartY + 5,
+        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
+        body: tableData,
         theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontSize: 9, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 8, cellPadding: 3, textColor: [40, 40, 40], valign: 'middle' },
-        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 18 }, 2: { cellWidth: 18 }, 3: { cellWidth: 30 }, 4: { cellWidth: 18 } }
+        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
+        columnStyles: {
+            0: { cellWidth: 10, halign: 'center' },
+            1: { cellWidth: 20 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 25 },
+            4: { cellWidth: 20, halign: 'center' },
+            5: { cellWidth: 'auto' }
+        }
+      });
+
+      // Absence Registry
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      // Only check if we have space, else add page
+      if (finalY > 180) {
+          doc.addPage();
+          // Reset headers on new page? Or just continue.
+      }
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text("ABSENCE AND REST REGISTRY", 14, finalY);
+
+      // Categorize Staff
+      const workingIds = new Set(prog.assignments.map(a => a.staffId));
+      const offStaff = staff.filter(s => !workingIds.has(s.id));
+
+      const categories: Record<string, string[]> = {
+         'DAYS OFF': [],
+         'ROSTER LEAVE': [],
+         'ANNUAL LEAVE': [],
+         'STANDBY (RESERVE)': []
+      };
+
+      offStaff.forEach(s => {
+         // Check explicit leave
+         const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
+         
+         // Counter Logic (Consecutive days up to today)
+         // Simple simulation: count occurrences in previous programs + today
+         let count = 1; 
+         for (let i = index - 1; i >= 0; i--) {
+             const prevProg = programs[i];
+             const worked = prevProg.assignments.some(a => a.staffId === s.id);
+             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
+             
+             // If status matches, increment
+             if (!worked) {
+                if (leave && prevLeave && prevLeave.type === leave.type) count++;
+                else if (!leave && !prevLeave) count++; // Consecutive Days Off
+                else break; 
+             } else {
+                 break;
+             }
+         }
+         
+         const label = `${s.initials} (${count})`;
+
+         if (leave) {
+            if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(label);
+            else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(label);
+            else if (leave.type === 'Day off') categories['DAYS OFF'].push(label);
+            else categories['DAYS OFF'].push(label);
+         } else {
+            // Logic for Resting vs Days Off vs Standby
+            // If they worked yesterday late? 
+            const yesterdayProg = programs[index - 1];
+            let workedYesterday = false;
+            if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
+            
+            if (workedYesterday) {
+                // Do not display in this list as they are in the Rest Log table if applicable, 
+                // or just resting normally. User asked to remove from this PDF table.
+            }
+            else if (s.type === 'Local') categories['DAYS OFF'].push(label);
+            else categories['STANDBY (RESERVE)'].push(label);
+         }
+      });
+
+      const registryData = [
+         ['DAYS OFF', categories['DAYS OFF'].join(', ')],
+         ['ROSTER LEAVE', categories['ROSTER LEAVE'].join(', ')],
+         ['ANNUAL LEAVE', categories['ANNUAL LEAVE'].join(', ')],
+         ['STANDBY (RESERVE)', categories['STANDBY (RESERVE)'].join(', ')]
+      ];
+
+      autoTable(doc, {
+        startY: finalY + 2,
+        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
+        body: registryData,
+        theme: 'grid',
+        headStyles: { fillColor: [50, 50, 60], textColor: [255, 255, 255] },
+        styles: { fontSize: 8, cellPadding: 2 },
+        columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' } }
       });
     });
-    doc.save(`SkyOPS_Station_Handling_Program_${startDate}.pdf`);
-  };
 
-  const getFormatDate = (dateStr?: string) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' }).toUpperCase().replace(',', ' -');
+    // --- 2. WEEKLY AUDIT (LOCAL) ---
+    doc.addPage();
+    doc.setFontSize(16);
+    doc.text("Weekly Personnel Utilization Audit (Local)", 14, 15);
+    
+    const localStaff = staff.filter(s => s.type === 'Local');
+    const localAuditData = localStaff.map((s, idx) => {
+        const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+        const daysOff = programs.length - shiftsWorked; // Assuming program length is the period
+        
+        // Standard: 5 On / 2 Off for 7 days
+        const targetShifts = 5; 
+        const targetOff = 2;
+        
+        // Simple heuristic for 7 day program
+        const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
+        
+        return [
+            (idx + 1).toString(),
+            s.name,
+            s.initials,
+            shiftsWorked.toString(),
+            daysOff.toString(),
+            isMatch ? 'MATCH' : 'CHECK'
+        ];
+    });
+
+    autoTable(doc, {
+        startY: 20,
+        head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']],
+        body: localAuditData,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 0, 0] },
+        styles: { fontSize: 9, halign: 'center' },
+        columnStyles: { 1: { halign: 'left' } },
+        didParseCell: (data) => {
+            if (data.section === 'body') {
+                const status = data.row.raw[5];
+                if (status === 'MATCH') {
+                    data.cell.styles.fillColor = [22, 163, 74]; // Green
+                    data.cell.styles.textColor = [255, 255, 255];
+                } else if (status === 'CHECK') {
+                    data.cell.styles.fillColor = [220, 38, 38]; // Red
+                    data.cell.styles.textColor = [255, 255, 255];
+                }
+            }
+        }
+    });
+
+    // --- 3. WEEKLY AUDIT (ROSTER) ---
+    doc.addPage();
+    doc.setFontSize(16);
+    doc.setTextColor(0,0,0);
+    doc.text("Weekly Personnel Utilization Audit (Roster)", 14, 15);
+
+    const rosterStaff = staff.filter(s => s.type === 'Roster');
+    const rosterAuditData = rosterStaff.map((s, idx) => {
+        const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+        
+        // Calculate Potential (Days overlapping with program)
+        const progStart = new Date(startDate);
+        const progEnd = new Date(endDate);
+        const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+        const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+        
+        const overlapStart = workFrom > progStart ? workFrom : progStart;
+        const overlapEnd = workTo < progEnd ? workTo : progEnd;
+        
+        let potential = 0;
+        if (overlapStart <= overlapEnd) {
+             potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        }
+
+        const isMatch = shiftsWorked === potential;
+
+        return [
+            (idx + 1).toString(),
+            s.name,
+            s.initials,
+            s.workFromDate || 'N/A',
+            s.workToDate || 'N/A',
+            potential.toString(),
+            shiftsWorked.toString(),
+            isMatch ? 'MATCH' : 'CHECK'
+        ];
+    });
+
+    autoTable(doc, {
+        startY: 20,
+        head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']],
+        body: rosterAuditData,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 0, 0] },
+        styles: { fontSize: 9, halign: 'center' },
+        columnStyles: { 1: { halign: 'left' } },
+        didParseCell: (data) => {
+            if (data.section === 'body') {
+                const status = data.row.raw[7];
+                if (status === 'MATCH') {
+                    data.cell.styles.fillColor = [22, 163, 74];
+                    data.cell.styles.textColor = [255, 255, 255];
+                } else if (status === 'CHECK') {
+                    data.cell.styles.fillColor = [220, 38, 38];
+                    data.cell.styles.textColor = [255, 255, 255];
+                }
+            }
+        }
+    });
+
+    // --- 4. OPERATIONS MATRIX VIEW ---
+    doc.addPage();
+    doc.setFontSize(16);
+    doc.setTextColor(0,0,0);
+    doc.text("Weekly Operations Matrix View", 14, 15);
+
+    // Headers: S/N, AGENT, Date1, Date2... AUDIT
+    const dateHeaders = programs.map(p => {
+        const d = new Date(p.dateString || startDate);
+        return `${d.getDate()}/${d.getMonth()+1}`;
+    });
+    
+    const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
+    const matrixBody = staff.map((s, idx) => {
+        const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
+        
+        let workedCount = 0;
+        
+        programs.forEach(p => {
+            const assign = p.assignments.find(a => a.staffId === s.id);
+            if (assign) {
+                workedCount++;
+                const shift = getShift(assign.shiftId || '');
+                if (shift) {
+                    const pDate = new Date(p.dateString!);
+                    const [ph, pm] = shift.pickupTime.split(':').map(Number);
+                    const shiftStart = new Date(pDate);
+                    shiftStart.setHours(ph, pm, 0, 0);
+                    
+                    const rest = calculateRestHours(s.id, shiftStart);
+                    const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : '';
+                    
+                    row.push(`${shift.pickupTime} ${restLabel}`);
+                } else {
+                    row.push('ERR');
+                }
+            } else {
+                row.push('-');
+            }
+        });
+        
+        row.push(`${workedCount}/${programs.length}`);
+        return row;
+    });
+
+    autoTable(doc, {
+        startY: 20,
+        head: matrixHead,
+        body: matrixBody,
+        theme: 'grid',
+        headStyles: { fillColor: [220, 100, 0] }, // Orange header
+        styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 },
+        columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } },
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index > 1 && data.column.index < dateHeaders.length + 2) {
+                const text = data.cell.raw as string;
+                if (text && text.includes('[')) {
+                    // Extract rest hours
+                    const match = text.match(/\[([\d.]+)H\]/);
+                    if (match) {
+                        const rest = parseFloat(match[1]);
+                        if (rest < minRestHours) {
+                            data.cell.styles.fillColor = [220, 38, 38]; // Red background for violation
+                            data.cell.styles.textColor = [255, 255, 255];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // --- 5. SPECIALIST ROLE FULFILLMENT MATRIX ---
+    doc.addPage();
+    doc.setFontSize(16);
+    doc.setTextColor(0,0,0);
+    doc.text("Specialist Role Fulfillment Matrix", 14, 15);
+
+    const roleMatrixData: any[] = [];
+    
+    programs.forEach(p => {
+        const d = new Date(p.dateString || startDate);
+        const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+        const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
+        
+        shiftsToday.forEach(s => {
+            const assignments = p.assignments.filter(a => a.shiftId === s.id);
+            
+            // Map codes to full names or just use codes? Screenshot implies codes or groupings
+            // Let's use standard codes mapping
+            const sl = assignments.filter(a => ['SL', 'Shift Leader'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            const lc = assignments.filter(a => ['LC', 'Load Control'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            const rmp = assignments.filter(a => ['RMP', 'Ramp'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            const ops = assignments.filter(a => ['OPS', 'Operations'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            const lf = assignments.filter(a => ['LF', 'Lost and Found'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            
+            roleMatrixData.push([
+                dateLabel,
+                `${s.pickupTime}-${s.endTime}`,
+                sl,
+                lc,
+                rmp,
+                ops,
+                lf
+            ]);
+        });
+    });
+
+    autoTable(doc, {
+        startY: 20,
+        head: [['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF']],
+        body: roleMatrixData,
+        theme: 'grid',
+        headStyles: { fillColor: [0, 0, 0] },
+        styles: { fontSize: 8, halign: 'center', valign: 'middle' },
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index > 1) {
+                const content = data.cell.raw as string;
+                if (content && content.length > 0) {
+                    data.cell.styles.fillColor = [22, 163, 74]; // Green (Filled)
+                    data.cell.styles.textColor = [255, 255, 255];
+                }
+            }
+        }
+    });
+
+    doc.save(`SkyOPS_Full_Report_${startDate}.pdf`);
+    setIsGeneratingPdf(false);
   };
 
   return (
-    <div className="space-y-8 pb-32 animate-in fade-in duration-500 relative">
-      <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div>
-           <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter">Operational Program</h2>
-           <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2 flex items-center gap-2">
-             <Activity size={14} className="text-blue-500" /> Professional Handling Roster
-           </p>
-           <div className="flex items-center gap-4 mt-4">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                  <input type="checkbox" className="w-5 h-5 rounded border-slate-200" checked={attachAnalytics} onChange={e => setAttachAnalytics(e.target.checked)} />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 group-hover:text-slate-900">With Audit</span>
-              </label>
-           </div>
-        </div>
-        <div className="flex gap-3">
-           <button onClick={runDiagnosis} disabled={isRepairing} className="px-8 py-5 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50">
-              {isRepairing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-              {isRepairing ? 'Fixing...' : 'AI Repair'}
-           </button>
-           <button onClick={generatePDF} className="px-10 py-5 bg-slate-950 text-white rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl hover:bg-blue-600 transition-all active:scale-95">
-              <Printer size={18} /> Download PDF
-           </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-8 md:p-12 space-y-12">
-            {filteredPrograms.map((p) => {
-              const dayShifts = shifts.filter(s => s.pickupDate === p.dateString).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
-              return (
-                <div key={p.dateString} className="space-y-6">
-                  <h3 className="text-2xl font-black italic text-slate-900 uppercase tracking-tight flex items-center gap-3">
-                     <FileText className="text-blue-600" /> {getFormatDate(p.dateString)}
-                  </h3>
-                  <div className="overflow-x-auto border border-slate-100 rounded-2xl">
-                    <table className="w-full text-left border-collapse">
-                       <thead className="bg-black text-white text-[10px] font-black uppercase tracking-widest">
-                         <tr>
-                           <th className="p-4">S/N</th>
-                           <th className="p-4">PICKUP</th>
-                           <th className="p-4">RELEASE</th>
-                           <th className="p-4">FLIGHTS</th>
-                           <th className="p-4">HC / MAX</th>
-                           <th className="p-4">PERSONNEL & ROLES</th>
-                         </tr>
-                       </thead>
-                       <tbody className="divide-y divide-slate-100 text-[11px]">
-                          {dayShifts.map((s, si) => {
-                            const assigned = p.assignments.filter(a => a.shiftId === s.id);
-                            return (
-                              <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-4 font-bold text-slate-400">{si + 1}</td>
-                                <td className="p-4 font-black text-slate-900">{s.pickupTime}</td>
-                                <td className="p-4 font-black text-slate-900">{s.endTime}</td>
-                                <td className="p-4">
-                                  <div className="flex flex-wrap gap-1">
-                                    {(s.flightIds || []).map(fid => (
-                                      <span key={fid} className="px-1.5 py-0.5 bg-slate-100 rounded text-[9px] font-black uppercase">{getFlightById(fid)?.flightNumber}</span>
-                                    )) || 'NIL'}
-                                  </div>
-                                </td>
-                                <td className="p-4 font-black text-slate-600">{assigned.length} / {s.maxStaff}</td>
-                                <td className={`p-4 transition-all ${draggedAssignment?.day === p.day && draggedAssignment.shiftId !== s.id ? 'bg-blue-50 ring-2 ring-blue-200 ring-inset' : ''}`} onDragOver={(e) => e.preventDefault()} onDrop={() => handleDrop(s.id, p.day)}>
-                                   <div className="flex flex-wrap gap-2 text-[10px] items-center">
-                                      {assigned.map(a => {
-                                        const roleCode = getSkillCodeShort(a.role);
-                                        return (
-                                          <div key={a.id} draggable onDragStart={() => setDraggedAssignment({ id: a.id, day: p.day, shiftId: s.id })} onDragEnd={() => setDraggedAssignment(null)} className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing group">
-                                             <GripHorizontal size={12} className="text-slate-300" />
-                                             <span className="text-slate-900 font-bold">
-                                                {getStaffById(a.staffId)?.initials}
-                                                {roleCode && <span className="text-blue-600 ml-1 font-black">({roleCode})</span>}
-                                             </span>
-                                             <button onClick={(e) => { e.stopPropagation(); handleManualRemove(p.day, a.id); }} className="p-1 rounded-full hover:bg-rose-100 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><X size={10} /></button>
-                                          </div>
-                                        );
-                                      })}
-                                      <button onClick={() => handleManualAdd(p.day, s.id)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-300 hover:text-blue-500 hover:border-blue-500 transition-all"><Plus size={14} /></button>
-                                   </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                       </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })}
-        </div>
-      </div>
-
-      {showRepairModal && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[85vh]">
-             <div className="bg-indigo-600 p-8 flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-4">
-                   <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-lg"><Wrench size={24} className="text-indigo-600" /></div>
-                   <div>
-                     <h3 className="text-xl font-black italic text-white uppercase tracking-tighter leading-none">Diagnostic Repair</h3>
-                     <p className="text-[10px] font-black text-indigo-100 uppercase tracking-widest mt-1">Review & Fix Violations</p>
-                   </div>
-                </div>
-                <button onClick={() => setShowRepairModal(false)} className="text-indigo-100 hover:text-white transition-colors bg-white/10 p-2 rounded-full"><X size={20}/></button>
-             </div>
-             <div className="flex-1 overflow-y-auto p-8 space-y-4">
-                {detectedIssues.length === 0 ? (
-                  <div className="text-center py-12 space-y-4">
-                     <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto text-emerald-500"><Check size={32} /></div>
-                     <h4 className="text-lg font-black text-slate-900">No Critical Issues Detected</h4>
-                  </div>
-                ) : (
-                  detectedIssues.map(issue => (
-                     <div key={issue.id} className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-start gap-4 ${selectedIssueIds.has(issue.id) ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-slate-300'}`} onClick={() => toggleIssue(issue.id)}>
-                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${selectedIssueIds.has(issue.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}><Check size={14} strokeWidth={4} /></div>
-                        <div className="flex-1"><p className="text-sm font-bold text-slate-900">{issue.description}</p></div>
-                     </div>
-                  ))
-                )}
-             </div>
-             <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0">
-                <button onClick={confirmRepair} disabled={selectedIssueIds.size === 0} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest shadow-xl hover:bg-indigo-500 transition-all disabled:opacity-50 flex items-center justify-center gap-3"><Sparkles size={18} /> Auto-Fix Selected ({selectedIssueIds.size})</button>
-             </div>
+    <div className="space-y-6 md:space-y-12 pb-24 animate-in fade-in duration-500">
+      <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8 overflow-hidden relative">
+        <div className="flex items-center gap-4 md:gap-6 relative z-10 flex-col md:flex-row text-center md:text-left">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <CalendarDays size={24} className="md:w-8 md:h-8" />
+          </div>
+          <div>
+            <h3 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter text-white leading-none">Master Roster</h3>
+            <p className="text-slate-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] mt-2">
+              Program View & Export
+            </p>
           </div>
         </div>
-      )}
+        <div className="flex gap-4 relative z-10">
+          <button 
+             onClick={generateFullReport} 
+             disabled={isGeneratingPdf}
+             className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95"
+          >
+             {isGeneratingPdf ? <Printer size={18} className="animate-spin"/> : <FileDown size={18} />}
+             <span>Export PDF Report</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 min-h-[500px]">
+         {programs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300 gap-4">
+               <AlertTriangle size={48} />
+               <span className="text-xl font-black uppercase italic">No Program Generated Yet</span>
+            </div>
+         ) : (
+            <div className="space-y-12">
+               {programs.map((prog, i) => (
+                  <div key={i} className="space-y-6">
+                     <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
+                        <div className="w-10 h-10 bg-slate-950 text-white rounded-xl flex items-center justify-center font-black italic">
+                           {i + 1}
+                        </div>
+                        <h4 className="text-xl font-black italic uppercase text-slate-900">{prog.dateString}</h4>
+                     </div>
+                     
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {prog.assignments.map(a => {
+                           const s = getStaff(a.staffId);
+                           const sh = getShift(a.shiftId || '');
+                           const f = sh?.flightIds?.[0] ? getFlight(sh.flightIds[0]) : null;
+                           if (!s || !sh) return null;
+                           
+                           return (
+                              <div key={a.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
+                                 <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                       <span className="text-xs font-black uppercase text-slate-900">{s.initials}</span>
+                                       <span className="px-1.5 py-0.5 bg-slate-200 rounded text-[9px] font-bold uppercase">{a.role}</span>
+                                    </div>
+                                    <div className="text-[10px] font-bold text-slate-500 flex items-center gap-2">
+                                       <Clock size={10} /> {sh.pickupTime} - {sh.endTime}
+                                    </div>
+                                 </div>
+                                 {f && (
+                                    <div className="text-right">
+                                       <span className="block text-xs font-black italic text-blue-600">{f.flightNumber}</span>
+                                       <span className="text-[9px] font-bold text-slate-400">{f.from}-{f.to}</span>
+                                    </div>
+                                 )}
+                              </div>
+                           );
+                        })}
+                     </div>
+                  </div>
+               ))}
+            </div>
+         )}
+      </div>
     </div>
   );
 };

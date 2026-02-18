@@ -93,43 +93,35 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   // --- PHASE 1: CAPACITY HEATMAP & STRATEGIC BRIEFING ---
   const dailyDemand: Record<number, number> = {};
-  const dailyRosterSupply: Record<number, number> = {};
   
   for(let i=0; i<config.numDays; i++) {
     const d = new Date(config.startDate);
     d.setDate(d.getDate() + i);
     const dStr = d.toISOString().split('T')[0];
     
-    // Demand
+    // Demand: Sum of minStaff for all shifts this day
     dailyDemand[i] = data.shifts
       .filter(s => s.pickupDate === dStr)
       .reduce((acc, curr) => acc + curr.minStaff, 0);
-
-    // Roster Supply
-    dailyRosterSupply[i] = data.staff
-      .filter(s => {
-        if (s.type !== 'Roster') return false;
-        const outOfContract = s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate);
-        const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        return !outOfContract && !onLeave;
-      }).length;
   }
 
+  // Calculate "Light Days" (Lowest Demand)
+  // We identify the bottom 2 days to enforce Local off-days if the period is ~1 week
   const lightDays = Object.entries(dailyDemand)
     .sort(([,a], [,b]) => a - b)
     .slice(0, 2)
-    .map(([day]) => day);
+    .map(([day]) => parseInt(day));
 
   const operationalBriefing = `
-    WEEKLY STRATEGIC PLAN:
-    - Target: Exactly 5 work days for Local staff.
-    - Light Days (Low Demand): DayOffsets ${lightDays.join(', ')}. Force Local Off-Days here.
+    WEEKLY STRATEGIC PLAN (GLOBAL SOLVER):
+    - Target: Exactly 5 work days for Local staff (5/2 Pattern).
+    - Light Days (Low Demand): DayOffsets ${lightDays.join(', ')}. Locals are PRE-ALLOCATED OFF on these days via DailyMap.
     - Heavy Days: All other days. Prioritize full deployment.
-    - Specialist Priority: Assign Roster Specialists first. 
-    - LC+SL Optimization: If an agent has both LC and SL skills, assign them to LC. This automatically satisfies 1 SL requirement for that shift.
+    - Specialist Priority: Assign Roster Specialists first to 'heavy' roles. 
+    - LC+SL Optimization: Staff marked [DUAL_LC_SL] are force multipliers. Assigning them to LC satisfies 1 SL requirement too.
   `;
 
-  // --- PHASE 2: STAFF CONTEXT ---
+  // --- PHASE 2: STAFF CONTEXT & AVAILABILITY MAPPING ---
   const staffContext = data.staff.map(s => {
     const skills = [
       s.isLoadControl?'LC':'', 
@@ -139,6 +131,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       s.isLostFound?'LF':''
     ].filter(Boolean).join(',');
     
+    // Check for Dual Role Super-Token
+    const isDualLCSL = s.isLoadControl && s.isShiftLeader;
+    const dualTag = isDualLCSL ? ' [DUAL_LC_SL]' : '';
+    
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
     
     let dailyAvail = "";
@@ -146,15 +142,31 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         const d = new Date(config.startDate);
         d.setDate(d.getDate() + i);
         const dStr = d.toISOString().split('T')[0];
+        
+        // 1. Check Leave
         const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+        
+        // 2. Check Contract (Roster)
         const outOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate);
-        dailyAvail += (onLeave || outOfContract) ? "0" : "1";
+        
+        // 3. Strategic Off-Day Enforcement (Local)
+        // If Local, and this is a "Light Day", force off to achieve 5/2 ratio
+        let forceOff = false;
+        if (s.type === 'Local' && !onLeave && config.numDays >= 5) {
+            if (lightDays.includes(i)) forceOff = true;
+        }
+
+        if (onLeave || outOfContract || forceOff) {
+            dailyAvail += "0";
+        } else {
+            dailyAvail += "1";
+        }
     }
 
     const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
     const restContext = lastDuty ? `[REST_LOG: Ended ${lastDuty.date} at ${lastDuty.shiftEndTime}]` : "[REST_LOG: None]";
 
-    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}], MaxShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
+    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}]${dualTag}, MaxShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
   }).join('\n');
 
   // --- PHASE 3: SHIFT CONTEXT ---
@@ -178,10 +190,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     PHASED EXECUTION RULES:
     1. EXHAUST ROSTER FIRST: Fill all specialist needs (LC, SL, OPS, RMP, LF) with Roster staff before using Locals.
-    2. LOCAL 5/2 BALANCING: Ensure Local staff work exactly their MaxShifts. Use Light Days (DayOffsets ${lightDays.join(',')}) as their primary OFF days.
-    3. LC+SL SYNERGY: If an agent has both skills, one person can cover BOTH roles. If you assign them to LC, deduct 1 from the SL requirement for that shift.
+    2. LOCAL 5/2 BALANCING: Ensure Local staff work exactly their MaxShifts. The DailyMap has strictly pre-calculated their OFF days (0). You MUST respect DailyMap.
+    3. LC+SL SYNERGY: If an agent has [DUAL_LC_SL], assigning them to 'LC' role counts as covering 1 'SL' requirement too. Optimize this!
     4. REST MANDATE: Minimum ${config.minRestHours}h gap. Use REST_LOG for Day 0 calculations.
-    5. NO GO ZONES: DailyMap '0' means NO WORK allowed (Leave/Contract).
+    5. NO GO ZONES: DailyMap '0' means NO WORK allowed (Leave/Contract/Forced Off).
 
     OUTPUT FORMAT: JSON Array of arrays [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
     Note: "AssignedRole" must be one of: LC, SL, OPS, RMP, LF, or AGT (for general).
