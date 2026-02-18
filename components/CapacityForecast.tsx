@@ -33,14 +33,17 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, leaveRequests
     const rosterStaff = staff.filter(s => s.type === 'Roster');
 
     // --- LOCAL CAPACITY CALCULATION (WITH LEAVE DISRUPTION) ---
-    // Rule: Standard is approx 5 days work per 7 days.
-    // Disruption: Deduct specific leave days falling in this period.
+    // Rule: Standard is 5 days work per 7 days (5/7 ratio).
+    // Logic aligned with GeminiService: Math.floor(duration * (5/7))
+    // Example: 7 days = 5 shifts. 30 days = 21 shifts.
     let localCapacity = 0;
     let totalLeaveLost = 0;
 
     localStaff.forEach(s => {
-       // Base capacity for this duration (e.g. 7 days -> 5 shifts)
-       const baseCap = Math.ceil(duration * (5/7));
+       // Base capacity calculation aligned with AI Engine
+       let baseCap = Math.floor(duration * (5/7));
+       // Permissive scale for short durations (< 1 week)
+       if (duration < 7 && duration > 0) baseCap = Math.ceil(duration * 0.75);
        
        // Calculate leave overlap
        let leaveDays = 0;

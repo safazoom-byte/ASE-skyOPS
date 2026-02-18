@@ -54,6 +54,15 @@ const UI_PREF_KEYS = {
   DURATION: 'skyops_pref_duration',
 };
 
+const DATA_KEYS = {
+  FLIGHTS: 'skyops_data_flights',
+  STAFF: 'skyops_data_staff',
+  SHIFTS: 'skyops_data_shifts',
+  PROGRAMS: 'skyops_data_programs',
+  LEAVES: 'skyops_data_leaves',
+  INCOMING: 'skyops_data_incoming',
+};
+
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -65,12 +74,25 @@ const App: React.FC = () => {
   const [endDate, setEndDate] = useState<string>(() => localStorage.getItem(UI_PREF_KEYS.END_DATE) || new Date().toISOString().split('T')[0]);
   const [minRestHours, setMinRestHours] = useState<number>(() => parseInt(localStorage.getItem(UI_PREF_KEYS.REST_HOURS) || '12'));
 
-  const [flights, setFlights] = useState<Flight[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [shifts, setShifts] = useState<ShiftConfig[]>([]);
-  const [programs, setPrograms] = useState<DailyProgram[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>([]);
+  // Initialize data from LocalStorage to ensure persistence
+  const [flights, setFlights] = useState<Flight[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.FLIGHTS) || '[]'); } catch { return []; }
+  });
+  const [staff, setStaff] = useState<Staff[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.STAFF) || '[]'); } catch { return []; }
+  });
+  const [shifts, setShifts] = useState<ShiftConfig[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.SHIFTS) || '[]'); } catch { return []; }
+  });
+  const [programs, setPrograms] = useState<DailyProgram[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.PROGRAMS) || '[]'); } catch { return []; }
+  });
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.LEAVES) || '[]'); } catch { return []; }
+  });
+  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DATA_KEYS.INCOMING) || '[]'); } catch { return []; }
+  });
   
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning', message: string }[]>([]);
@@ -90,6 +112,15 @@ const App: React.FC = () => {
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState('');
 
+  // --- DATA PERSISTENCE EFFECTS ---
+  useEffect(() => localStorage.setItem(DATA_KEYS.FLIGHTS, JSON.stringify(flights)), [flights]);
+  useEffect(() => localStorage.setItem(DATA_KEYS.STAFF, JSON.stringify(staff)), [staff]);
+  useEffect(() => localStorage.setItem(DATA_KEYS.SHIFTS, JSON.stringify(shifts)), [shifts]);
+  useEffect(() => localStorage.setItem(DATA_KEYS.PROGRAMS, JSON.stringify(programs)), [programs]);
+  useEffect(() => localStorage.setItem(DATA_KEYS.LEAVES, JSON.stringify(leaveRequests)), [leaveRequests]);
+  useEffect(() => localStorage.setItem(DATA_KEYS.INCOMING, JSON.stringify(incomingDuties)), [incomingDuties]);
+
+  // --- PREFERENCE PERSISTENCE EFFECTS ---
   useEffect(() => {
     const start = new Date(startDate);
     if (!isNaN(start.getTime())) {
@@ -120,12 +151,14 @@ const App: React.FC = () => {
       try {
         const cloudData = await db.fetchAll();
         if (mounted && cloudData) {
-          setFlights(cloudData.flights || []); 
-          setStaff(cloudData.staff || []); 
-          setShifts(cloudData.shifts || []);
-          setPrograms(cloudData.programs || []); 
-          setLeaveRequests(cloudData.leaveRequests || []);
-          setIncomingDuties(cloudData.incomingDuties || []); 
+          // Merge logic: If cloud is empty but local has data, keep local (offline first assumption for start)
+          // But usually cloud is master. For this app, we'll overwrite local with cloud if cloud has data.
+          if (cloudData.flights?.length) setFlights(cloudData.flights); 
+          if (cloudData.staff?.length) setStaff(cloudData.staff); 
+          if (cloudData.shifts?.length) setShifts(cloudData.shifts);
+          if (cloudData.programs?.length) setPrograms(cloudData.programs); 
+          if (cloudData.leaveRequests?.length) setLeaveRequests(cloudData.leaveRequests);
+          if (cloudData.incomingDuties?.length) setIncomingDuties(cloudData.incomingDuties); 
           setCloudStatus('connected');
         }
       } catch (e: any) { if (mounted) setCloudStatus('error'); }
