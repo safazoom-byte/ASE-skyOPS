@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { DailyProgram, ProgramData, Staff, LeaveRequest, IncomingDuty, ShiftConfig, Skill } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
@@ -193,22 +194,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   const blueprintBlock = dailyBlueprint.join('\n');
 
-  const operationalBriefing = `
-    CRITICAL MANPOWER BLUEPRINT (EXECUTE STRICTLY):
-    The station statistics have proven the following mathematical feasibility. You must NOT deviate from these numbers.
-    
-    ${blueprintBlock}
-
-    STRATEGIC RULES:
-    1. ROSTER PRIORITY: Roster staff (contractors) must be deployed first to cover their contract days.
-    2. LOCAL OFF-DUTY ENFORCEMENT: For each date, you MUST assign exactly 'LOCAL_FORCE_OFF' count of Local staff to 'NO SHIFT'. 
-       - Do not over-assign Locals. If the blueprint says 9 Locals off, pick the 9 with the highest fatigue or lowest credits and give them a day off.
-    3. ROLE OPTIMIZATION:
-       - [DUAL_LC_SL]: Staff with both Shift Leader and Load Control skills are force multipliers. Assigning them to LC satisfies 1 SL requirement visually.
-    4. REST: Ensure ${config.minRestHours}h rest between shifts.
-  `;
-
-  // --- PHASE 2: STAFF CONTEXT & AVAILABILITY MAPPING ---
+  // --- PHASE 2: STAFF CONTEXT & AVAILABILITY MAPPING (V2 ENHANCED) ---
   const staffContext = data.staff.map(s => {
     const skills = [
       s.isLoadControl?'LC':'', 
@@ -222,6 +208,25 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const isDualLCSL = s.isLoadControl && s.isShiftLeader;
     const dualTag = isDualLCSL ? ' [DUAL_LC_SL]' : '';
     
+    // Fatigue Score Calculation
+    const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
+    let fatigueLevel = "FRESH";
+    let lastDutyInfo = "No recent duty";
+
+    if (lastDuty) {
+        const lastDutyDate = new Date(lastDuty.date);
+        const programStartDate = new Date(config.startDate);
+        const diffTime = programStartDate.getTime() - lastDutyDate.getTime();
+        const diffDays = diffTime / (1000 * 3600 * 24);
+
+        if (diffDays <= 1) {
+             const [h] = lastDuty.shiftEndTime.split(':').map(Number);
+             if (h >= 20 || h <= 4) fatigueLevel = "CRITICAL_FATIGUE (Night Turnaround)";
+             else fatigueLevel = "MODERATE_FATIGUE";
+        }
+        lastDutyInfo = `Ended ${lastDuty.date} ${lastDuty.shiftEndTime}`;
+    }
+
     const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
     
     let dailyAvail = "";
@@ -240,21 +245,52 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         }
     }
 
-    const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
-    const restContext = lastDuty ? `[REST_LOG: Ended ${lastDuty.date} at ${lastDuty.shiftEndTime}]` : "[REST_LOG: None]";
-
-    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}]${dualTag}, TargetShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
+    return `ID: ${s.initials}, Role: ${s.type}, Rank: ${s.powerRate}%, Skills: [${skills}]${dualTag}, AllocatableShifts: ${credits}, Fatigue: ${fatigueLevel} (${lastDutyInfo}), AvailPattern: ${dailyAvail}`; 
   }).join('\n');
 
-  // --- PHASE 3: SHIFT CONTEXT ---
+  // --- PHASE 3: SHIFT CONTEXT (V2 ENHANCED WAVE LOGIC) ---
   const shiftContext = [...data.shifts]
     .sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime))
     .map((s, idx) => {
       // Use original index from the data array to allow safe lookup later
       const originalIdx = data.shifts.findIndex(os => os.id === s.id);
       const needs = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => `${k.substring(0,2).toUpperCase()}:${v}`).join(', ');
-      return `ID: ${originalIdx}, Date: ${s.pickupDate}, Time: ${s.pickupTime}-${s.endTime}, MinStaff: ${s.minStaff}, Needs: [${needs}]`;
+      
+      const h = parseInt(s.pickupTime.split(':')[0]);
+      let wave = "NIGHT_OPS";
+      if (h >= 4 && h < 12) wave = "AM_WAVE";
+      else if (h >= 12 && h < 20) wave = "PM_WAVE";
+
+      return `Ref: ${originalIdx}, Day: ${s.pickupDate}, Slot: ${s.pickupTime}-${s.endTime} (${wave}), MinReq: ${s.minStaff}, SpecialistNeeds: [${needs}]`;
     }).join('\n');
+
+  const operationalBriefing = `
+    GLOBAL MATRIX SOLVER V2 (HIGH FIDELITY MODE):
+    
+    MANPOWER BLUEPRINT (HARD MATHEMATICAL LIMITS):
+    ${blueprintBlock}
+
+    STRATEGIC ALLOCATION PROTOCOL (3-PASS SYSTEM):
+    
+    PASS 1: COMMAND STRUCTURE (SL & LC)
+    - Assign 'Shift Leaders' and 'Load Control' first.
+    - DISTRIBUTE TALENT: Do not cluster all senior staff in the AM Wave. Ensure Night Ops have at least 1 senior capability if possible.
+    - Use [DUAL_LC_SL] agents efficiently to cover double requirements where legal.
+
+    PASS 2: SPECIALIST CORE (OPS, RMP, LF)
+    - Fill 'Operations', 'Ramp', and 'Lost & Found' requirements next.
+    - Match skills strictly. An agent without 'RMP' skill cannot cover a 'RMP' requirement.
+
+    PASS 3: GENERAL WORKFORCE & FATIGUE MANAGEMENT
+    - Fill remaining 'MinReq' slots with General Agents.
+    - FATIGUE CHECK: Agents marked 'CRITICAL_FATIGUE' should NOT be assigned to early AM starts on Day 0.
+    - CONTINUITY: If an agent works PM_WAVE on Day 0, prefer PM_WAVE for Day 1 to avoid body clock disruption.
+
+    CONSTRAINT CHECKS:
+    1. ROSTER PRIORITY: Contract staff must fulfill their 'AllocatableShifts' before Locals.
+    2. FORCE OFF: Ensure exactly 'LOCAL_FORCE_OFF' locals are left empty (no assignments) per day. Prioritize resting high-fatigue agents.
+    3. REST: ${config.minRestHours}h minimum rest between shifts is MANDATORY.
+  `;
 
   const prompt = `
     ROLE: Global Strategic Roster Architect
@@ -264,7 +300,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
     EXECUTION STEPS:
     1. Read the "MANPOWER BLUEPRINT" for Day X. It tells you exactly how many Locals to use and how many to rest.
-    2. Read "DailyMap" for each agent. '0' means physically unavailable (Leave/Contract). '1' means available.
+    2. Read "AvailPattern" for each agent. '0' means physically unavailable (Leave/Contract). '1' means available.
     3. Fill the 'RosterAvailable' quota first using available Roster staff.
     4. Fill the 'LOCAL_WORK_TARGET' using available Local staff.
     5. The remaining Locals (equal to LOCAL_FORCE_OFF) MUST NOT be assigned shifts on that day.
