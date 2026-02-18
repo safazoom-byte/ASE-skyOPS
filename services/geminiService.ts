@@ -1,5 +1,4 @@
-
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { DailyProgram, ProgramData, Staff, LeaveRequest, IncomingDuty, ShiftConfig, Skill } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
 
@@ -14,6 +13,46 @@ export interface BuildResult {
 export interface ExtractionMedia {
   data: string;
   mimeType: string;
+}
+
+// --- RETRY LOGIC ENGINE ---
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function withRetry<T>(operation: () => Promise<T>, retries = 5, baseDelay = 2000): Promise<T> {
+  let lastError: any;
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Detect specific 503 / Overload signals from Google
+      const isRetryable = 
+        error?.status === 503 || 
+        error?.code === 503 ||
+        (error?.message && (
+          error.message.includes('503') || 
+          error.message.includes('overloaded') || 
+          error.message.includes('high demand') ||
+          error.message.includes('temporary') ||
+          error.message.includes('quota')
+        ));
+
+      if (isRetryable && i < retries - 1) {
+        // Exponential backoff with jitter: 2s, 4s, 8s, 16s... + random ms
+        const jitter = Math.random() * 500;
+        const delayTime = (baseDelay * Math.pow(2, i)) + jitter;
+        console.warn(`Gemini API Busy (503). Retrying in ${Math.round(delayTime)}ms... (Attempt ${i + 1}/${retries})`);
+        await wait(delayTime);
+        continue;
+      }
+      
+      // If error is not retryable (e.g., 400 Bad Request) or max retries reached, throw immediately
+      throw error;
+    }
+  }
+  throw lastError;
 }
 
 // 1. ADVANCED SEMANTIC JSON PARSER
@@ -246,7 +285,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     ${shiftContext}
   `;
 
-  const response = await ai.models.generateContent({
+  // Wrap the call in withRetry to handle 503s
+  const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: prompt,
       config: { 
@@ -255,7 +295,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         // Increased thinking budget for complex solving
         thinkingConfig: { thinkingBudget: 4096 } 
       }
-  });
+  }));
 
   const parsed = safeParseJson(response.text);
   
@@ -304,7 +344,13 @@ export const extractDataFromContent = async (params: { textData?: string, media?
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
   const prompt = `Extract ${params.targetType} from provided content. Target Start: ${params.startDate || 'Current'}. Return valid JSON: { "flights": [], "staff": [], "shifts": [] }.`;
   parts.unshift({ text: prompt });
-  const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: { parts }, config: { responseMimeType: "application/json" } });
+  
+  // Wrap extraction call with retry
+  const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
+      model: 'gemini-3-flash-preview', 
+      contents: { parts }, 
+      config: { responseMimeType: "application/json" } 
+  }));
   return safeParseJson(response.text);
 };
 
@@ -313,13 +359,25 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   const prompt = `TASK: Modify roster. Instruction: ${instruction}. Current: ${JSON.stringify(data.programs)}. Return { "programs": [], "explanation": "" }`;
   const parts: any[] = [{ text: prompt }];
   if (media.length > 0) media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: { parts }, config: { responseMimeType: "application/json" } });
+  
+  // Wrap modification call with retry
+  const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
+      model: 'gemini-3-flash-preview', 
+      contents: { parts }, 
+      config: { responseMimeType: "application/json" } 
+  }));
   return safeParseJson(response.text);
 };
 
 export const repairProgramWithAI = async (currentPrograms: DailyProgram[], auditReport: string, data: ProgramData, constraints: { minRestHours: number }): Promise<{ programs: DailyProgram[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `FIX ROSTER. Violations: ${auditReport}. Rules: 5/2 local rule, 12h rest, roster contract dates. Return: { "programs": [] }`;
-  const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: prompt, config: { responseMimeType: 'application/json' } });
+  
+  // Wrap repair call with retry
+  const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
+      model: 'gemini-3-pro-preview', 
+      contents: prompt, 
+      config: { responseMimeType: 'application/json' } 
+  }));
   return { programs: safeParseJson(response.text)?.programs || currentPrograms };
 };
