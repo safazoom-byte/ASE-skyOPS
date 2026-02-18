@@ -19,21 +19,40 @@ export interface ExtractionMedia {
 // 1. ADVANCED SEMANTIC JSON PARSER
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
+  
+  // 1. Try cleaning Markdown wrappers
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  
+  // 2. Locate the main array [...]
   const firstOpen = clean.indexOf('[');
   const lastClose = clean.lastIndexOf(']');
+  
   if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
       clean = clean.substring(firstOpen, lastClose + 1);
+  } else {
+      // Fallback: Try locating an object {...} if array not found
+      const firstBrace = clean.indexOf('{');
+      const lastBrace = clean.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+          clean = clean.substring(firstBrace, lastBrace + 1);
+      }
   }
+
   try {
-    return JSON.parse(clean);
-  } catch (e) {
-    try {
-      if (clean.startsWith('[') && !clean.endsWith(']')) return JSON.parse(clean + ']');
-      if (clean.startsWith('{') && !clean.endsWith('}')) return JSON.parse(clean + '}');
-    } catch (finalErr) {
-      console.error("JSON Recovery Failed", finalErr);
+    const parsed = JSON.parse(clean);
+    // Unwrapping logic if the AI returned { "result": [...] } or similar
+    if (!Array.isArray(parsed) && typeof parsed === 'object') {
+        const values = Object.values(parsed);
+        const arrayVal = values.find(v => Array.isArray(v));
+        if (arrayVal) return arrayVal;
     }
+    return parsed;
+  } catch (e) {
+    console.error("JSON Parse Error:", e);
+    // Last ditch: try to append brackets if missing
+    try {
+      if (clean.trim().startsWith('[') && !clean.trim().endsWith(']')) return JSON.parse(clean + ']');
+    } catch (err2) {}
     return null;
   }
 };
@@ -94,8 +113,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   data.staff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
   // --- PHASE 1: GENERATE MANPOWER BLUEPRINT (THE "GOLD AUDIT" LOGIC) ---
-  // We explicitly calculate supply/demand BEFORE asking AI, forcing it to adhere to the math.
-  
   const totalLocalCount = data.staff.filter(s => s.type === 'Local').length;
   const dailyBlueprint: string[] = [];
 
@@ -110,7 +127,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       .reduce((acc, curr) => acc + curr.minStaff, 0);
 
     // 2. Calculate Roster Availability
-    // Roster staff are "Active" if today is within their contract window AND they are not on leave.
     const activeRosterCount = data.staff.filter(s => {
         if (s.type !== 'Roster') return false;
         
@@ -129,8 +145,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const localNeeded = Math.max(0, dailyDemand - activeRosterCount);
     
     // 4. Calculate Forced Off-Duty
-    // This is the critical number the AI was missing. 
-    // If we have 24 locals but only need 15, then 9 MUST be Off-Duty.
     const localForceOff = Math.max(0, totalLocalCount - localNeeded);
 
     dailyBlueprint.push(
@@ -197,6 +211,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const shiftContext = [...data.shifts]
     .sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime))
     .map((s, idx) => {
+      // Use original index from the data array to allow safe lookup later
       const originalIdx = data.shifts.findIndex(os => os.id === s.id);
       const needs = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => `${k.substring(0,2).toUpperCase()}:${v}`).join(', ');
       return `ID: ${originalIdx}, Date: ${s.pickupDate}, Time: ${s.pickupTime}-${s.endTime}, MinStaff: ${s.minStaff}, Needs: [${needs}]`;
@@ -216,8 +231,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     5. The remaining Locals (equal to LOCAL_FORCE_OFF) MUST NOT be assigned shifts on that day.
     6. Ensure specialist roles (LC, SL, OPS, RMP) are covered by people with those skills.
 
-    OUTPUT FORMAT: JSON Array of arrays [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
-    Note: "AssignedRole" must be one of: LC, SL, OPS, RMP, LF, or AGT (for general).
+    OUTPUT FORMAT: 
+    STRICTLY RETURN ONLY A RAW JSON ARRAY. NO MARKDOWN. NO COMMENTS.
+    Format: [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
+    
+    Example: [[0, 2, "AB-HMB", "RMP"], [0, 2, "XY-ATZ", "LC"], [1, 5, "AB-HMB", "RMP"]]
+    Note: DayOffset is 0 to ${config.numDays-1}. ShiftID is the ID provided in SHIFTS list.
 
     DATA:
     Period: ${config.startDate} to ${programEndStr}
@@ -233,7 +252,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       config: { 
         temperature: 0.1, 
         responseMimeType: 'application/json',
-        thinkingConfig: { thinkingBudget: 4000 } 
+        // Increased thinking budget for complex solving
+        thinkingConfig: { thinkingBudget: 4096 } 
       }
   });
 
@@ -245,6 +265,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       d.setDate(d.getDate() + i);
       return { day: i, dateString: d.toISOString().split('T')[0], assignments: [] };
   });
+
+  let validAssignmentsCount = 0;
 
   if (Array.isArray(parsed)) {
     parsed.forEach((item: any) => {
@@ -260,15 +282,18 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                 role: role || 'AGT',
                 flightId: '' 
             });
+            validAssignmentsCount++;
         }
     });
   }
   
+  const stationHealth = (parsed && validAssignmentsCount > 0) ? 100 : 0;
+  
   return {
     programs: finalPrograms,
-    stationHealth: parsed ? 100 : 0,
-    alerts: parsed ? [] : [{ type: 'danger', message: 'Strategic Engine timeout. Check logic constraints.' }],
-    isCompliant: !!parsed
+    stationHealth,
+    alerts: stationHealth === 0 ? [{ type: 'danger', message: 'CRITICAL: AI failed to generate valid assignments. Check staff/shift inputs.' }] : [],
+    isCompliant: stationHealth === 100
   };
 };
 
