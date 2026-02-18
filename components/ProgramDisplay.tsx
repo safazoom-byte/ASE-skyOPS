@@ -111,31 +111,6 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.setFont('helvetica', 'normal');
       doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 22);
 
-      // Manpower Forecast Box
-      doc.setDrawColor(200, 200, 200);
-      doc.setFillColor(245, 245, 245);
-      doc.rect(190, 5, 95, 25, 'F');
-      doc.rect(190, 5, 95, 25, 'S'); // Border
-      
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
-      doc.text("MANPOWER CAPACITY FORECAST", 195, 10);
-      
-      // Calculate daily capacity
-      const shiftsToday = shifts.filter(s => s.pickupDate === prog.dateString);
-      const minDemand = shiftsToday.reduce((sum, s) => sum + (s.minStaff || 0), 0);
-      const assignedCount = prog.assignments.length;
-      
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Total Supply: ${staff.length} Active Staff`, 195, 16);
-      doc.text(`Total Demand: ${minDemand} Shifts (Min)`, 195, 21);
-      
-      const balance = assignedCount - minDemand;
-      doc.setFont('helvetica', 'bold');
-      if (balance >= 0) doc.setTextColor(0, 150, 0); else doc.setTextColor(200, 0, 0);
-      doc.text(`Net Balance: ${balance > 0 ? '+' : ''}${balance}`, 195, 26);
-      doc.text(`Status: ${balance >= 0 ? 'HEALTHY' : 'CRITICAL'}`, 245, 26);
-
       let contentStartY = 35;
 
       // --- REST LOG TABLE (Inserted on First Page) ---
@@ -163,7 +138,7 @@ export const ProgramDisplay: React.FC<Props> = ({
               const dateLabel = isPrevDay ? "Prev Day" : `${endDt.getDate()}/${endDt.getMonth()+1}`;
               
               const releaseDateLabel = releaseDt.getDate() !== endDt.getDate() 
-                  ? (releaseDt.getDate() === new Date(startDate).getDate() ? "Day 1" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
+                  ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
                   : ""; 
 
               const initials = groupedMap.get(key)?.join(' - ');
@@ -179,6 +154,10 @@ export const ProgramDisplay: React.FC<Props> = ({
           });
 
           if (restRows.length > 0) {
+              doc.setFontSize(9);
+              doc.setFont('helvetica', 'bold');
+              doc.text("PREVIOUS DAY SHIFTS", 14, contentStartY - 2);
+
               autoTable(doc, {
                   startY: contentStartY,
                   head: [['S/N', 'SHIFT END', 'RELEASE', 'HC', 'PERSONNEL (REST LOG)']],
@@ -220,6 +199,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.text(dateStr, 14, contentStartY);
 
       // Main Table Data
+      const shiftsToday = shifts.filter(s => s.pickupDate === prog.dateString);
       const tableData = shiftsToday.map((shift, idx) => {
         const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
         
@@ -233,16 +213,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const personnelStrs = assignments.map(a => {
            const st = getStaff(a.staffId);
            if (!st) return '';
-           
-           // Calculate Rest
-           const [ph, pm] = shift.pickupTime.split(':').map(Number);
-           const shiftStart = new Date(currentDate);
-           shiftStart.setHours(ph, pm, 0, 0);
-           
-           const rest = calculateRestHours(st.id, shiftStart);
-           const restStr = rest !== null ? ` [${rest.toFixed(1)}H]` : '';
-           
-           return `${st.initials} (${a.role})${restStr}`;
+           return `${st.initials} (${a.role})`;
         }).join(' | ');
 
         return [
@@ -274,10 +245,8 @@ export const ProgramDisplay: React.FC<Props> = ({
 
       // Absence Registry
       const finalY = (doc as any).lastAutoTable.finalY + 10;
-      // Only check if we have space, else add page
       if (finalY > 180) {
           doc.addPage();
-          // Reset headers on new page? Or just continue.
       }
 
       doc.setFontSize(12);
@@ -296,21 +265,18 @@ export const ProgramDisplay: React.FC<Props> = ({
       };
 
       offStaff.forEach(s => {
-         // Check explicit leave
          const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
          
-         // Counter Logic (Consecutive days up to today)
-         // Simple simulation: count occurrences in previous programs + today
+         // Counter Logic
          let count = 1; 
          for (let i = index - 1; i >= 0; i--) {
              const prevProg = programs[i];
              const worked = prevProg.assignments.some(a => a.staffId === s.id);
              const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
              
-             // If status matches, increment
              if (!worked) {
                 if (leave && prevLeave && prevLeave.type === leave.type) count++;
-                else if (!leave && !prevLeave) count++; // Consecutive Days Off
+                else if (!leave && !prevLeave) count++;
                 else break; 
              } else {
                  break;
@@ -319,21 +285,23 @@ export const ProgramDisplay: React.FC<Props> = ({
          
          const label = `${s.initials} (${count})`;
 
-         if (leave) {
+         // Check if Roster staff is out of contract window
+         const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
+
+         if (isRosterOutOfContract) {
+             categories['ROSTER LEAVE'].push(label);
+         } else if (leave) {
             if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(label);
             else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(label);
             else if (leave.type === 'Day off') categories['DAYS OFF'].push(label);
             else categories['DAYS OFF'].push(label);
          } else {
-            // Logic for Resting vs Days Off vs Standby
-            // If they worked yesterday late? 
             const yesterdayProg = programs[index - 1];
             let workedYesterday = false;
             if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
             
             if (workedYesterday) {
-                // Do not display in this list as they are in the Rest Log table if applicable, 
-                // or just resting normally. User asked to remove from this PDF table.
+               // Resting
             }
             else if (s.type === 'Local') categories['DAYS OFF'].push(label);
             else categories['STANDBY (RESERVE)'].push(label);
@@ -366,13 +334,9 @@ export const ProgramDisplay: React.FC<Props> = ({
     const localStaff = staff.filter(s => s.type === 'Local');
     const localAuditData = localStaff.map((s, idx) => {
         const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        const daysOff = programs.length - shiftsWorked; // Assuming program length is the period
-        
-        // Standard: 5 On / 2 Off for 7 days
+        const daysOff = programs.length - shiftsWorked;
         const targetShifts = 5; 
         const targetOff = 2;
-        
-        // Simple heuristic for 7 day program
         const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
         
         return [
@@ -397,10 +361,10 @@ export const ProgramDisplay: React.FC<Props> = ({
             if (data.section === 'body') {
                 const status = data.row.raw[5];
                 if (status === 'MATCH') {
-                    data.cell.styles.fillColor = [22, 163, 74]; // Green
+                    data.cell.styles.fillColor = [22, 163, 74];
                     data.cell.styles.textColor = [255, 255, 255];
                 } else if (status === 'CHECK') {
-                    data.cell.styles.fillColor = [220, 38, 38]; // Red
+                    data.cell.styles.fillColor = [220, 38, 38];
                     data.cell.styles.textColor = [255, 255, 255];
                 }
             }
@@ -416,8 +380,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     const rosterStaff = staff.filter(s => s.type === 'Roster');
     const rosterAuditData = rosterStaff.map((s, idx) => {
         const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        
-        // Calculate Potential (Days overlapping with program)
         const progStart = new Date(startDate);
         const progEnd = new Date(endDate);
         const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
@@ -473,7 +435,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.setTextColor(0,0,0);
     doc.text("Weekly Operations Matrix View", 14, 15);
 
-    // Headers: S/N, AGENT, Date1, Date2... AUDIT
     const dateHeaders = programs.map(p => {
         const d = new Date(p.dateString || startDate);
         return `${d.getDate()}/${d.getMonth()+1}`;
@@ -482,9 +443,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
     const matrixBody = staff.map((s, idx) => {
         const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
-        
         let workedCount = 0;
-        
         programs.forEach(p => {
             const assign = p.assignments.find(a => a.staffId === s.id);
             if (assign) {
@@ -495,10 +454,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                     const [ph, pm] = shift.pickupTime.split(':').map(Number);
                     const shiftStart = new Date(pDate);
                     shiftStart.setHours(ph, pm, 0, 0);
-                    
                     const rest = calculateRestHours(s.id, shiftStart);
                     const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : '';
-                    
                     row.push(`${shift.pickupTime} ${restLabel}`);
                 } else {
                     row.push('ERR');
@@ -507,7 +464,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                 row.push('-');
             }
         });
-        
         row.push(`${workedCount}/${programs.length}`);
         return row;
     });
@@ -517,19 +473,18 @@ export const ProgramDisplay: React.FC<Props> = ({
         head: matrixHead,
         body: matrixBody,
         theme: 'grid',
-        headStyles: { fillColor: [220, 100, 0] }, // Orange header
+        headStyles: { fillColor: [220, 100, 0] },
         styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 },
         columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } },
         didParseCell: (data) => {
             if (data.section === 'body' && data.column.index > 1 && data.column.index < dateHeaders.length + 2) {
                 const text = data.cell.raw as string;
                 if (text && text.includes('[')) {
-                    // Extract rest hours
                     const match = text.match(/\[([\d.]+)H\]/);
                     if (match) {
                         const rest = parseFloat(match[1]);
                         if (rest < minRestHours) {
-                            data.cell.styles.fillColor = [220, 38, 38]; // Red background for violation
+                            data.cell.styles.fillColor = [220, 38, 38];
                             data.cell.styles.textColor = [255, 255, 255];
                             data.cell.styles.fontStyle = 'bold';
                         }
@@ -546,6 +501,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.text("Specialist Role Fulfillment Matrix", 14, 15);
 
     const roleMatrixData: any[] = [];
+    const roleMatrixMeta: any[] = [];
     
     programs.forEach(p => {
         const d = new Date(p.dateString || startDate);
@@ -555,13 +511,40 @@ export const ProgramDisplay: React.FC<Props> = ({
         shiftsToday.forEach(s => {
             const assignments = p.assignments.filter(a => a.shiftId === s.id);
             
-            // Map codes to full names or just use codes? Screenshot implies codes or groupings
-            // Let's use standard codes mapping
-            const sl = assignments.filter(a => ['SL', 'Shift Leader'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
-            const lc = assignments.filter(a => ['LC', 'Load Control'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
-            const rmp = assignments.filter(a => ['RMP', 'Ramp'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
-            const ops = assignments.filter(a => ['OPS', 'Operations'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
-            const lf = assignments.filter(a => ['LF', 'Lost and Found'].includes(a.role)).map(a => getStaff(a.staffId)?.initials).join(', ');
+            // Helper to check if a staff member covers a role with Dual Logic
+            const coversRole = (a: any, targetRole: string) => {
+                const st = getStaff(a.staffId);
+                if (!st) return false;
+                
+                // 1. Direct Assignment (Standard Codes)
+                const roleCode = targetRole === 'Shift Leader' ? 'SL' : 
+                                 targetRole === 'Load Control' ? 'LC' : 
+                                 targetRole === 'Ramp' ? 'RMP' : 
+                                 targetRole === 'Operations' ? 'OPS' : 
+                                 targetRole === 'Lost and Found' ? 'LF' : targetRole;
+                                 
+                if (a.role === roleCode || a.role === targetRole) return true;
+
+                // 2. Dual Role Logic (SL Covers LC, LC Covers SL)
+                if (targetRole === 'Load Control' && (a.role === 'SL' || a.role === 'Shift Leader') && st.isLoadControl) return true;
+                if (targetRole === 'Shift Leader' && (a.role === 'LC' || a.role === 'Load Control') && st.isShiftLeader) return true;
+
+                return false;
+            };
+
+            const getStaffForRole = (role: string) => {
+                return assignments
+                    .filter(a => coversRole(a, role))
+                    .map(a => getStaff(a.staffId)?.initials)
+                    .filter(Boolean)
+                    .join(', ');
+            };
+
+            const sl = getStaffForRole('Shift Leader');
+            const lc = getStaffForRole('Load Control');
+            const rmp = getStaffForRole('Ramp');
+            const ops = getStaffForRole('Operations');
+            const lf = getStaffForRole('Lost and Found');
             
             roleMatrixData.push([
                 dateLabel,
@@ -572,6 +555,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                 ops,
                 lf
             ]);
+
+            roleMatrixMeta.push({
+                slReq: (s.roleCounts?.['Shift Leader'] || 0) > 0,
+                lcReq: (s.roleCounts?.['Load Control'] || 0) > 0,
+                rmpReq: (s.roleCounts?.['Ramp'] || 0) > 0,
+                opsReq: (s.roleCounts?.['Operations'] || 0) > 0,
+                lfReq: (s.roleCounts?.['Lost and Found'] || 0) > 0
+            });
         });
     });
 
@@ -581,13 +572,31 @@ export const ProgramDisplay: React.FC<Props> = ({
         body: roleMatrixData,
         theme: 'grid',
         headStyles: { fillColor: [0, 0, 0] },
-        styles: { fontSize: 8, halign: 'center', valign: 'middle' },
+        styles: { fontSize: 7, halign: 'center', valign: 'middle', cellPadding: 1.5 },
         didParseCell: (data) => {
             if (data.section === 'body' && data.column.index > 1) {
+                const rowIndex = data.row.index;
+                const meta = roleMatrixMeta[rowIndex];
+                if (!meta) return;
+
+                const colIdx = data.column.index;
+                let isRequired = false;
+                if (colIdx === 2) isRequired = meta.slReq;
+                if (colIdx === 3) isRequired = meta.lcReq;
+                if (colIdx === 4) isRequired = meta.rmpReq;
+                if (colIdx === 5) isRequired = meta.opsReq;
+                if (colIdx === 6) isRequired = meta.lfReq;
+
                 const content = data.cell.raw as string;
-                if (content && content.length > 0) {
-                    data.cell.styles.fillColor = [22, 163, 74]; // Green (Filled)
+                const hasContent = content && content.length > 0;
+
+                if (hasContent) {
+                    data.cell.styles.fillColor = [22, 163, 74]; // Green
                     data.cell.styles.textColor = [255, 255, 255];
+                } else if (isRequired) {
+                    data.cell.styles.fillColor = [220, 38, 38]; // Red
+                    data.cell.styles.textColor = [255, 255, 255];
+                    data.cell.text = ['MISSING'];
                 }
             }
         }

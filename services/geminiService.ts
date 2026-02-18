@@ -45,8 +45,10 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
 
   let grossCredits = 0;
   if (staff.type === 'Local') {
+    // 5/2 Rule Logic: For every 7 days, 5 days work.
     grossCredits = Math.floor(duration * (5/7)); 
-    if (duration < 7 && duration > 0) grossCredits = Math.ceil(duration * 0.75);
+    // Fallback for short periods (e.g. 1-4 days) to allow utilization
+    if (duration < 7 && duration > 0) grossCredits = Math.ceil(duration * 0.8);
   } else {
     if (!staff.workFromDate || !staff.workToDate) {
       grossCredits = duration;
@@ -91,34 +93,66 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const staffMap: Record<string, string> = {};
   data.staff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
 
-  // --- PHASE 1: CAPACITY HEATMAP & STRATEGIC BRIEFING ---
-  const dailyDemand: Record<number, number> = {};
+  // --- PHASE 1: GENERATE MANPOWER BLUEPRINT (THE "GOLD AUDIT" LOGIC) ---
+  // We explicitly calculate supply/demand BEFORE asking AI, forcing it to adhere to the math.
   
+  const totalLocalCount = data.staff.filter(s => s.type === 'Local').length;
+  const dailyBlueprint: string[] = [];
+
   for(let i=0; i<config.numDays; i++) {
     const d = new Date(config.startDate);
     d.setDate(d.getDate() + i);
     const dStr = d.toISOString().split('T')[0];
     
-    // Demand: Sum of minStaff for all shifts this day
-    dailyDemand[i] = data.shifts
+    // 1. Calculate Demand
+    const dailyDemand = data.shifts
       .filter(s => s.pickupDate === dStr)
       .reduce((acc, curr) => acc + curr.minStaff, 0);
+
+    // 2. Calculate Roster Availability
+    // Roster staff are "Active" if today is within their contract window AND they are not on leave.
+    const activeRosterCount = data.staff.filter(s => {
+        if (s.type !== 'Roster') return false;
+        
+        // Contract Check
+        if (!s.workFromDate || !s.workToDate) return false;
+        if (dStr < s.workFromDate || dStr > s.workToDate) return false;
+
+        // Leave Check
+        const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+        if (onLeave) return false;
+
+        return true;
+    }).length;
+
+    // 3. Calculate Local Requirements
+    const localNeeded = Math.max(0, dailyDemand - activeRosterCount);
+    
+    // 4. Calculate Forced Off-Duty
+    // This is the critical number the AI was missing. 
+    // If we have 24 locals but only need 15, then 9 MUST be Off-Duty.
+    const localForceOff = Math.max(0, totalLocalCount - localNeeded);
+
+    dailyBlueprint.push(
+        `DATE ${dStr} (D${i}): Demand=${dailyDemand}. RosterAvailable=${activeRosterCount}. LOCAL_WORK_TARGET=${localNeeded}. LOCAL_FORCE_OFF=${localForceOff}.`
+    );
   }
 
-  // Calculate "Light Days" (Lowest Demand)
-  // We identify the bottom 2 days to enforce Local off-days if the period is ~1 week
-  const lightDays = Object.entries(dailyDemand)
-    .sort(([,a], [,b]) => a - b)
-    .slice(0, 2)
-    .map(([day]) => parseInt(day));
+  const blueprintBlock = dailyBlueprint.join('\n');
 
   const operationalBriefing = `
-    WEEKLY STRATEGIC PLAN (GLOBAL SOLVER):
-    - Target: Exactly 5 work days for Local staff (5/2 Pattern).
-    - Light Days (Low Demand): DayOffsets ${lightDays.join(', ')}. Locals are PRE-ALLOCATED OFF on these days via DailyMap.
-    - Heavy Days: All other days. Prioritize full deployment.
-    - Specialist Priority: Assign Roster Specialists first to 'heavy' roles. 
-    - LC+SL Optimization: Staff marked [DUAL_LC_SL] are force multipliers. Assigning them to LC satisfies 1 SL requirement too.
+    CRITICAL MANPOWER BLUEPRINT (EXECUTE STRICTLY):
+    The station statistics have proven the following mathematical feasibility. You must NOT deviate from these numbers.
+    
+    ${blueprintBlock}
+
+    STRATEGIC RULES:
+    1. ROSTER PRIORITY: Roster staff (contractors) must be deployed first to cover their contract days.
+    2. LOCAL OFF-DUTY ENFORCEMENT: For each date, you MUST assign exactly 'LOCAL_FORCE_OFF' count of Local staff to 'NO SHIFT'. 
+       - Do not over-assign Locals. If the blueprint says 9 Locals off, pick the 9 with the highest fatigue or lowest credits and give them a day off.
+    3. ROLE OPTIMIZATION:
+       - [DUAL_LC_SL]: Staff with both Shift Leader and Load Control skills are force multipliers. Assigning them to LC satisfies 1 SL requirement visually.
+    4. REST: Ensure ${config.minRestHours}h rest between shifts.
   `;
 
   // --- PHASE 2: STAFF CONTEXT & AVAILABILITY MAPPING ---
@@ -143,20 +177,10 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         d.setDate(d.getDate() + i);
         const dStr = d.toISOString().split('T')[0];
         
-        // 1. Check Leave
         const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        
-        // 2. Check Contract (Roster)
         const outOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate);
         
-        // 3. Strategic Off-Day Enforcement (Local)
-        // If Local, and this is a "Light Day", force off to achieve 5/2 ratio
-        let forceOff = false;
-        if (s.type === 'Local' && !onLeave && config.numDays >= 5) {
-            if (lightDays.includes(i)) forceOff = true;
-        }
-
-        if (onLeave || outOfContract || forceOff) {
+        if (onLeave || outOfContract) {
             dailyAvail += "0";
         } else {
             dailyAvail += "1";
@@ -166,7 +190,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
     const restContext = lastDuty ? `[REST_LOG: Ended ${lastDuty.date} at ${lastDuty.shiftEndTime}]` : "[REST_LOG: None]";
 
-    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}]${dualTag}, MaxShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
+    return `Agent: ${s.initials}, Type: ${s.type}, Skills: [${skills}]${dualTag}, TargetShifts: ${credits}, DailyMap: ${dailyAvail}, ${restContext}`; 
   }).join('\n');
 
   // --- PHASE 3: SHIFT CONTEXT ---
@@ -175,25 +199,22 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     .map((s, idx) => {
       const originalIdx = data.shifts.findIndex(os => os.id === s.id);
       const needs = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => `${k.substring(0,2).toUpperCase()}:${v}`).join(', ');
-      return `ID: ${originalIdx}, DayOffset: ${getDayOffset(config.startDate, s.pickupDate)}, Time: ${s.pickupTime}-${s.endTime}, MinStaff: ${s.minStaff}, Needs: [${needs}]`;
+      return `ID: ${originalIdx}, Date: ${s.pickupDate}, Time: ${s.pickupTime}-${s.endTime}, MinStaff: ${s.minStaff}, Needs: [${needs}]`;
     }).join('\n');
-
-  function getDayOffset(start: string, target: string) {
-    return Math.floor((new Date(target).getTime() - new Date(start).getTime()) / 86400000);
-  }
 
   const prompt = `
     ROLE: Global Strategic Roster Architect
-    MISSION: Create a weekly program using a "Big Basket" approach.
+    MISSION: Assign staff to shifts adhering strictly to the MANPOWER BLUEPRINT.
     
     ${operationalBriefing}
 
-    PHASED EXECUTION RULES:
-    1. EXHAUST ROSTER FIRST: Fill all specialist needs (LC, SL, OPS, RMP, LF) with Roster staff before using Locals.
-    2. LOCAL 5/2 BALANCING: Ensure Local staff work exactly their MaxShifts. The DailyMap has strictly pre-calculated their OFF days (0). You MUST respect DailyMap.
-    3. LC+SL SYNERGY: If an agent has [DUAL_LC_SL], assigning them to 'LC' role counts as covering 1 'SL' requirement too. Optimize this!
-    4. REST MANDATE: Minimum ${config.minRestHours}h gap. Use REST_LOG for Day 0 calculations.
-    5. NO GO ZONES: DailyMap '0' means NO WORK allowed (Leave/Contract/Forced Off).
+    EXECUTION STEPS:
+    1. Read the "MANPOWER BLUEPRINT" for Day X. It tells you exactly how many Locals to use and how many to rest.
+    2. Read "DailyMap" for each agent. '0' means physically unavailable (Leave/Contract). '1' means available.
+    3. Fill the 'RosterAvailable' quota first using available Roster staff.
+    4. Fill the 'LOCAL_WORK_TARGET' using available Local staff.
+    5. The remaining Locals (equal to LOCAL_FORCE_OFF) MUST NOT be assigned shifts on that day.
+    6. Ensure specialist roles (LC, SL, OPS, RMP) are covered by people with those skills.
 
     OUTPUT FORMAT: JSON Array of arrays [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
     Note: "AssignedRole" must be one of: LC, SL, OPS, RMP, LF, or AGT (for general).
