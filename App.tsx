@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -30,7 +31,8 @@ import {
   Layers,
   Timer,
   CheckCircle2,
-  PieChart
+  PieChart,
+  CalendarRange
 } from 'lucide-react';
 import './style.css'; 
 
@@ -106,11 +108,13 @@ const App: React.FC = () => {
   const [incomingHour, setIncomingHour] = useState('06');
   const [incomingMin, setIncomingMin] = useState('00');
   const [incomingDate, setIncomingDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [incomingEndDate, setIncomingEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [incomingSearchTerm, setIncomingSearchTerm] = useState('');
 
   // Leave Registry Logic (Off-Duty)
   const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
   const [quickLeaveDate, setQuickLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [quickLeaveEndDate, setQuickLeaveEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState('');
 
@@ -138,6 +142,15 @@ const App: React.FC = () => {
     localStorage.setItem(UI_PREF_KEYS.REST_HOURS, minRestHours.toString());
     localStorage.setItem(UI_PREF_KEYS.DURATION, programDuration.toString());
   }, [startDate, endDate, minRestHours, programDuration]);
+
+  // Sync End Dates with Start Dates initially if they are empty or user wants convenience (optional, but good UX)
+  useEffect(() => {
+    if (incomingDate > incomingEndDate) setIncomingEndDate(incomingDate);
+  }, [incomingDate]);
+
+  useEffect(() => {
+    if (quickLeaveDate > quickLeaveEndDate) setQuickLeaveEndDate(quickLeaveDate);
+  }, [quickLeaveDate]);
 
   useEffect(() => {
     if (notification) {
@@ -285,13 +298,24 @@ const App: React.FC = () => {
     finalIds = Array.from(new Set(finalIds));
 
     if (finalIds.length === 0) return;
-    
-    const newDuties: IncomingDuty[] = finalIds.map(sid => ({ 
-      id: Math.random().toString(36).substr(2, 9), 
-      staffId: sid, 
-      date: incomingDate, 
-      shiftEndTime: finalTime 
-    }));
+
+    // Multi-day logic
+    const start = new Date(incomingDate);
+    const end = new Date(incomingEndDate);
+    const newDuties: IncomingDuty[] = [];
+
+    // Loop through each day in range
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        finalIds.forEach(sid => {
+            newDuties.push({
+                id: Math.random().toString(36).substr(2, 9),
+                staffId: sid,
+                date: dateStr,
+                shiftEndTime: finalTime
+            });
+        });
+    }
     
     setIncomingDuties(prev => [...prev, ...newDuties]);
     if (supabase) await db.upsertIncomingDuties(newDuties);
@@ -320,11 +344,12 @@ const App: React.FC = () => {
 
     if (finalIds.length === 0) return;
     
+    // Create leave request spanning from Start to End
     const newLeaves: LeaveRequest[] = finalIds.map(sid => ({ 
       id: Math.random().toString(36).substr(2, 9), 
       staffId: sid, 
       startDate: quickLeaveDate, 
-      endDate: quickLeaveDate, 
+      endDate: quickLeaveEndDate, 
       type: quickLeaveType 
     }));
     
@@ -343,6 +368,11 @@ const App: React.FC = () => {
   const deleteLeaveRequest = async (id: string) => {
     setLeaveRequests(prev => prev.filter(l => l.id !== id));
     if (supabase) await db.deleteLeave(id);
+  };
+
+  const formatDateShort = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
   };
 
   if (isInitializing) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="text-blue-500 animate-spin" size={64} /></div>;
@@ -426,8 +456,11 @@ const App: React.FC = () => {
                               </div>
                               {staff.length === 0 && <p className="text-[9px] font-bold text-rose-500 mt-2 ml-1">Warning: Register personnel in 'Staff' tab first.</p>}
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                               <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                               <div className="md:col-span-2 flex gap-2">
+                                  <input type="date" title="Start Date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={incomingDate} onChange={e => setIncomingDate(e.target.value)}/>
+                                  <input type="date" title="End Date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={incomingEndDate} onChange={e => setIncomingEndDate(e.target.value)}/>
+                               </div>
                                <div className="flex gap-2">
                                   <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-2" value={incomingHour} onChange={e => setIncomingHour(e.target.value)}>
                                       {Array.from({length: 24}).map((_, i) => <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}</option>)}
@@ -436,28 +469,22 @@ const App: React.FC = () => {
                                       {['00', '15', '30', '45'].map(m => <option key={m} value={m}>{m}</option>)}
                                   </select>
                                 </div>
-                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0 && !incomingSearchTerm.trim()} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Bulk Lock Registry</button>
+                               <button onClick={addIncomingDuties} disabled={incomingSelectedStaffIds.length === 0 && !incomingSearchTerm.trim()} className="h-[56px] bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Lock size={16}/> Lock Registry</button>
                           </div>
                           
-                          {/* Feedback List */}
-                          <div className="pt-4 border-t border-slate-50">
-                             <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Registered for {incomingDate}</h5>
+                          {/* Feedback List - Showing All */}
+                          <div className="pt-4 border-t border-slate-50 max-h-60 overflow-y-auto custom-scrollbar">
+                             <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">All Recorded Rest Logs ({incomingDuties.length})</h5>
                              <div className="flex flex-wrap gap-2">
-                               {incomingDuties.filter(d => d.date === incomingDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
-                               {incomingDuties.filter(d => d.date === incomingDate).map(d => {
-                                 const availDate = new Date(`${d.date}T${d.shiftEndTime}`);
-                                 availDate.setHours(availDate.getHours() + minRestHours);
-                                 const availStr = availDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                                 const isNextDay = availDate.getDate() !== new Date(d.date).getDate();
+                               {incomingDuties.length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
+                               {[...incomingDuties].sort((a,b) => b.date.localeCompare(a.date)).map(d => {
                                  return (
-                                   <div key={d.id} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in group relative">
+                                   <div key={d.id} className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in group relative hover:shadow-md transition-all">
+                                      <span className="text-[8px] font-bold text-amber-500/80">{formatDateShort(d.date)}</span>
+                                      <div className="w-px h-3 bg-amber-200"></div>
                                       <span className="text-[10px] font-black text-amber-700 uppercase">{staff.find(s => s.id === d.staffId)?.initials}</span>
                                       <span className="text-[10px] font-bold text-amber-600">{d.shiftEndTime}</span>
-                                      <div className="flex items-center gap-1 pl-2 border-l border-amber-200">
-                                         <Zap size={8} className="text-amber-400" />
-                                         <span className="text-[8px] font-black text-amber-500">{availStr}{isNextDay ? '+1' : ''}</span>
-                                      </div>
-                                      <button onClick={() => deleteIncomingDuty(d.id)} className="text-amber-400 hover:text-amber-600"><X size={10}/></button>
+                                      <button onClick={() => deleteIncomingDuty(d.id)} className="text-amber-400 hover:text-amber-600 ml-1"><X size={10}/></button>
                                    </div>
                                  );
                                })}
@@ -493,27 +520,40 @@ const App: React.FC = () => {
                                 />
                             </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                           <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)}/>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                           <div className="md:col-span-2 flex gap-2">
+                              <input type="date" title="Start Date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)}/>
+                              <input type="date" title="End Date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveEndDate} onChange={e => setQuickLeaveEndDate(e.target.value)}/>
+                           </div>
                            <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-4 outline-none" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
                               <option value="Day off">Day off</option>
                               <option value="Annual leave">Annual leave</option>
                               <option value="Sick leave">Sick leave</option>
                               <option value="Roster leave">Roster leave</option>
                            </select>
-                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
+                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Log</button>
                         </div>
 
-                        {/* Feedback List */}
-                        <div className="pt-4 border-t border-slate-50">
-                           <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absences for {quickLeaveDate}</h5>
+                        {/* Feedback List - Showing All */}
+                        <div className="pt-4 border-t border-slate-50 max-h-60 overflow-y-auto custom-scrollbar">
+                           <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">All Absence Records ({leaveRequests.length})</h5>
                            <div className="flex flex-wrap gap-2">
-                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
-                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).map(l => (
-                               <div key={l.id} className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in">
+                             {leaveRequests.length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
+                             {[...leaveRequests].sort((a,b) => b.startDate.localeCompare(a.startDate)).map(l => (
+                               <div key={l.id} className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in hover:shadow-md transition-all">
+                                  <div className="flex items-center gap-1 text-[8px] font-bold text-indigo-400">
+                                     <span>{formatDateShort(l.startDate)}</span>
+                                     {l.startDate !== l.endDate && (
+                                       <>
+                                         <ChevronRight size={8} />
+                                         <span>{formatDateShort(l.endDate)}</span>
+                                       </>
+                                     )}
+                                  </div>
+                                  <div className="w-px h-3 bg-indigo-200"></div>
                                   <span className="text-[10px] font-black text-indigo-700 uppercase">{staff.find(s => s.id === l.staffId)?.initials}</span>
                                   <span className="text-[10px] font-bold text-indigo-500">{l.type}</span>
-                                  <button onClick={() => deleteLeaveRequest(l.id)} className="text-indigo-400 hover:text-indigo-600"><X size={10}/></button>
+                                  <button onClick={() => deleteLeaveRequest(l.id)} className="text-indigo-400 hover:text-indigo-600 ml-1"><X size={10}/></button>
                                </div>
                              ))}
                            </div>
