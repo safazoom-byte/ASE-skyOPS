@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -29,7 +30,8 @@ import {
   Cloud,
   Layers,
   Timer,
-  CheckCircle2
+  CheckCircle2,
+  PieChart
 } from 'lucide-react';
 import './style.css'; 
 
@@ -41,6 +43,7 @@ import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramChat } from './components/ProgramChat';
 import { GithubSync } from './components/GithubSync';
 import { CapacityForecast } from './components/CapacityForecast';
+import { StationStatistics } from './components/StationStatistics';
 import { Auth } from './components/Auth';
 import { SkyOpsLogo } from './components/Logo';
 import { generateAIProgram } from './services/geminiService';
@@ -66,7 +69,7 @@ const DATA_KEYS = {
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program' | 'statistics'>('dashboard');
   const [cloudStatus, setCloudStatus] = useState<'connected' | 'offline' | 'unconfigured' | 'error'>('unconfigured');
   
   const [startDate, setStartDate] = useState<string>(() => localStorage.getItem(UI_PREF_KEYS.START_DATE) || new Date().toISOString().split('T')[0]);
@@ -151,8 +154,6 @@ const App: React.FC = () => {
       try {
         const cloudData = await db.fetchAll();
         if (mounted && cloudData) {
-          // Merge logic: If cloud is empty but local has data, keep local (offline first assumption for start)
-          // But usually cloud is master. For this app, we'll overwrite local with cloud if cloud has data.
           if (cloudData.flights?.length) setFlights(cloudData.flights); 
           if (cloudData.staff?.length) setStaff(cloudData.staff); 
           if (cloudData.shifts?.length) setShifts(cloudData.shifts);
@@ -368,7 +369,7 @@ const App: React.FC = () => {
         <div className="flex items-center gap-4">
            {/* Desktop Nav */}
            <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
-              {['dashboard', 'flights', 'staff', 'shifts', 'program'].map(tab => (
+              {['dashboard', 'flights', 'staff', 'shifts', 'program', 'statistics'].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab}</button>
               ))}
            </nav>
@@ -551,6 +552,30 @@ const App: React.FC = () => {
         {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} />}
         {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} minRestHours={minRestHours} onUpdatePrograms={async (updated) => { setPrograms(updated); if (supabase) await db.savePrograms(updated); }} />}
+        
+        {activeTab === 'statistics' && (
+          <div className="max-w-6xl mx-auto space-y-6 md:space-y-12 animate-in fade-in duration-500">
+             <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div>
+                   <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter">Station Analytics</h2>
+                   <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2 flex items-center gap-2">
+                     <PieChart size={14} /> Comprehensive Manpower Report
+                   </p>
+                </div>
+                <div className="flex gap-4">
+                   <div className="flex flex-col">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Period Start</label>
+                      <input type="date" className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                   </div>
+                   <div className="flex flex-col">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Period End</label>
+                      <input type="date" className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                   </div>
+                </div>
+             </div>
+             <StationStatistics staff={staff} shifts={shifts} leaveRequests={leaveRequests} startDate={startDate} endDate={endDate} />
+          </div>
+        )}
       </main>
       
       {/* Mobile Footer Navigation */}
@@ -561,6 +586,7 @@ const App: React.FC = () => {
            { id: 'staff', icon: Users, label: 'Staff' },
            { id: 'shifts', icon: Clock, label: 'Shifts' },
            { id: 'program', icon: CalendarDays, label: 'Roster' },
+           { id: 'statistics', icon: PieChart, label: 'Stats' },
          ].map(item => (
            <button 
              key={item.id}
