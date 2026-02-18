@@ -93,8 +93,14 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(true);
     const doc = new jsPDF('l', 'mm', 'a4');
     
+    // STRICT DATE FILTER: Only process programs within the selected range
+    const activePrograms = programs.filter(p => {
+        if (!p.dateString) return false;
+        return p.dateString >= startDate && p.dateString <= endDate;
+    }).sort((a,b) => (a.dateString || '').localeCompare(b.dateString || ''));
+
     // --- 1. DAILY PROGRAM PAGES ---
-    programs.forEach((prog, index) => {
+    activePrograms.forEach((prog, index) => {
       if (index > 0) doc.addPage();
       
       const currentDate = new Date(prog.dateString || startDate);
@@ -113,50 +119,59 @@ export const ProgramDisplay: React.FC<Props> = ({
 
       let contentStartY = 35;
 
-      // --- REST LOG TABLE (Inserted on First Page) ---
-      if (index === 0 && incomingDuties.length > 0) {
-          const groupedMap = new Map<string, string[]>(); // key: "date|time", value: [initials]
+      // --- REST LOG TABLE (Inserted on First Page Only) ---
+      // FILTER: Only show duties from the last 48 hours relative to Start Date
+      if (index === 0) {
+          const groupedMap = new Map<string, string[]>(); 
           
           incomingDuties.forEach(d => {
-              const key = `${d.date}|${d.shiftEndTime}`;
-              const st = getStaff(d.staffId);
-              if (st) {
-                  const existing = groupedMap.get(key) || [];
-                  existing.push(st.initials);
-                  groupedMap.set(key, existing);
+              // Date Check: Is this duty relevant? (e.g. within 2 days before start)
+              const dDate = new Date(d.date);
+              const sDate = new Date(startDate);
+              const diffTime = sDate.getTime() - dDate.getTime();
+              const diffDays = diffTime / (1000 * 3600 * 24);
+              
+              if (diffDays >= 0 && diffDays <= 2) {
+                  const key = `${d.date}|${d.shiftEndTime}`;
+                  const st = getStaff(d.staffId);
+                  if (st) {
+                      const existing = groupedMap.get(key) || [];
+                      existing.push(st.initials);
+                      groupedMap.set(key, existing);
+                  }
               }
           });
 
           const sortedKeys = Array.from(groupedMap.keys()).sort();
 
-          const restRows = sortedKeys.map((key, i) => {
-              const [dDate, dTime] = key.split('|');
-              const endDt = new Date(`${dDate}T${dTime}`);
-              const releaseDt = new Date(endDt.getTime() + minRestHours * 60 * 60 * 1000);
-              
-              const isPrevDay = new Date(dDate) < new Date(startDate);
-              const dateLabel = isPrevDay ? "Prev Day" : `${endDt.getDate()}/${endDt.getMonth()+1}`;
-              
-              const releaseDateLabel = releaseDt.getDate() !== endDt.getDate() 
-                  ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
-                  : ""; 
+          if (sortedKeys.length > 0) {
+              const restRows = sortedKeys.map((key, i) => {
+                  const [dDate, dTime] = key.split('|');
+                  const endDt = new Date(`${dDate}T${dTime}`);
+                  const releaseDt = new Date(endDt.getTime() + minRestHours * 60 * 60 * 1000);
+                  
+                  const isPrevDay = new Date(dDate) < new Date(startDate);
+                  const dateLabel = isPrevDay ? "Prev Day" : `${endDt.getDate()}/${endDt.getMonth()+1}`;
+                  
+                  const releaseDateLabel = releaseDt.getDate() !== endDt.getDate() 
+                      ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
+                      : ""; 
 
-              const initials = groupedMap.get(key)?.join(' - ');
-              const hc = groupedMap.get(key)?.length || 0;
+                  const initials = groupedMap.get(key)?.join(' - ');
+                  const hc = groupedMap.get(key)?.length || 0;
 
-              return [
-                  (i + 1).toString(),
-                  `${dTime} (${dateLabel})`,
-                  `${releaseDt.getHours().toString().padStart(2,'0')}:${releaseDt.getMinutes().toString().padStart(2,'0')} ${releaseDateLabel}`,
-                  hc.toString(),
-                  initials
-              ];
-          });
+                  return [
+                      (i + 1).toString(),
+                      `${dTime} (${dateLabel})`,
+                      `${releaseDt.getHours().toString().padStart(2,'0')}:${releaseDt.getMinutes().toString().padStart(2,'0')} ${releaseDateLabel}`,
+                      hc.toString(),
+                      initials
+                  ];
+              });
 
-          if (restRows.length > 0) {
               doc.setFontSize(9);
               doc.setFont('helvetica', 'bold');
-              doc.text("PREVIOUS DAY SHIFTS", 14, contentStartY - 2);
+              doc.text("PREVIOUS DAY SHIFTS (INCOMING HANDOVER)", 14, contentStartY - 2);
 
               autoTable(doc, {
                   startY: contentStartY,
@@ -270,7 +285,7 @@ export const ProgramDisplay: React.FC<Props> = ({
          // Counter Logic
          let count = 1; 
          for (let i = index - 1; i >= 0; i--) {
-             const prevProg = programs[i];
+             const prevProg = activePrograms[i];
              const worked = prevProg.assignments.some(a => a.staffId === s.id);
              const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
              
@@ -296,7 +311,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             else if (leave.type === 'Day off') categories['DAYS OFF'].push(label);
             else categories['DAYS OFF'].push(label);
          } else {
-            const yesterdayProg = programs[index - 1];
+            const yesterdayProg = activePrograms[index - 1];
             let workedYesterday = false;
             if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
             
@@ -333,8 +348,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     
     const localStaff = staff.filter(s => s.type === 'Local');
     const localAuditData = localStaff.map((s, idx) => {
-        const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        const daysOff = programs.length - shiftsWorked;
+        const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+        const daysOff = activePrograms.length - shiftsWorked;
         const targetShifts = 5; 
         const targetOff = 2;
         const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
@@ -379,7 +394,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
     const rosterStaff = staff.filter(s => s.type === 'Roster');
     const rosterAuditData = rosterStaff.map((s, idx) => {
-        const shiftsWorked = programs.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+        const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
         const progStart = new Date(startDate);
         const progEnd = new Date(endDate);
         const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
@@ -435,7 +450,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.setTextColor(0,0,0);
     doc.text("Weekly Operations Matrix View", 14, 15);
 
-    const dateHeaders = programs.map(p => {
+    const dateHeaders = activePrograms.map(p => {
         const d = new Date(p.dateString || startDate);
         return `${d.getDate()}/${d.getMonth()+1}`;
     });
@@ -444,7 +459,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const matrixBody = staff.map((s, idx) => {
         const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
         let workedCount = 0;
-        programs.forEach(p => {
+        activePrograms.forEach(p => {
             const assign = p.assignments.find(a => a.staffId === s.id);
             if (assign) {
                 workedCount++;
@@ -464,7 +479,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 row.push('-');
             }
         });
-        row.push(`${workedCount}/${programs.length}`);
+        row.push(`${workedCount}/${activePrograms.length}`);
         return row;
     });
 
@@ -503,7 +518,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const roleMatrixData: any[] = [];
     const roleMatrixMeta: any[] = [];
     
-    programs.forEach(p => {
+    activePrograms.forEach(p => {
         const d = new Date(p.dateString || startDate);
         const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
         const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
@@ -640,7 +655,8 @@ export const ProgramDisplay: React.FC<Props> = ({
             </div>
          ) : (
             <div className="space-y-12">
-               {programs.map((prog, i) => (
+               {/* STRICTLY FILTERED DISPLAY LOOP - Fixes 'Old Days' appearing in UI */}
+               {programs.filter(p => p.dateString && p.dateString >= startDate && p.dateString <= endDate).sort((a,b) => (a.dateString || '').localeCompare(b.dateString || '')).map((prog, i) => (
                   <div key={i} className="space-y-6">
                      <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
                         <div className="w-10 h-10 bg-slate-950 text-white rounded-xl flex items-center justify-center font-black italic">

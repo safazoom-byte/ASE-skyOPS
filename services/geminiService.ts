@@ -238,6 +238,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   const parsed = safeParseJson(response.text);
+  
+  // SANITIZED INITIALIZATION: Create empty days ONLY for the requested period.
   const finalPrograms: DailyProgram[] = Array.from({length: config.numDays}).map((_, i) => {
       const d = new Date(config.startDate);
       d.setDate(d.getDate() + i);
@@ -248,7 +250,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     parsed.forEach((item: any) => {
         const [dayOffset, shiftIdx, initials, role] = Array.isArray(item) ? item : [item.d, item.s, item.st, item.r];
         const staffId = staffMap[String(initials).toUpperCase()];
-        if (finalPrograms[dayOffset] && data.shifts[shiftIdx] && staffId) {
+        
+        // Strict Boundary Check: Ensure dayOffset is within the 0..numDays-1 range
+        if (typeof dayOffset === 'number' && dayOffset >= 0 && dayOffset < config.numDays && finalPrograms[dayOffset] && data.shifts[shiftIdx] && staffId) {
             finalPrograms[dayOffset].assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
                 staffId,
