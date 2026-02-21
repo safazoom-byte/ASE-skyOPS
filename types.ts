@@ -88,6 +88,18 @@ export interface DailyProgram {
   offDuty?: OffDutyRecord[];
 }
 
+export interface ProgramVersion {
+  id: string;
+  versionNumber: number;
+  name: string;
+  createdAt: string; // ISO Date
+  periodStart: string;
+  periodEnd: string;
+  programs: DailyProgram[];
+  stationHealth: number;
+  isAutoSave?: boolean;
+}
+
 export interface ProgramData {
   flights: Flight[];
   staff: Staff[];

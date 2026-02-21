@@ -265,46 +265,50 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     }).join('\n');
 
   const operationalBriefing = `
-    GLOBAL MATRIX SOLVER V2 (HIGH FIDELITY MODE):
+    GLOBAL MATRIX SOLVER V3 (DAYS-OFF-FIRST ARCHITECTURE):
     
-    MANPOWER BLUEPRINT (HARD MATHEMATICAL LIMITS):
-    ${blueprintBlock}
-
-    STRATEGIC ALLOCATION PROTOCOL (3-PASS SYSTEM):
+    CRITICAL PROTOCOL: YOU MUST ALLOCATE DAYS OFF *BEFORE* ASSIGNING SHIFTS.
     
-    PASS 1: COMMAND STRUCTURE (SL & LC)
-    - Assign 'Shift Leaders' and 'Load Control' first.
-    - DISTRIBUTE TALENT: Do not cluster all senior staff in the AM Wave. Ensure Night Ops have at least 1 senior capability if possible.
-    - Use [DUAL_LC_SL] agents efficiently to cover double requirements where legal.
-
-    PASS 2: SPECIALIST CORE (OPS, RMP, LF)
-    - Fill 'Operations', 'Ramp', and 'Lost & Found' requirements next.
-    - Match skills strictly. An agent without 'RMP' skill cannot cover a 'RMP' requirement.
-
-    PASS 3: GENERAL WORKFORCE & FATIGUE MANAGEMENT
-    - Fill remaining 'MinReq' slots with General Agents.
-    - FATIGUE CHECK: Agents marked 'CRITICAL_FATIGUE' should NOT be assigned to early AM starts on Day 0.
-    - CONTINUITY: If an agent works PM_WAVE on Day 0, prefer PM_WAVE for Day 1 to avoid body clock disruption.
-
-    CONSTRAINT CHECKS:
-    1. ROSTER PRIORITY: Contract staff must fulfill their 'AllocatableShifts' before Locals.
-    2. FORCE OFF: Ensure exactly 'LOCAL_FORCE_OFF' locals are left empty (no assignments) per day. Prioritize resting high-fatigue agents.
-    3. REST: ${config.minRestHours}h minimum rest between shifts is MANDATORY.
+    STEP 1: CAPACITY ANALYSIS & ROSTER LOCK
+    - Calculate total staff needed per day based on 'MinReq' of all shifts.
+    - Identify 'Roster' staff availability based on their contract dates (workFrom/workTo).
+    - 'Roster' staff work EVERY day within their contract period unless on Leave.
+    
+    STEP 2: LOCAL STAFF DAYS OFF ALLOCATION (THE PUZZLE SOLVER)
+    - Each 'Local' staff member MUST have exactly 2 DAYS OFF per 7-day period (5 Days On / 2 Days Off).
+    - STRATEGY: Assign days off on days with the LOWEST demand or HIGHEST Roster staff availability.
+    - CONSTRAINT: Ensure enough Locals remain on each day to meet the 'LOCAL_WORK_TARGET' calculated in the Blueprint.
+    - OUTPUT: Create an internal map of [StaffID -> Array of OffDays].
+    
+    STEP 3: SHIFT ASSIGNMENT (EXECUTION)
+    - Now, assign shifts using ONLY the staff who are NOT on a Day Off.
+    - PASS 1: COMMAND (SL, LC) - Fill using available Senior staff.
+    - PASS 2: SPECIALIST (OPS, RMP, LF) - Fill using available Specialist staff.
+    - PASS 3: GENERAL - Fill remaining slots.
+    
+    HARD RULES:
+    1. NO SHIFTS ON DAYS OFF: A Local staff member MUST NOT be assigned to any shift on their 2 allocated days off.
+    2. ROSTER PRIORITY: Use Roster staff first to save Local man-days for peak times.
+    3. REST: ${config.minRestHours}h minimum rest is MANDATORY.
+    4. CONTINUITY: Avoid "Split Days Off" if possible (e.g., prefer Mon/Tue off over Mon/Thu off).
   `;
 
   const prompt = `
     ROLE: Global Strategic Roster Architect
-    MISSION: Assign staff to shifts adhering strictly to the MANPOWER BLUEPRINT.
+    MISSION: Solve the "Local Staff Days Off" puzzle first, then assign shifts.
     
     ${operationalBriefing}
 
-    EXECUTION STEPS:
-    1. Read the "MANPOWER BLUEPRINT" for Day X. It tells you exactly how many Locals to use and how many to rest.
-    2. Read "AvailPattern" for each agent. '0' means physically unavailable (Leave/Contract). '1' means available.
-    3. Fill the 'RosterAvailable' quota first using available Roster staff.
-    4. Fill the 'LOCAL_WORK_TARGET' using available Local staff.
-    5. The remaining Locals (equal to LOCAL_FORCE_OFF) MUST NOT be assigned shifts on that day.
-    6. Ensure specialist roles (LC, SL, OPS, RMP) are covered by people with those skills.
+    MANPOWER BLUEPRINT (DAILY TARGETS):
+    ${blueprintBlock}
+
+    EXECUTION INSTRUCTIONS:
+    1. Analyze the Blueprint to see which days need the most people.
+    2. For every Local staff member, pick 2 days to be "OFF".
+       - Pick days where 'LOCAL_WORK_TARGET' is low.
+       - Ensure you don't give everyone the same days off (stagger them).
+    3. Once days off are set, assign the remaining 5 working days to specific shifts.
+    4. Ensure Specialist Roles (SL, LC, RMP, OPS) are covered every single day.
 
     OUTPUT FORMAT: 
     STRICTLY RETURN ONLY A RAW JSON ARRAY. NO MARKDOWN. NO COMMENTS.
