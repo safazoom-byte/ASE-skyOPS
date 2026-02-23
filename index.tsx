@@ -501,7 +501,6 @@ const App: React.FC = () => {
                               <option value="Day off">Day off</option>
                               <option value="Annual leave">Annual leave</option>
                               <option value="Sick leave">Sick leave</option>
-                              <option value="Roster leave">Roster leave</option>
                            </select>
                            <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
                         </div>

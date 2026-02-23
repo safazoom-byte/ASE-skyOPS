@@ -231,10 +231,51 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
       }
 
+      const workingIds = new Set(prog.assignments.map(a => a.staffId));
+      const offStaff = staff.filter(s => !workingIds.has(s.id));
+      const pdfCategories: Record<string, string[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
+
+      offStaff.forEach(s => {
+         const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
+         let count = 1; 
+         for (let i = index - 1; i >= 0; i--) {
+             const prevProg = activePrograms[i];
+             const worked = prevProg.assignments.some(a => a.staffId === s.id);
+             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
+             if (!worked) { if (leave && prevLeave && prevLeave.type === leave.type) count++; else if (!leave && !prevLeave) count++; else break; } else break;
+         }
+         const label = `${s.initials} (${count})`;
+         const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
+
+         if (isRosterOutOfContract) pdfCategories['ROSTER LEAVE'].push(label);
+         else if (leave) {
+            if (leave.type === 'Annual leave') pdfCategories['ANNUAL LEAVE'].push(label);
+            else if (leave.type === 'Roster leave') pdfCategories['ROSTER LEAVE'].push(label);
+            else if (leave.type === 'Sick leave') pdfCategories['SICK LEAVE'].push(label);
+            else pdfCategories['DAYS OFF'].push(label);
+         } else {
+            const yesterdayProg = activePrograms[index - 1];
+            let workedYesterday = false;
+            if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
+            if (!workedYesterday) {
+               if (s.type === 'Local') pdfCategories['DAYS OFF'].push(label);
+               else pdfCategories['STANDBY (RESERVE)'].push(label);
+            }
+         }
+      });
+
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
       doc.text(dateStr, 14, contentStartY);
+      
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(70, 70, 70);
+      const statsText = `HEADCOUNT RECONCILIATION: Total Registered: ${staff.length} | Working: ${workingIds.size} | Days Off: ${pdfCategories['DAYS OFF'].length} | Annual Leave: ${pdfCategories['ANNUAL LEAVE'].length} | Sick Leave: ${pdfCategories['SICK LEAVE'].length} | Standby: ${pdfCategories['STANDBY (RESERVE)'].length} | Roster Leave: ${pdfCategories['ROSTER LEAVE'].length}`;
+      doc.text(statsText, 14, contentStartY + 5);
+      
+      contentStartY += 10;
 
       const shiftsToday = shifts.filter(s => s.pickupDate === prog.dateString);
       const tableData = shiftsToday.map((shift, idx) => {
@@ -245,7 +286,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
 
       autoTable(doc, {
-        startY: contentStartY + 5,
+        startY: contentStartY,
         head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
         body: tableData,
         theme: 'grid',
@@ -261,44 +302,13 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.setFont('helvetica', 'bold');
       doc.text("ABSENCE AND REST REGISTRY", 14, finalY);
 
-      const workingIds = new Set(prog.assignments.map(a => a.staffId));
-      const offStaff = staff.filter(s => !workingIds.has(s.id));
-      const categories: Record<string, string[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'STANDBY (RESERVE)': [] };
-
-      offStaff.forEach(s => {
-         const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
-         let count = 1; 
-         for (let i = index - 1; i >= 0; i--) {
-             const prevProg = activePrograms[i];
-             const worked = prevProg.assignments.some(a => a.staffId === s.id);
-             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
-             if (!worked) { if (leave && prevLeave && prevLeave.type === leave.type) count++; else if (!leave && !prevLeave) count++; else break; } else break;
-         }
-         const label = `${s.initials} (${count})`;
-         const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
-
-         if (isRosterOutOfContract) categories['ROSTER LEAVE'].push(label);
-         else if (leave) {
-            if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(label);
-            else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(label);
-            else categories['DAYS OFF'].push(label);
-         } else {
-            const yesterdayProg = activePrograms[index - 1];
-            let workedYesterday = false;
-            if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
-            if (!workedYesterday) {
-               if (s.type === 'Local') categories['DAYS OFF'].push(label);
-               else categories['STANDBY (RESERVE)'].push(label);
-            }
-         }
-      });
-
       const registryData = [
-         ['DAYS OFF', categories['DAYS OFF'].join(', ')],
-         ['ROSTER LEAVE', categories['ROSTER LEAVE'].join(', ')],
-         ['ANNUAL LEAVE', categories['ANNUAL LEAVE'].join(', ')],
-         ['STANDBY (RESERVE)', categories['STANDBY (RESERVE)'].join(', ')]
-      ];
+         ['DAYS OFF', pdfCategories['DAYS OFF'].join(', ')],
+         ['ROSTER LEAVE', pdfCategories['ROSTER LEAVE'].join(', ')],
+         ['ANNUAL LEAVE', pdfCategories['ANNUAL LEAVE'].join(', ')],
+         ['SICK LEAVE', pdfCategories['SICK LEAVE'].join(', ')],
+         ['STANDBY (RESERVE)', pdfCategories['STANDBY (RESERVE)'].join(', ')]
+      ].filter(row => row[1].length > 0);
 
       autoTable(doc, {
         startY: finalY + 2,
@@ -611,7 +621,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                  
                  const workingIds = new Set(prog.assignments.map(a => a.staffId));
                  const offStaff = staff.filter(s => !workingIds.has(s.id));
-                 const categories: Record<string, { staff: Staff, count: number }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'STANDBY (RESERVE)': [] };
+                 const categories: Record<string, { staff: Staff, count: number }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
 
                  offStaff.forEach(s => {
                      const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
@@ -631,6 +641,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                      } else if (leave) {
                         if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(item);
                         else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(item);
+                        else if (leave.type === 'Sick leave') categories['SICK LEAVE'].push(item);
                         else categories['DAYS OFF'].push(item);
                      } else {
                         if (s.type === 'Local') {
@@ -647,8 +658,16 @@ export const ProgramDisplay: React.FC<Props> = ({
 
                  return (
                     <div key={i} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                       <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                       <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
                           <h3 className="text-lg font-black uppercase italic text-slate-900">{dateLabel}</h3>
+                          <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest">
+                             <span className="px-2 py-1 bg-slate-900 text-white rounded-md">Total: {staff.length}</span>
+                             <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md">Work: {workingIds.size}</span>
+                             <span className="px-2 py-1 bg-slate-200 text-slate-700 rounded-md">Off: {categories['DAYS OFF'].length}</span>
+                             <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-md">Leave: {categories['ANNUAL LEAVE'].length + categories['SICK LEAVE'].length}</span>
+                             <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-md">SBY: {categories['STANDBY (RESERVE)'].length}</span>
+                             <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-md">Roster Off: {categories['ROSTER LEAVE'].length}</span>
+                          </div>
                        </div>
                        
                        <div className="overflow-x-auto">
