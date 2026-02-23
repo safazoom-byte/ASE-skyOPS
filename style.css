@@ -36,6 +36,10 @@ body {
   animation: wave 1s ease-in-out infinite;
 }
 
+[draggable="true"] {
+  touch-action: none;
+}
+
 @keyframes wave {
   0%, 100% { height: 20%; }
   50% { height: 100%; }

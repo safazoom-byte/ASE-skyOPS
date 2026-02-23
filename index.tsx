@@ -2,6 +2,18 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { polyfill } from "mobile-drag-drop";
+import { scrollBehaviourDragImageTranslateOverride } from "mobile-drag-drop/scroll-behaviour";
+import "mobile-drag-drop/default.css";
+
+// Initialize mobile drag-and-drop polyfill
+polyfill({
+    dragImageTranslateOverride: scrollBehaviourDragImageTranslateOverride
+});
+
+// Prevent scrolling while dragging on mobile
+window.addEventListener('touchmove', function() {}, {passive: false});
+
 import { 
   Plane, 
   Users, 
@@ -112,7 +124,8 @@ const App: React.FC = () => {
 
   // Leave Registry Logic (Off-Duty)
   const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
-  const [quickLeaveDate, setQuickLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [quickLeaveStartDate, setQuickLeaveStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [quickLeaveEndDate, setQuickLeaveEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>('Day off');
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState('');
 
@@ -325,8 +338,8 @@ const App: React.FC = () => {
     const newLeaves: LeaveRequest[] = finalIds.map(sid => ({ 
       id: Math.random().toString(36).substr(2, 9), 
       staffId: sid, 
-      startDate: quickLeaveDate, 
-      endDate: quickLeaveDate, 
+      startDate: quickLeaveStartDate, 
+      endDate: quickLeaveEndDate, 
       type: quickLeaveType 
     }));
     
@@ -495,25 +508,39 @@ const App: React.FC = () => {
                                 />
                             </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                           <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveDate} onChange={e => setQuickLeaveDate(e.target.value)}/>
-                           <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-4 outline-none" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
-                              <option value="Day off">Day off</option>
-                              <option value="Annual leave">Annual leave</option>
-                              <option value="Sick leave">Sick leave</option>
-                           </select>
-                           <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                           <div className="flex flex-col gap-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">From</label>
+                              <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveStartDate} onChange={e => { setQuickLeaveStartDate(e.target.value); if (e.target.value > quickLeaveEndDate) setQuickLeaveEndDate(e.target.value); }}/>
+                           </div>
+                           <div className="flex flex-col gap-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To</label>
+                              <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" value={quickLeaveEndDate} min={quickLeaveStartDate} onChange={e => setQuickLeaveEndDate(e.target.value)}/>
+                           </div>
+                           <div className="flex flex-col gap-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Type</label>
+                              <select className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-4 outline-none" value={quickLeaveType} onChange={e => setQuickLeaveType(e.target.value as LeaveType)}>
+                                 <option value="Day off">Day off</option>
+                                 <option value="Annual leave">Annual leave</option>
+                                 <option value="Sick leave">Sick leave</option>
+                                 <option value="Roster leave">Roster leave</option>
+                              </select>
+                           </div>
+                           <div className="flex flex-col gap-1 justify-end">
+                              <button onClick={addQuickLeave} disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()} className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"><Plus size={16}/> Add Group Log</button>
+                           </div>
                         </div>
 
                         {/* Feedback List */}
                         <div className="pt-4 border-t border-slate-50">
-                           <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absences for {quickLeaveDate}</h5>
+                           <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Absences overlapping {quickLeaveStartDate} to {quickLeaveEndDate}</h5>
                            <div className="flex flex-wrap gap-2">
-                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
-                             {leaveRequests.filter(l => l.startDate === quickLeaveDate).map(l => (
+                             {leaveRequests.filter(l => l.startDate <= quickLeaveEndDate && l.endDate >= quickLeaveStartDate).length === 0 && <span className="text-[9px] italic text-slate-300">No entries yet.</span>}
+                             {leaveRequests.filter(l => l.startDate <= quickLeaveEndDate && l.endDate >= quickLeaveStartDate).map(l => (
                                <div key={l.id} className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in">
                                   <span className="text-[10px] font-black text-indigo-700 uppercase">{staff.find(s => s.id === l.staffId)?.initials}</span>
                                   <span className="text-[10px] font-bold text-indigo-500">{l.type}</span>
+                                  <span className="text-[8px] font-bold text-indigo-400 bg-indigo-100 px-1 rounded">{l.startDate === l.endDate ? l.startDate : `${l.startDate} - ${l.endDate}`}</span>
                                   <button onClick={() => deleteLeaveRequest(l.id)} className="text-indigo-400 hover:text-indigo-600"><X size={10}/></button>
                                </div>
                              ))}
@@ -636,6 +663,9 @@ const App: React.FC = () => {
 
 const container = document.getElementById('root');
 if (container) {
-  const root = createRoot(container);
+  // @ts-ignore
+  const root = container._reactRootContainer || createRoot(container);
+  // @ts-ignore
+  container._reactRootContainer = root;
   root.render(<App />);
 }

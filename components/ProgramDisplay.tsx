@@ -254,13 +254,8 @@ export const ProgramDisplay: React.FC<Props> = ({
             else if (leave.type === 'Sick leave') pdfCategories['SICK LEAVE'].push(label);
             else pdfCategories['DAYS OFF'].push(label);
          } else {
-            const yesterdayProg = activePrograms[index - 1];
-            let workedYesterday = false;
-            if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
-            if (!workedYesterday) {
-               if (s.type === 'Local') pdfCategories['DAYS OFF'].push(label);
-               else pdfCategories['STANDBY (RESERVE)'].push(label);
-            }
+            if (s.type === 'Local') pdfCategories['DAYS OFF'].push(label);
+            else pdfCategories['STANDBY (RESERVE)'].push(label);
          }
       });
 
@@ -303,12 +298,12 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.text("ABSENCE AND REST REGISTRY", 14, finalY);
 
       const registryData = [
-         ['DAYS OFF', pdfCategories['DAYS OFF'].join(', ')],
-         ['ROSTER LEAVE', pdfCategories['ROSTER LEAVE'].join(', ')],
-         ['ANNUAL LEAVE', pdfCategories['ANNUAL LEAVE'].join(', ')],
-         ['SICK LEAVE', pdfCategories['SICK LEAVE'].join(', ')],
-         ['STANDBY (RESERVE)', pdfCategories['STANDBY (RESERVE)'].join(', ')]
-      ].filter(row => row[1].length > 0);
+         ['DAYS OFF', pdfCategories['DAYS OFF'].join(', ') || 'NIL'],
+         ['ROSTER LEAVE', pdfCategories['ROSTER LEAVE'].join(', ') || 'NIL'],
+         ['ANNUAL LEAVE', pdfCategories['ANNUAL LEAVE'].join(', ') || 'NIL'],
+         ['SICK LEAVE', pdfCategories['SICK LEAVE'].join(', ') || 'NIL'],
+         ['STANDBY (RESERVE)', pdfCategories['STANDBY (RESERVE)'].join(', ') || 'NIL']
+      ];
 
       autoTable(doc, {
         startY: finalY + 2,
@@ -802,12 +797,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             {items.map(({ staff: s, count }) => {
                                                 const daysWorked = getStaffWorkload(s.id);
                                                 const colorClass = getStaffColor(s, daysWorked, null);
+                                                const isLocked = cat === 'ROSTER LEAVE' || cat === 'ANNUAL LEAVE';
                                                 return (
                                                    <div 
                                                       key={s.id}
-                                                      draggable
-                                                      onDragStart={(e) => handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, s.isShiftLeader ? 'SL' : s.isLoadControl ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')}
-                                                      className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
+                                                      draggable={!isLocked}
+                                                      onDragStart={(e) => {
+                                                          if (isLocked) {
+                                                              e.preventDefault();
+                                                              return;
+                                                          }
+                                                          handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, s.isShiftLeader ? 'SL' : s.isLoadControl ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')
+                                                      }}
+                                                      className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-move hover:scale-105'}`}>
                                                       <span>{s.initials}</span>
                                                       <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{count}</span>
                                                    </div>
