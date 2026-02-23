@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Skill, ProgramVersion } from '../types';
 import { jsPDF } from 'jspdf';
@@ -56,7 +55,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Load versions from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('skyops_program_versions');
     if (saved) {
@@ -79,7 +77,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       createdAt: new Date().toISOString(),
       periodStart: startDate,
       periodEnd: endDate,
-      programs: JSON.parse(JSON.stringify(programs)), // Deep copy
+      programs: JSON.parse(JSON.stringify(programs)),
       stationHealth,
       isAutoSave: false
     };
@@ -106,7 +104,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   const getFlight = (id: string) => flights.find(f => f.id === id);
   const getShift = (id: string) => shifts.find(s => s.id === id);
 
-  // Filter programs first to check if we have data to show
   const activePrograms = programs.filter(p => {
         if (!p.dateString) return false;
         return p.dateString >= startDate && p.dateString <= endDate;
@@ -115,11 +112,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   const totalAssignments = activePrograms.reduce((acc, p) => acc + p.assignments.length, 0);
   const isFailedGeneration = activePrograms.length > 0 && totalAssignments === 0;
 
-  // --- HELPER: Calculate Rest Hours ---
   const calculateRestHours = (staffId: string, currentShiftStart: Date): number | null => {
     let lastEndTime: Date | null = null;
-
-    // 1. Check Incoming Duties (Log)
     const staffIncoming = incomingDuties.filter(d => d.staffId === staffId);
     staffIncoming.forEach(d => {
         const dt = new Date(`${d.date}T${d.shiftEndTime}`);
@@ -127,8 +121,6 @@ export const ProgramDisplay: React.FC<Props> = ({
             lastEndTime = dt;
         }
     });
-
-    // 2. Check Previous Program Assignments
     programs.forEach(p => {
         p.assignments.filter(a => a.staffId === staffId).forEach(a => {
             const s = getShift(a.shiftId || '');
@@ -136,19 +128,15 @@ export const ProgramDisplay: React.FC<Props> = ({
                const pDate = new Date(p.dateString || startDate);
                const [sh, sm] = s.endTime.split(':').map(Number);
                const [ph, pm] = s.pickupTime.split(':').map(Number);
-               
                const endDt = new Date(pDate);
                endDt.setHours(sh, sm, 0, 0);
-               // Handle overnight
                if (sh < ph) endDt.setDate(endDt.getDate() + 1);
-
                if (endDt < currentShiftStart && (!lastEndTime || endDt > lastEndTime)) {
                    lastEndTime = endDt;
                }
             }
         });
     });
-
     if (!lastEndTime) return null;
     const diffMs = currentShiftStart.getTime() - (lastEndTime as Date).getTime();
     return parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
@@ -213,7 +201,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
                       : ""; 
 
-                  const initials = groupedMap.get(key)?.join(' - ');
+                  const initials = groupedMap.get(key)?.join(' - ') || '';
                   const hc = groupedMap.get(key)?.length || 0;
 
                   return [
@@ -318,7 +306,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         body: registryData,
         theme: 'grid',
         headStyles: { fillColor: [50, 50, 60], textColor: [255, 255, 255] },
-        styles: { fontSize: 8, cellPadding: 2 },
+        styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
         columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' } }
       });
     });
@@ -336,7 +324,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
         return [(idx + 1).toString(), s.name, s.initials, shiftsWorked.toString(), daysOff.toString(), isMatch ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = data.row.raw[5]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[5]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
 
     doc.addPage();
     doc.setFontSize(16);
@@ -356,7 +344,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const isMatch = shiftsWorked === potential;
         return [(idx + 1).toString(), s.name, s.initials, s.workFromDate || 'N/A', s.workToDate || 'N/A', potential.toString(), shiftsWorked.toString(), isMatch ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = data.row.raw[7]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[7]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
 
     // --- 3. MATRIX & ROLE FULFILLMENT ---
     doc.addPage();
@@ -444,23 +432,17 @@ export const ProgramDisplay: React.FC<Props> = ({
     
     try {
       const { staffId, currentShiftId, date, role } = JSON.parse(data);
-      if (date !== targetDate) return; // Restrict to same day for simplicity
-
+      if (date !== targetDate) return;
       const newPrograms = [...programs];
       const prog = newPrograms.find(p => p.dateString === targetDate);
       if (!prog) return;
-
-      // Remove from old (if it was assigned to a shift)
       if (currentShiftId !== 'ABSENCE') {
          const oldIdx = prog.assignments.findIndex(a => a.staffId === staffId && a.shiftId === currentShiftId);
          if (oldIdx !== -1) {
            prog.assignments.splice(oldIdx, 1);
          }
       }
-
-      // If dropped onto a shift (not ABSENCE), add to new
       if (targetShiftId !== 'ABSENCE') {
-          // Check if already assigned to this shift (prevent duplicates if dragging from same shift - though UI prevents this usually)
           const exists = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId);
           if (!exists) {
              prog.assignments.push({
@@ -468,31 +450,25 @@ export const ProgramDisplay: React.FC<Props> = ({
                staffId,
                shiftId: targetShiftId,
                flightId: '', 
-               role: role || 'OPS' // Default role if coming from absence
+               role: role || 'OPS'
              });
           }
       }
-
       onUpdatePrograms(newPrograms);
     } catch (err) {
       console.error("Drop failed", err);
     }
   };
 
-  // Helper to calculate workload for color coding
   const getStaffWorkload = (staffId: string) => {
       return activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === staffId) ? 1 : 0), 0);
   };
 
   const getStaffColor = (s: Staff, daysWorked: number, restHours: number | null) => {
-      // 1. Fatigue Check (Highest Priority)
       if (restHours !== null && restHours < minRestHours) {
         return "bg-purple-600 text-white border-purple-400 shadow-[0_0_10px_rgba(147,51,234,0.5)]";
       }
-    
-      // 2. Workload Heatmap
-      // Calculate target based on staff type
-      let target = 5; // Default for Local
+      let target = 5;
       if (s.type === 'Roster') {
           const progStart = new Date(startDate);
           const progEnd = new Date(endDate);
@@ -506,14 +482,12 @@ export const ProgramDisplay: React.FC<Props> = ({
              target = 0;
           }
       }
-
       const diff = daysWorked - target;
-    
-      if (diff >= 2) return "bg-gradient-to-br from-red-500 to-rose-700 text-white shadow-red-500/20"; // Very High
-      if (diff === 1) return "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-orange-500/20"; // High
-      if (diff === 0) return "bg-white border-slate-200 text-slate-900 shadow-sm"; // Perfect
-      if (diff === -1) return "bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-blue-500/20"; // Low
-      return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20"; // Very Low
+      if (diff >= 2) return "bg-gradient-to-br from-red-500 to-rose-700 text-white shadow-red-500/20";
+      if (diff === 1) return "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-orange-500/20";
+      if (diff === 0) return "bg-white border-slate-200 text-slate-900 shadow-sm";
+      if (diff === -1) return "bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-blue-500/20";
+      return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20";
   };
 
   return (
@@ -533,23 +507,20 @@ export const ProgramDisplay: React.FC<Props> = ({
         <div className="flex gap-4 relative z-10">
           <button 
              onClick={() => setShowHistory(!showHistory)}
-             className={`px-6 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? 'bg-emerald-500 text-white' : 'bg-white text-slate-950 hover:bg-slate-100'}`}
-          >
+             className={`px-6 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? 'bg-emerald-500 text-white' : 'bg-white text-slate-950 hover:bg-slate-100'}`}>
              <History size={18} />
              <span className="hidden md:inline">Time Machine</span>
           </button>
           <button 
              onClick={saveVersion}
-             className="px-6 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95"
-          >
+             className="px-6 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95">
              <Save size={18} />
              <span className="hidden md:inline">Save Ver</span>
           </button>
           <button 
              onClick={generateFullReport} 
              disabled={isGeneratingPdf || activePrograms.length === 0}
-             className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50"
-          >
+             className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50">
              {isGeneratingPdf ? <Printer size={18} className="animate-spin"/> : <FileDown size={18} />}
              <span>Export PDF Report</span>
           </button>
@@ -591,14 +562,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
                              onClick={() => restoreVersion(v)}
-                             className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-emerald-400 shadow-sm flex items-center gap-2"
-                          >
+                             className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-emerald-400 shadow-sm flex items-center gap-2">
                              <RotateCcw size={12} /> Restore
                           </button>
                           <button 
                              onClick={() => deleteVersion(v.id)}
-                             className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-                          >
+                             className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors">
                              <Trash2 size={16} />
                           </button>
                        </div>
@@ -640,14 +609,13 @@ export const ProgramDisplay: React.FC<Props> = ({
                  const d = new Date(prog.dateString || startDate);
                  const dateLabel = `${DAYS_OF_WEEK_FULL[d.getDay()].toUpperCase()} - ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
                  
-                 // Calculate Absence Data (duplicated logic for screen view)
                  const workingIds = new Set(prog.assignments.map(a => a.staffId));
                  const offStaff = staff.filter(s => !workingIds.has(s.id));
                  const categories: Record<string, { staff: Staff, count: number }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'STANDBY (RESERVE)': [] };
 
                  offStaff.forEach(s => {
                      const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
-                     let count = 1; 
+                     let count = 1;
                      for (let idx = i - 1; idx >= 0; idx--) {
                          const prevProg = activePrograms[idx];
                          const worked = prevProg.assignments.some(a => a.staffId === s.id);
@@ -656,24 +624,26 @@ export const ProgramDisplay: React.FC<Props> = ({
                      }
                      
                      const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
-
                      const item = { staff: s, count };
 
-                     if (isRosterOutOfContract) categories['ROSTER LEAVE'].push(item);
-                     else if (leave) {
+                     if (isRosterOutOfContract) {
+                        categories['ROSTER LEAVE'].push(item);
+                     } else if (leave) {
                         if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(item);
                         else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(item);
                         else categories['DAYS OFF'].push(item);
                      } else {
-                        const yesterdayProg = activePrograms[i - 1];
-                        let workedYesterday = false;
-                        if (yesterdayProg) workedYesterday = yesterdayProg.assignments.some(a => a.staffId === s.id);
-                        if (!workedYesterday) {
-                           if (s.type === 'Local') categories['DAYS OFF'].push(item);
-                           else categories['STANDBY (RESERVE)'].push(item);
+                        if (s.type === 'Local') {
+                           categories['DAYS OFF'].push(item);
+                        } else {
+                           categories['STANDBY (RESERVE)'].push(item);
                         }
                      }
                  });
+
+                 const shiftsTodaySorted = shifts
+                    .filter(s => s.pickupDate === prog.dateString)
+                    .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
                  return (
                     <div key={i} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
@@ -681,7 +651,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                           <h3 className="text-lg font-black uppercase italic text-slate-900">{dateLabel}</h3>
                        </div>
                        
-                       {/* Shifts Table */}
                        <div className="overflow-x-auto">
                           <table className="w-full text-left border-collapse">
                              <thead>
@@ -695,13 +664,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 </tr>
                              </thead>
                              <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                                {shifts.filter(s => s.pickupDate === prog.dateString).map((shift, idx) => {
+                                {shiftsTodaySorted.map((shift, idx, shiftsToday) => {
                                    const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
                                    const flightStrs = (shift.flightIds || []).map(fid => getFlight(fid)?.flightNumber).filter(Boolean).join(' / ') || 'NIL';
                                    const isFull = assignments.length >= shift.maxStaff;
                                    const isOver = assignments.length > shift.maxStaff;
                                    
-                                   // Check Critical Roles
                                    const hasSL = assignments.some(a => a.role === 'SL' || a.role === 'Shift Leader' || getStaff(a.staffId)?.isShiftLeader);
                                    const hasLC = assignments.some(a => a.role === 'LC' || a.role === 'Load Control' || getStaff(a.staffId)?.isLoadControl);
                                    const isCriticalMissing = (!hasSL && (shift.roleCounts?.['Shift Leader'] || 0) > 0) || (!hasLC && (shift.roleCounts?.['Load Control'] || 0) > 0);
@@ -710,8 +678,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                       <tr key={shift.id} 
                                           onDragOver={handleDragOver}
                                           onDrop={(e) => handleDrop(e, shift.id, prog.dateString!)}
-                                          className={`hover:bg-slate-50 transition-colors ${isCriticalMissing ? 'bg-rose-50/50' : ''}`}
-                                      >
+                                          className={`hover:bg-slate-50 transition-colors ${isCriticalMissing ? 'bg-rose-50/50' : ''}`}>
                                          <td className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? 'text-rose-500' : 'text-slate-400'}`}>{idx + 1}</td>
                                          <td className="px-4 py-3 font-mono">{shift.pickupTime}</td>
                                          <td className="px-4 py-3 font-mono">{shift.endTime}</td>
@@ -722,50 +689,65 @@ export const ProgramDisplay: React.FC<Props> = ({
                                          <td className="px-4 py-3">
                                             <div className="flex flex-wrap gap-2">
                                                {assignments.map(a => {
-                                                  const st = getStaff(a.staffId);
-                                                  if (!st) return null;
-                                                  
-                                                  // Calculate Rest & Workload
-                                                  const pDate = new Date(prog.dateString!);
-                                                  const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                                                  const shiftStart = new Date(pDate);
-                                                  shiftStart.setHours(ph, pm, 0, 0);
-                                                  
-                                                  const rest = calculateRestHours(st.id, shiftStart);
-                                                  const daysWorked = getStaffWorkload(st.id);
-                                                  const colorClass = getStaffColor(st, daysWorked, rest);
-                                                  
-                                                  // Determine Target for display
-                                                  let target = 5;
-                                                  if (st.type === 'Roster') {
-                                                      // Recalculate target logic briefly for display
-                                                      const progStart = new Date(startDate);
-                                                      const progEnd = new Date(endDate);
-                                                      const workFrom = st.workFromDate ? new Date(st.workFromDate) : progStart;
-                                                      const workTo = st.workToDate ? new Date(st.workToDate) : progEnd;
-                                                      const overlapStart = workFrom > progStart ? workFrom : progStart;
-                                                      const overlapEnd = workTo < progEnd ? workTo : progEnd;
-                                                      if (overlapStart <= overlapEnd) {
-                                                         target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                                                      } else { target = 0; }
-                                                  }
-                                                  const showDays = daysWorked !== target;
+                                                   const st = getStaff(a.staffId);
+                                                   if (!st) return null;
+                                                   
+                                                   const pDate = new Date(prog.dateString!);
+                                                   const [ph, pm] = shift.pickupTime.split(':').map(Number);
+                                                   const shiftStart = new Date(pDate);
+                                                   shiftStart.setHours(ph, pm, 0, 0);
+                                                   
+                                                   const rest = calculateRestHours(st.id, shiftStart);
+                                                   const daysWorked = getStaffWorkload(st.id);
+                                                   const colorClass = getStaffColor(st, daysWorked, rest);
+                                                   
+                                                   let target = 5;
+                                                   if (st.type === 'Roster') {
+                                                       const progStart = new Date(startDate);
+                                                       const progEnd = new Date(endDate);
+                                                       const workFrom = st.workFromDate ? new Date(st.workFromDate) : progStart;
+                                                       const workTo = st.workToDate ? new Date(st.workToDate) : progEnd;
+                                                       const overlapStart = workFrom > progStart ? workFrom : progStart;
+                                                       const overlapEnd = workTo < progEnd ? workTo : progEnd;
+                                                       if (overlapStart <= overlapEnd) {
+                                                          target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                                                       } else { target = 0; }
+                                                   }
+                                                   const showDays = daysWorked !== target;
 
-                                                  return (
-                                                     <div 
-                                                        key={a.id}
-                                                        draggable
-                                                        onDragStart={(e) => handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)}
-                                                        className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}
-                                                     >
-                                                        <span>{st.initials}</span>
-                                                        {['SL', 'LC', 'LF', 'RMP', 'OPS', 'Shift Leader', 'Load Control', 'Lost and Found', 'Ramp', 'Operations'].includes(a.role) && (
-                                                            <span className="opacity-70 text-[8px]">({a.role})</span>
-                                                        )}
-                                                        {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-purple-600 rounded text-[8px]">{rest}H</span>}
-                                                        {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
-                                                     </div>
-                                                  );
+                                                   const isLastShiftOfDay = !shiftsToday.slice(idx + 1).some(futureShift => 
+                                                       prog.assignments.some(ass => ass.shiftId === futureShift.id && ass.staffId === st.id)
+                                                   );
+                                                   let nextDayShiftTime: string | null = null;
+                                                   const nextProg = activePrograms[i + 1];
+                                                   if (isLastShiftOfDay && nextProg) {
+                                                       const shiftsTomorrow = shifts
+                                                           .filter(s => s.pickupDate === nextProg.dateString)
+                                                           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                                                       for (const tomorrowShift of shiftsTomorrow) {
+                                                           const nextAssignment = nextProg.assignments.find(ass => ass.shiftId === tomorrowShift.id && ass.staffId === st.id);
+                                                           if (nextAssignment) {
+                                                               nextDayShiftTime = tomorrowShift.pickupTime;
+                                                               break;
+                                                           }
+                                                       }
+                                                   }
+
+                                                   return (
+                                                      <div 
+                                                         key={a.id}
+                                                         draggable
+                                                         onDragStart={(e) => handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)}
+                                                         className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
+                                                         <span>{st.initials}</span>
+                                                         {['SL', 'LC', 'LF', 'RMP', 'OPS', 'Shift Leader', 'Load Control', 'Lost and Found', 'Ramp', 'Operations'].includes(a.role) && (
+                                                             <span className="opacity-70 text-[8px]">({a.role})</span>
+                                                         )}
+                                                         {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-purple-600 rounded text-[8px]">{rest}H</span>}
+                                                         {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
+                                                         {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
+                                                      </div>
+                                                   );
                                                })}
                                                {assignments.length === 0 && <span className="text-[10px] italic text-slate-300">Drag staff here...</span>}
                                             </div>
@@ -777,12 +759,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                           </table>
                        </div>
 
-                       {/* Absence Table */}
                        <div 
                           className="border-t-4 border-slate-100"
                           onDragOver={handleDragOver}
-                          onDrop={(e) => handleDrop(e, 'ABSENCE', prog.dateString!)}
-                       >
+                          onDrop={(e) => handleDrop(e, 'ABSENCE', prog.dateString!)}>
                           <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                              <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">Absence and Rest Registry</h4>
                              <span className="text-[9px] font-bold text-slate-400 italic">Drag here to unassign</span>
@@ -797,42 +777,25 @@ export const ProgramDisplay: React.FC<Props> = ({
                              <tbody className="text-[10px] font-medium text-slate-600 divide-y divide-slate-100">
                                 {Object.entries(categories).map(([cat, items]) => (
                                    <tr key={cat}>
-                                      <td className="px-4 py-2 font-black text-slate-800 bg-slate-50/50">{cat}</td>
-                                      <td className="px-4 py-2">
-                                        <div className="flex flex-wrap gap-2">
-                                          {items.length > 0 ? items.map((item, idx) => {
-                                              const daysWorked = getStaffWorkload(item.staff.id);
-                                              const colorClass = getStaffColor(item.staff, daysWorked, null); // No rest check for absence
-                                              
-                                              // Recalculate target for display
-                                              let target = 5;
-                                              if (item.staff.type === 'Roster') {
-                                                  const progStart = new Date(startDate);
-                                                  const progEnd = new Date(endDate);
-                                                  const workFrom = item.staff.workFromDate ? new Date(item.staff.workFromDate) : progStart;
-                                                  const workTo = item.staff.workToDate ? new Date(item.staff.workToDate) : progEnd;
-                                                  const overlapStart = workFrom > progStart ? workFrom : progStart;
-                                                  const overlapEnd = workTo < progEnd ? workTo : progEnd;
-                                                  if (overlapStart <= overlapEnd) {
-                                                     target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                                                  } else { target = 0; }
-                                              }
-                                              const showDays = daysWorked !== target;
-
-                                              return (
-                                                <div 
-                                                    key={idx}
-                                                    draggable
-                                                    onDragStart={(e) => handleDragStart(e, item.staff.id, 'ABSENCE', prog.dateString!, 'OPS')}
-                                                    className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 ${colorClass}`}
-                                                >
-                                                    <span>{item.staff.initials}</span>
-                                                    <span className="opacity-70 text-[8px]">({item.count})</span>
-                                                    {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
-                                                </div>
-                                              );
-                                          }) : '-'}
-                                        </div>
+                                      <td className="px-4 py-3 font-bold align-top">{cat}</td>
+                                      <td className="px-4 py-3">
+                                         <div className="flex flex-wrap gap-2">
+                                            {items.map(({ staff: s, count }) => {
+                                                const daysWorked = getStaffWorkload(s.id);
+                                                const colorClass = getStaffColor(s, daysWorked, null);
+                                                return (
+                                                   <div 
+                                                      key={s.id}
+                                                      draggable
+                                                      onDragStart={(e) => handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, s.isShiftLeader ? 'SL' : s.isLoadControl ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')}
+                                                      className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
+                                                      <span>{s.initials}</span>
+                                                      <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{count}</span>
+                                                   </div>
+                                                );
+                                            })}
+                                            {items.length === 0 && <span className="text-slate-300 italic">None</span>}
+                                         </div>
                                       </td>
                                    </tr>
                                 ))}

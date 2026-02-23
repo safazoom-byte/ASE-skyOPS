@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import './style.css';
 import { 
   Plane, 
   Users, 
@@ -551,7 +552,33 @@ const App: React.FC = () => {
         {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} />}
         {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} />}
-        {activeTab === 'program' && <ProgramDisplay programs={programs} flights={flights} staff={staff} shifts={shifts} leaveRequests={leaveRequests} incomingDuties={incomingDuties} startDate={startDate} endDate={endDate} stationHealth={stationHealth} alerts={alerts} minRestHours={minRestHours} onUpdatePrograms={async (updated) => { setPrograms(updated); if (supabase) await db.savePrograms(updated); }} />}
+        {activeTab === 'program' && (
+          <ProgramDisplay 
+            programs={programs} 
+            flights={flights} 
+            staff={staff} 
+            shifts={shifts} 
+            leaveRequests={leaveRequests} 
+            incomingDuties={incomingDuties} 
+            startDate={startDate} 
+            endDate={endDate} 
+            stationHealth={stationHealth} 
+            alerts={alerts} 
+            minRestHours={minRestHours} 
+            onUpdatePrograms={async (updated) => { 
+              setPrograms(updated); 
+              if (supabase) await db.savePrograms(updated); 
+            }}
+            onRestoreVersion={(v) => {
+              setPrograms(v.programs);
+              setStartDate(v.periodStart);
+              setEndDate(v.periodEnd);
+              setStationHealth(v.stationHealth);
+              setNotification(`Restored version: ${v.name}`);
+              if (supabase) db.savePrograms(v.programs);
+            }}
+          />
+        )}
         
         {activeTab === 'statistics' && (
           <div className="max-w-6xl mx-auto space-y-6 md:space-y-12 animate-in fade-in duration-500">

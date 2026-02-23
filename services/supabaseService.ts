@@ -72,7 +72,7 @@ export const db = {
           date: f.flight_date,
           type: f.flight_type || 'Turnaround',
           day: f.day || 0,
-          priority: 'Standard'
+          priority: 'Standard' as 'High' | 'Standard' | 'Low'
         })),
         staff: (sRes.data || []).map((s: any) => ({
           id: s.id,
