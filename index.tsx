@@ -335,6 +335,25 @@ const App: React.FC = () => {
 
     if (finalIds.length === 0) return;
     
+    // Validation: Check for overlapping leaves
+    const overlappingStaff: string[] = [];
+    finalIds.forEach(id => {
+       const hasOverlap = leaveRequests.some(l => 
+          l.staffId === id && 
+          l.startDate <= quickLeaveEndDate && 
+          l.endDate >= quickLeaveStartDate
+       );
+       if (hasOverlap) {
+          const st = staff.find(s => s.id === id);
+          if (st) overlappingStaff.push(st.initials);
+       }
+    });
+
+    if (overlappingStaff.length > 0) {
+       alert(`Cannot add leave. The following staff already have overlapping leave records: ${overlappingStaff.join(', ')}`);
+       return;
+    }
+
     const newLeaves: LeaveRequest[] = finalIds.map(sid => ({ 
       id: Math.random().toString(36).substr(2, 9), 
       staffId: sid, 
@@ -523,7 +542,6 @@ const App: React.FC = () => {
                                  <option value="Day off">Day off</option>
                                  <option value="Annual leave">Annual leave</option>
                                  <option value="Sick leave">Sick leave</option>
-                                 <option value="Roster leave">Roster leave</option>
                               </select>
                            </div>
                            <div className="flex flex-col gap-1 justify-end">

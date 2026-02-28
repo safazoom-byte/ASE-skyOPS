@@ -291,6 +291,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     2. ROSTER PRIORITY: Use Roster staff first to save Local man-days for peak times.
     3. REST: ${config.minRestHours}h minimum rest is MANDATORY.
     4. CONTINUITY: Avoid "Split Days Off" if possible (e.g., prefer Mon/Tue off over Mon/Thu off).
+    5. DUAL ROLES: Staff marked with [DUAL_LC_SL] can fulfill BOTH the 'Shift Leader' and 'Load Control' requirements for a shift simultaneously. You only need to assign them once (e.g., as 'SL') and both needs are met.
   `;
 
   const prompt = `

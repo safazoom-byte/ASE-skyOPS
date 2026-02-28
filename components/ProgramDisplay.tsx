@@ -20,6 +20,7 @@ import {
   Eye
 } from 'lucide-react';
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from '../constants';
+import { db, supabase } from '../services/supabaseService';
 
 interface Props {
   programs: DailyProgram[];
@@ -56,17 +57,27 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('skyops_program_versions');
-    if (saved) {
-      try {
-        setVersions(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to load versions", e);
+    const loadVersions = async () => {
+      if (supabase) {
+        const dbVersions = await db.getProgramVersions();
+        if (dbVersions.length > 0) {
+          setVersions(dbVersions);
+          return;
+        }
       }
-    }
+      const saved = localStorage.getItem('skyops_program_versions');
+      if (saved) {
+        try {
+          setVersions(JSON.parse(saved));
+        } catch (e) {
+          console.error("Failed to load versions", e);
+        }
+      }
+    };
+    loadVersions();
   }, []);
 
-  const saveVersion = () => {
+  const saveVersion = async () => {
     const name = prompt("Enter a name for this version (e.g., 'Draft 1', 'Final Approval'):", `Version ${versions.length + 1}`);
     if (!name) return;
 
@@ -85,13 +96,19 @@ export const ProgramDisplay: React.FC<Props> = ({
     const updatedVersions = [newVersion, ...versions];
     setVersions(updatedVersions);
     localStorage.setItem('skyops_program_versions', JSON.stringify(updatedVersions));
+    if (supabase) {
+      await db.saveProgramVersion(newVersion);
+    }
   };
 
-  const deleteVersion = (id: string) => {
+  const deleteVersion = async (id: string) => {
     if (!confirm("Are you sure you want to delete this version?")) return;
     const updated = versions.filter(v => v.id !== id);
     setVersions(updated);
     localStorage.setItem('skyops_program_versions', JSON.stringify(updated));
+    if (supabase) {
+      await db.deleteProgramVersion(id);
+    }
   };
 
   const restoreVersion = (v: ProgramVersion) => {
@@ -238,21 +255,28 @@ export const ProgramDisplay: React.FC<Props> = ({
       offStaff.forEach(s => {
          const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
          let count = 1; 
-         for (let i = index - 1; i >= 0; i--) {
-             const prevProg = activePrograms[i];
-             const worked = prevProg.assignments.some(a => a.staffId === s.id);
-             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
-             if (!worked) { if (leave && prevLeave && prevLeave.type === leave.type) count++; else if (!leave && !prevLeave) count++; else break; } else break;
+         if (leave) {
+             const start = new Date(leave.startDate);
+             const current = new Date(prog.dateString!);
+             count = Math.floor((current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+         } else {
+             for (let i = index - 1; i >= 0; i--) {
+                 const prevProg = activePrograms[i];
+                 const worked = prevProg.assignments.some(a => a.staffId === s.id);
+                 const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
+                 if (!worked && !prevLeave) count++; else break;
+             }
          }
          const label = `${s.initials} (${count})`;
          const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
 
-         if (isRosterOutOfContract) pdfCategories['ROSTER LEAVE'].push(label);
-         else if (leave) {
+         if (leave) {
             if (leave.type === 'Annual leave') pdfCategories['ANNUAL LEAVE'].push(label);
             else if (leave.type === 'Roster leave') pdfCategories['ROSTER LEAVE'].push(label);
             else if (leave.type === 'Sick leave') pdfCategories['SICK LEAVE'].push(label);
             else pdfCategories['DAYS OFF'].push(label);
+         } else if (isRosterOutOfContract) {
+            pdfCategories['ROSTER LEAVE'].push(label);
          } else {
             if (s.type === 'Local') pdfCategories['DAYS OFF'].push(label);
             else pdfCategories['STANDBY (RESERVE)'].push(label);
@@ -471,7 +495,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const getStaffColor = (s: Staff, daysWorked: number, restHours: number | null) => {
       if (restHours !== null && restHours < minRestHours) {
-        return "bg-purple-600 text-white border-purple-400 shadow-[0_0_10px_rgba(147,51,234,0.5)]";
+        return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
       }
       let target = 5;
       if (s.type === 'Roster') {
@@ -621,23 +645,29 @@ export const ProgramDisplay: React.FC<Props> = ({
                  offStaff.forEach(s => {
                      const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
                      let count = 1;
-                     for (let idx = i - 1; idx >= 0; idx--) {
-                         const prevProg = activePrograms[idx];
-                         const worked = prevProg.assignments.some(a => a.staffId === s.id);
-                         const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
-                         if (!worked) { if (leave && prevLeave && prevLeave.type === leave.type) count++; else if (!leave && !prevLeave) count++; else break; } else break;
+                     if (leave) {
+                         const start = new Date(leave.startDate);
+                         const current = new Date(prog.dateString!);
+                         count = Math.floor((current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                     } else {
+                         for (let idx = i - 1; idx >= 0; idx--) {
+                             const prevProg = activePrograms[idx];
+                             const worked = prevProg.assignments.some(a => a.staffId === s.id);
+                             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
+                             if (!worked && !prevLeave) count++; else break;
+                         }
                      }
                      
                      const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
                      const item = { staff: s, count };
 
-                     if (isRosterOutOfContract) {
-                        categories['ROSTER LEAVE'].push(item);
-                     } else if (leave) {
+                     if (leave) {
                         if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(item);
                         else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(item);
                         else if (leave.type === 'Sick leave') categories['SICK LEAVE'].push(item);
                         else categories['DAYS OFF'].push(item);
+                     } else if (isRosterOutOfContract) {
+                        categories['ROSTER LEAVE'].push(item);
                      } else {
                         if (s.type === 'Local') {
                            categories['DAYS OFF'].push(item);
@@ -757,7 +787,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                          {['SL', 'LC', 'LF', 'RMP', 'OPS', 'Shift Leader', 'Load Control', 'Lost and Found', 'Ramp', 'Operations'].includes(a.role) && (
                                                              <span className="opacity-70 text-[8px]">({a.role})</span>
                                                          )}
-                                                         {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-purple-600 rounded text-[8px]">{rest}H</span>}
+                                                         {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">{rest}H</span>}
                                                          {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
                                                          {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
                                                       </div>

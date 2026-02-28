@@ -283,5 +283,49 @@ export const db = {
   async deleteStaff(id: string) { const client = supabase; if (client) await client.from('staff').delete().eq('id', id); },
   async deleteShift(id: string) { const client = supabase; if (client) await client.from('shifts').delete().eq('id', id); },
   async deleteLeave(id: string) { const client = supabase; if (client) await client.from('leave_requests').delete().eq('id', id); },
-  async deleteIncomingDuty(id: string) { const client = supabase; if (client) await client.from('incoming_duties').delete().eq('id', id); }
+  async deleteIncomingDuty(id: string) { const client = supabase; if (client) await client.from('incoming_duties').delete().eq('id', id); },
+
+  async saveProgramVersion(v: ProgramVersion) {
+    const client = supabase;
+    if (!client) return;
+    const session = await auth.getSession();
+    if (!session) return;
+    await client.from('program_versions').upsert({
+      id: v.id,
+      user_id: session.user.id,
+      version_number: v.versionNumber,
+      name: v.name,
+      created_at: v.createdAt,
+      period_start: v.periodStart,
+      period_end: v.periodEnd,
+      programs: v.programs,
+      station_health: v.stationHealth,
+      is_auto_save: v.isAutoSave || false
+    });
+  },
+
+  async getProgramVersions(): Promise<ProgramVersion[]> {
+    const client = supabase;
+    if (!client) return [];
+    const session = await auth.getSession();
+    if (!session) return [];
+    const { data } = await client.from('program_versions').select('*').order('created_at', { ascending: false });
+    if (!data) return [];
+    return data.map((v: any) => ({
+      id: v.id,
+      versionNumber: v.version_number,
+      name: v.name,
+      createdAt: v.created_at,
+      periodStart: v.period_start,
+      periodEnd: v.period_end,
+      programs: v.programs,
+      stationHealth: v.station_health,
+      isAutoSave: v.is_auto_save
+    }));
+  },
+
+  async deleteProgramVersion(id: string) {
+    const client = supabase;
+    if (client) await client.from('program_versions').delete().eq('id', id);
+  }
 };
