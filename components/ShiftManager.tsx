@@ -738,11 +738,13 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                     </div>
                   ))}
                 </div>
-
-                <button onClick={handleBulkCreateWeekly} className="w-full py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition-all flex items-center justify-center gap-3 active:scale-95">
-                  <Layers size={18} /> Generate Bulk Shifts
-                </button>
               </div>
+            </div>
+            
+            <div className="p-4 md:p-8 border-t border-slate-100 bg-white/90 backdrop-blur-md sticky bottom-0 z-10">
+              <button onClick={handleBulkCreateWeekly} className="w-full py-4 md:py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition-all flex items-center justify-center gap-3 active:scale-95">
+                <Layers size={18} /> Generate Bulk Shifts
+              </button>
             </div>
           </div>
         </div>
