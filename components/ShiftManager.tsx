@@ -103,12 +103,19 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
         const dateStr = d.toISOString().split('T')[0];
         
         bulkTemplates.forEach(template => {
+          let endDateStr = dateStr;
+          if (template.endTime < template.pickupTime) {
+            const nextDay = new Date(d);
+            nextDay.setDate(nextDay.getDate() + 1);
+            endDateStr = nextDay.toISOString().split('T')[0];
+          }
+
           newShifts.push({
             id: Math.random().toString(36).substr(2, 9),
             day: getDayOffset(dateStr),
             pickupDate: dateStr,
             pickupTime: template.pickupTime,
-            endDate: dateStr, // Assuming same day for simplicity
+            endDate: endDateStr,
             endTime: template.endTime,
             minStaff: template.minStaff,
             maxStaff: template.maxStaff,
@@ -629,22 +636,22 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col">
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur-md z-10">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto flex flex-col">
+            <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur-md z-10">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600"><Layers size={24} /></div>
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-600"><Layers size={20} className="md:w-6 md:h-6" /></div>
                 <div>
-                  <h3 className="text-2xl font-black uppercase italic text-slate-900 leading-none">Bulk Shifts Creater</h3>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Mass Schedule Generation</p>
+                  <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 leading-none">Bulk Shifts Creater</h3>
+                  <p className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Mass Schedule Generation</p>
                 </div>
               </div>
               <button onClick={() => setShowBulkModal(false)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition-colors"><X size={20}/></button>
             </div>
 
-            <div className="p-8 flex-1">
-              <div className="space-y-8 animate-in slide-in-from-right-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="p-4 md:p-8 flex-1">
+              <div className="space-y-6 md:space-y-8 animate-in slide-in-from-right-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">From Date</label>
                     <input type="date" className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={bulkStartDate} onChange={e => setBulkStartDate(e.target.value)} />
@@ -682,7 +689,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                   </div>
 
                   {bulkTemplates.map((template, index) => (
-                    <div key={template.id} className="p-6 bg-slate-50 rounded-3xl border border-slate-200 space-y-6 relative">
+                    <div key={template.id} className="p-4 md:p-6 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-200 space-y-4 md:space-y-6 relative">
                       {bulkTemplates.length > 1 && (
                         <button 
                           onClick={() => setBulkTemplates(bulkTemplates.filter(t => t.id !== template.id))}
@@ -694,7 +701,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                       
                       <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">Shift {index + 1}</h5>
                       
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pickup Time (24H)</label>
                           <input type="time" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none" value={template.pickupTime} onChange={e => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, pickupTime: e.target.value } : t))} />
