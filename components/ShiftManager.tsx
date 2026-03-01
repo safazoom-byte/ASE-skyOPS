@@ -636,7 +636,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center md:p-4 animate-in fade-in">
+        <div className="fixed inset-0 z-[1600] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center md:p-4 animate-in fade-in">
           <div className="absolute inset-0 md:relative md:inset-auto bg-white md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl md:max-h-[95vh] flex flex-col overflow-hidden">
             <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10">
               <div className="flex items-center gap-4">
