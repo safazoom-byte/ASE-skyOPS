@@ -637,8 +637,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto flex flex-col">
-            <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/90 backdrop-blur-md z-10">
+          <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden">
+            <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-600"><Layers size={20} className="md:w-6 md:h-6" /></div>
                 <div>
@@ -649,8 +649,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
               <button onClick={() => setShowBulkModal(false)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition-colors"><X size={20}/></button>
             </div>
 
-            <div className="p-4 md:p-8 flex-1">
-              <div className="space-y-6 md:space-y-8 animate-in slide-in-from-right-4">
+            <div className="p-4 md:p-8 flex-1 overflow-y-auto">
+              <div className="space-y-6 md:space-y-8 animate-in slide-in-from-right-4 pb-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">From Date</label>
@@ -741,7 +741,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
               </div>
             </div>
             
-            <div className="p-4 md:p-8 border-t border-slate-100 bg-white/90 backdrop-blur-md sticky bottom-0 z-10">
+            <div className="p-4 md:p-8 border-t border-slate-100 bg-white shrink-0 z-10">
               <button onClick={handleBulkCreateWeekly} className="w-full py-4 md:py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition-all flex items-center justify-center gap-3 active:scale-95">
                 <Layers size={18} /> Generate Bulk Shifts
               </button>
