@@ -636,8 +636,8 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-0 md:p-4 animate-in fade-in">
-          <div className="bg-white rounded-none md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl h-[100dvh] md:h-auto md:max-h-[95vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center md:p-4 animate-in fade-in">
+          <div className="absolute inset-0 md:relative md:inset-auto bg-white md:rounded-[2.5rem] shadow-2xl w-full max-w-4xl md:max-h-[95vh] flex flex-col overflow-hidden">
             <div className="p-4 md:p-8 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-600"><Layers size={20} className="md:w-6 md:h-6" /></div>
@@ -741,9 +741,12 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
               </div>
             </div>
             
-            <div className="p-4 pb-8 md:p-8 border-t border-slate-100 bg-white shrink-0 z-10">
-              <button onClick={handleBulkCreateWeekly} className="w-full py-4 md:py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition-all flex items-center justify-center gap-3 active:scale-95">
-                <Layers size={18} /> Generate Bulk Shifts
+            <div className="p-4 pb-8 md:p-8 border-t border-slate-100 bg-white shrink-0 z-10 flex gap-3">
+              <button onClick={() => setShowBulkModal(false)} className="px-6 py-4 md:py-5 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-200 transition-all active:scale-95">
+                Cancel
+              </button>
+              <button onClick={handleBulkCreateWeekly} className="flex-1 py-4 md:py-5 bg-amber-500 text-slate-900 rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-400 transition-all flex items-center justify-center gap-2 active:scale-95">
+                <Layers size={18} /> <span className="hidden sm:inline">Generate Bulk Shifts</span><span className="sm:hidden">Generate</span>
               </button>
             </div>
           </div>
