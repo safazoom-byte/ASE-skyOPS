@@ -33,6 +33,22 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [showWipeConfirm, setShowWipeConfirm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
+  const [editingDuration, setEditingDuration] = useState<Staff | null>(null);
+
+  const getTimelineStyle = (start?: string, end?: string) => {
+    if (!start || !end) return { left: '0%', width: '100%' };
+    const s = new Date(start).getTime();
+    const e = new Date(end).getTime();
+    const yearStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+    const yearEnd = new Date(new Date().getFullYear(), 11, 31).getTime();
+    
+    const left = Math.max(0, ((s - yearStart) / (yearEnd - yearStart)) * 100);
+    const right = Math.min(100, ((e - yearStart) / (yearEnd - yearStart)) * 100);
+    const width = Math.max(0.5, right - left);
+    
+    return { left: `${left}%`, width: `${width}%` };
+  };
   
   const [newStaff, setNewStaff] = useState<Partial<Staff>>({
     name: '',
@@ -308,22 +324,30 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
         </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20">
-        <Search className="text-slate-400 ml-2" size={20} />
-        <input 
-          type="text" 
-          placeholder="Search personnel by name, initials, or type..." 
-          className="flex-1 bg-transparent font-bold text-sm text-slate-900 outline-none placeholder:text-slate-300 placeholder:font-medium"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        {searchTerm && (
-          <button onClick={() => setSearchTerm('')} className="p-2 text-slate-400 hover:text-rose-500 transition-colors">
-            <Trash2 size={16} />
-          </button>
-        )}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20">
+        <div className="flex items-center flex-1 bg-slate-50 rounded-2xl px-4 py-2 border border-slate-100">
+          <Search className="text-slate-400 mr-3" size={20} />
+          <input 
+            type="text" 
+            placeholder="Search personnel by name, initials, or type..." 
+            className="flex-1 bg-transparent font-bold text-sm text-slate-900 outline-none placeholder:text-slate-300 placeholder:font-medium py-2"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button onClick={() => setSearchTerm('')} className="p-2 text-slate-400 hover:text-rose-500 transition-colors">
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+        
+        <div className="flex bg-slate-100 p-1.5 rounded-2xl shrink-0">
+          <button onClick={() => setViewMode('grid')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>Grid</button>
+          <button onClick={() => setViewMode('timeline')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'timeline' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>Timeline</button>
+        </div>
       </div>
 
+      {viewMode === 'grid' ? (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-8">
         {filteredStaff.length === 0 ? (
           <div className="col-span-full py-20 md:py-32 text-center bg-slate-100/50 rounded-3xl md:rounded-[4rem] border-2 border-dashed border-slate-200">
@@ -404,11 +428,120 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
           })
         )}
       </div>
+      ) : (
+        <div className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden flex flex-col animate-in fade-in">
+          <div className="p-4 md:p-8 border-b border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-slate-50/50">
+            <h4 className="text-sm md:text-lg font-black uppercase italic text-slate-800">Duration Matrix (Current Year)</h4>
+            <div className="flex gap-3 text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400">
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-slate-200"></div> Local</span>
+              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-400"></div> Roster</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px] p-6 md:p-8 space-y-4">
+              {/* Months Header */}
+              <div className="flex ml-[200px] mb-4 border-b border-slate-100 pb-2">
+                {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map(m => (
+                  <div key={m} className="flex-1 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">{m}</div>
+                ))}
+              </div>
+              
+              {filteredStaff.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs font-black uppercase tracking-widest">No personnel found</div>
+              ) : (
+                filteredStaff.map(member => {
+                  const isRoster = member.type === 'Roster';
+                  const style = isRoster ? getTimelineStyle(member.workFromDate, member.workToDate) : { left: '0%', width: '100%' };
+                  
+                  return (
+                    <div key={member.id} className="flex items-center gap-4 group">
+                      <div className="w-[184px] shrink-0 flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black ${isRoster ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>
+                          {member.initials}
+                        </div>
+                        <div className="truncate">
+                          <div className="text-xs font-black text-slate-900 truncate">{member.name}</div>
+                          <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{member.type}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex-1 h-10 bg-slate-50 rounded-xl relative overflow-hidden border border-slate-100">
+                        {/* Grid lines */}
+                        <div className="absolute inset-0 flex">
+                          {Array.from({length: 12}).map((_, i) => (
+                            <div key={i} className="flex-1 border-r border-slate-100/50 last:border-0"></div>
+                          ))}
+                        </div>
+                        
+                        {/* Bar */}
+                        <div 
+                          className={`absolute top-2 bottom-2 rounded-md transition-all duration-500 ${isRoster ? 'bg-amber-400 cursor-pointer hover:brightness-110 shadow-sm' : 'bg-slate-200'}`}
+                          style={style}
+                          onClick={() => isRoster && setEditingDuration(member)}
+                        >
+                          {isRoster && (
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-[8px] font-black text-amber-900 uppercase tracking-widest bg-white/50 px-2 py-0.5 rounded backdrop-blur-sm">Edit Duration</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingDuration && (
+        <div className="fixed inset-0 z-[2000] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl w-full max-w-sm p-6 pb-8 md:p-8 animate-in slide-in-from-bottom-4 md:zoom-in-95">
+            <h4 className="text-lg font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
+              <CalendarRange className="text-amber-500" /> Edit Duration
+            </h4>
+            <div className="flex items-center gap-3 mb-6 p-3 bg-amber-50 rounded-xl border border-amber-100">
+              <div className="w-10 h-10 bg-amber-200 text-amber-700 rounded-lg flex items-center justify-center font-black">{editingDuration.initials}</div>
+              <div>
+                <div className="text-sm font-black text-slate-900">{editingDuration.name}</div>
+                <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Roster Agent</div>
+              </div>
+            </div>
+            
+            <div className="space-y-4 mb-8">
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Contract Start</label>
+                <input 
+                  type="date" 
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-400"
+                  value={editingDuration.workFromDate || ''}
+                  onChange={e => setEditingDuration({...editingDuration, workFromDate: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Contract End</label>
+                <input 
+                  type="date" 
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-400"
+                  value={editingDuration.workToDate || ''}
+                  onChange={e => setEditingDuration({...editingDuration, workToDate: e.target.value})}
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button onClick={() => setEditingDuration(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+              <button onClick={() => { onUpdate(editingDuration); setEditingDuration(null); }} className="flex-[2] py-3 bg-amber-500 text-slate-900 rounded-xl font-black uppercase italic tracking-widest hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20">Save Dates</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editingStaff && (
-        <div className="fixed inset-0 z-[1600] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-          <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-xl w-full p-8 md:p-12 overflow-y-auto max-h-[95vh] no-scrollbar animate-in zoom-in-95">
-            <h4 className="text-xl md:text-2xl font-black uppercase italic mb-8 md:mb-10 flex items-center gap-4">
+        <div className="fixed inset-0 z-[1600] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-950/90 backdrop-blur-md">
+          <div className="bg-white rounded-t-[2.5rem] md:rounded-[4rem] shadow-2xl max-w-xl w-full p-6 pb-8 md:p-12 overflow-y-auto max-h-[90vh] md:max-h-[95vh] no-scrollbar animate-in slide-in-from-bottom-4 md:zoom-in-95">
+            <h4 className="text-xl md:text-2xl font-black uppercase italic mb-6 md:mb-10 flex items-center gap-4">
               <Edit2 className="text-indigo-600" /> Refine Profile
             </h4>
             <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingStaff); setEditingStaff(null); }} className="space-y-6 md:space-y-8">
@@ -470,7 +603,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
       {showWipeConfirm && (
         <div className="fixed inset-0 z-[1700] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-           <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-sm w-full p-8 md:p-12 text-center">
+           <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-w-sm w-full p-8 md:p-12 text-center">
               <ShieldCheck size={48} className="mx-auto text-rose-500 mb-6" />
               <h4 className="text-xl md:text-2xl font-black uppercase italic mb-3">Registry Purge</h4>
               <p className="text-[10px] md:text-xs text-slate-500 mb-8">Permanently erase all personnel data?</p>
