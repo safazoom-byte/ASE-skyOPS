@@ -210,7 +210,16 @@ const App: React.FC = () => {
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs); 
       setActiveTab('program'); 
-    } catch (err: any) { alert(err.message || "Engine failure."); } finally { setIsGenerating(false); }
+    } catch (err: any) { 
+      console.error("Generation Error:", err);
+      let msg = err.message || "Engine failure.";
+      if (msg.includes("NetworkError") || msg.includes("Failed to fetch")) {
+        msg = "Network Error: Could not connect to the AI service. This is usually caused by an Adblocker, VPN, or your network blocking access to Google's API. Please disable your adblocker or try a different network.";
+      }
+      alert(msg); 
+    } finally { 
+      setIsGenerating(false); 
+    }
   };
 
   // Improved matching logic to handle suffixes (e.g. MS-ATZ)

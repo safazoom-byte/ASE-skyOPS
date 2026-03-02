@@ -155,6 +155,9 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
+  if (!process.env.API_KEY) {
+    throw new Error("Missing Gemini API Key. Please set VITE_API_KEY in your Vercel environment variables.");
+  }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
@@ -352,7 +355,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   // Wrap the call in withRetry to handle 503s
   const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: prompt,
       config: { 
         temperature: 0.1, 
@@ -599,6 +602,9 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 };
 
 export const extractDataFromContent = async (params: { textData?: string, media?: ExtractionMedia[], startDate?: string, targetType: string }): Promise<any> => {
+  if (!process.env.API_KEY) {
+    throw new Error("Missing Gemini API Key. Please set VITE_API_KEY in your Vercel environment variables.");
+  }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [];
   if (params.textData) parts.push({ text: `DATA:\n${params.textData}` });
@@ -636,7 +642,7 @@ export const repairProgramWithAI = async (currentPrograms: DailyProgram[], audit
   
   // Wrap repair call with retry
   const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-      model: 'gemini-3-pro-preview', 
+      model: 'gemini-3.1-pro-preview', 
       contents: prompt, 
       config: { responseMimeType: 'application/json' } 
   }));
