@@ -19,7 +19,7 @@ export interface ExtractionMedia {
 // --- RETRY LOGIC ENGINE ---
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function withRetry<T>(operation: () => Promise<T>, retries = 6, baseDelay = 3000): Promise<T> {
+async function withRetry<T>(operation: () => Promise<T>, retries = 3, baseDelay = 1500): Promise<T> {
   let lastError: any;
   
   for (let i = 0; i < retries; i++) {
@@ -28,8 +28,17 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 6, baseDelay 
     } catch (error: any) {
       lastError = error;
       
+      // Safely convert error to string
+      let errStr = '';
+      if (typeof error === 'string') {
+        errStr = error;
+      } else if (error?.message) {
+        errStr = error.message;
+      } else {
+        try { errStr = JSON.stringify(error); } catch (e) { errStr = String(error); }
+      }
+
       // Detect specific 503 / Overload signals from Google
-      const errStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
       const isRetryable = 
         error?.status === 503 || 
         error?.code === 503 ||
@@ -41,7 +50,7 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 6, baseDelay 
         errStr.includes('UNAVAILABLE');
 
       if (isRetryable && i < retries - 1) {
-        // Exponential backoff with jitter: 2s, 4s, 8s, 16s... + random ms
+        // Exponential backoff with jitter
         const jitter = Math.random() * 500;
         const delayTime = (baseDelay * Math.pow(2, i)) + jitter;
         console.warn(`Gemini API Busy (503). Retrying in ${Math.round(delayTime)}ms... (Attempt ${i + 1}/${retries})`);
@@ -49,7 +58,7 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 6, baseDelay 
         continue;
       }
       
-      // If error is not retryable (e.g., 400 Bad Request) or max retries reached, throw immediately
+      // If error is not retryable or max retries reached, throw immediately
       throw error;
     }
   }

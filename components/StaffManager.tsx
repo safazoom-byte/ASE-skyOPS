@@ -420,7 +420,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                     <button onClick={() => setEditingStaff(member)} className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-2xl font-black uppercase text-[8px] md:text-[9px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all">
                       <Edit2 size={12} /> REFINE
                     </button>
-                    <button onClick={() => onDelete(member.id)} className="w-10 h-10 md:w-14 md:h-14 bg-rose-50 text-rose-500 rounded-xl md:rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shrink-0">
+                    <button onClick={() => { if(confirm('Are you sure you want to delete this employee?')) onDelete(member.id) }} className="w-10 h-10 md:w-14 md:h-14 bg-rose-50 text-rose-500 rounded-xl md:rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shrink-0">
                       <Trash2 size={16} />
                     </button>
                   </div>
