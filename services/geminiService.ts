@@ -19,7 +19,7 @@ export interface ExtractionMedia {
 // --- RETRY LOGIC ENGINE ---
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function withRetry<T>(operation: () => Promise<T>, retries = 5, baseDelay = 2000): Promise<T> {
+async function withRetry<T>(operation: () => Promise<T>, retries = 6, baseDelay = 3000): Promise<T> {
   let lastError: any;
   
   for (let i = 0; i < retries; i++) {
@@ -29,16 +29,16 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 5, baseDelay 
       lastError = error;
       
       // Detect specific 503 / Overload signals from Google
+      const errStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
       const isRetryable = 
         error?.status === 503 || 
         error?.code === 503 ||
-        (error?.message && (
-          error.message.includes('503') || 
-          error.message.includes('overloaded') || 
-          error.message.includes('high demand') ||
-          error.message.includes('temporary') ||
-          error.message.includes('quota')
-        ));
+        errStr.includes('503') || 
+        errStr.includes('overloaded') || 
+        errStr.includes('high demand') ||
+        errStr.includes('temporary') ||
+        errStr.includes('quota') ||
+        errStr.includes('UNAVAILABLE');
 
       if (isRetryable && i < retries - 1) {
         // Exponential backoff with jitter: 2s, 4s, 8s, 16s... + random ms

@@ -215,6 +215,8 @@ const App: React.FC = () => {
       let msg = err.message || "Engine failure.";
       if (msg.includes("NetworkError") || msg.includes("Failed to fetch")) {
         msg = "Network Error: Could not connect to the AI service. This is usually caused by an Adblocker, VPN, or your network blocking access to Google's API. Please disable your adblocker or try a different network.";
+      } else if (msg.includes("503") || msg.includes("high demand") || msg.includes("UNAVAILABLE")) {
+        msg = "Google's AI servers are currently overloaded due to high demand. The system tried to reconnect multiple times but the servers are still busy. Please wait a minute or two and try generating again.";
       }
       alert(msg); 
     } finally { 
