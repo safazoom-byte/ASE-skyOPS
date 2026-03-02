@@ -284,97 +284,38 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
     return `ID: ${s.initials}, Role: ${s.type}, Rank: ${s.powerRate}%, Skills: [${skills}]${dualTag}, AllocatableShifts: ${credits}, Fatigue: ${fatigueLevel} (${lastDutyInfo}), AvailPattern: ${dailyAvail}`; 
   }).join('\n');
 
-  // --- PHASE 3: SHIFT CONTEXT (V2 ENHANCED WAVE LOGIC) ---
-  const shiftContext = [...data.shifts]
-    .sort((a,b) => (a.pickupDate+a.pickupTime).localeCompare(b.pickupDate+b.pickupTime))
-    .map((s, idx) => {
-      // Use original index from the data array to allow safe lookup later
-      const originalIdx = data.shifts.findIndex(os => os.id === s.id);
-      const needs = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => `${k.substring(0,2).toUpperCase()}:${v}`).join(', ');
-      
-      const h = parseInt(s.pickupTime.split(':')[0]);
-      let wave = "NIGHT_OPS";
-      if (h >= 4 && h < 12) wave = "AM_WAVE";
-      else if (h >= 12 && h < 20) wave = "PM_WAVE";
-
-      return `Ref: ${originalIdx}, Day: ${s.pickupDate}, Slot: ${s.pickupTime}-${s.endTime} (${wave}), MinReq: ${s.minStaff}, SpecialistNeeds: [${needs}]`;
-    }).join('\n');
-
-  const operationalBriefing = `
-    GLOBAL MATRIX SOLVER V3 (DAYS-OFF-FIRST ARCHITECTURE):
-    
-    CRITICAL PROTOCOL: YOU MUST ALLOCATE DAYS OFF *BEFORE* ASSIGNING SHIFTS.
-    
-    STEP 1: CAPACITY ANALYSIS & ROSTER LOCK
-    - Calculate total staff needed per day based on 'MinReq' of all shifts.
-    - Identify 'Roster' staff availability based on their contract dates (workFrom/workTo).
-    - 'Roster' staff work EVERY day within their contract period unless on Leave.
-    
-    STEP 2: LOCAL STAFF DAYS OFF ALLOCATION (THE PUZZLE SOLVER)
-    - Each 'Local' staff member MUST have exactly 2 DAYS OFF per 7-day period (5 Days On / 2 Days Off).
-    - STRATEGY: Assign days off on days with the LOWEST demand or HIGHEST Roster staff availability.
-    - CONSTRAINT: Ensure enough Locals remain on each day to meet the 'LOCAL_WORK_TARGET' calculated in the Blueprint.
-    - OUTPUT: Create an internal map of [StaffID -> Array of OffDays].
-    
-    STEP 3: SHIFT ASSIGNMENT (EXECUTION)
-    - Now, assign shifts using ONLY the staff who are NOT on a Day Off.
-    - PASS 1: COMMAND (SL, LC) - Fill using available Senior staff.
-    - PASS 2: SPECIALIST (OPS, RMP, LF) - Fill using available Specialist staff.
-    - PASS 3: GENERAL - Fill remaining slots.
-    
-    HARD RULES:
-    1. NO SHIFTS ON DAYS OFF: A Local staff member MUST NOT be assigned to any shift on their 2 allocated days off.
-    2. ROSTER PRIORITY: Use Roster staff first to save Local man-days for peak times.
-    3. REST: ${config.minRestHours}h minimum rest is MANDATORY.
-    4. CONTINUITY: Avoid "Split Days Off" if possible (e.g., prefer Mon/Tue off over Mon/Thu off).
-    5. DUAL ROLES: Staff marked with [DUAL_LC_SL] can fulfill BOTH the 'Shift Leader' and 'Load Control' requirements for a shift simultaneously. You only need to assign them once (e.g., as 'SL') and both needs are met.
-  `;
-
-  const prompt = `
+  // --- PHASE 2: MASTER ROSTER PLANNING (DAYS OFF) ---
+  const daysOffPrompt = `
     ROLE: Global Strategic Roster Architect
-    MISSION: Solve the "Local Staff Days Off" puzzle first, then assign shifts.
+    MISSION: Assign exactly 2 Days Off for each 'Local' staff member for the ${config.numDays}-day period.
     
-    ${operationalBriefing}
-
     MANPOWER BLUEPRINT (DAILY TARGETS):
     ${blueprintBlock}
-
-    EXECUTION INSTRUCTIONS:
-    1. Analyze the Blueprint to see which days need the most people.
-    2. For every Local staff member, pick 2 days to be "OFF".
-       - Pick days where 'LOCAL_WORK_TARGET' is low.
-       - Ensure you don't give everyone the same days off (stagger them).
-    3. Once days off are set, assign the remaining 5 working days to specific shifts.
-    4. Ensure Specialist Roles (SL, LC, RMP, OPS) are covered every single day.
-
-    OUTPUT FORMAT: 
-    STRICTLY RETURN ONLY A RAW JSON ARRAY. NO MARKDOWN. NO COMMENTS.
-    Format: [[DayOffset, ShiftID, "Initials", "AssignedRole"], ...]
     
-    Example: [[0, 2, "AB-HMB", "RMP"], [0, 2, "XY-ATZ", "LC"], [1, 5, "AB-HMB", "RMP"]]
-    Note: DayOffset is 0 to ${config.numDays-1}. ShiftID is the ID provided in SHIFTS list.
-
-    DATA:
-    Period: ${config.startDate} to ${programEndStr}
-    STAFF:
+    STAFF CONTEXT:
     ${staffContext}
-    SHIFTS:
-    ${shiftContext}
+    
+    INSTRUCTIONS:
+    1. Analyze the Blueprint to see which days need the most people.
+    2. For every Local staff member, pick exactly 2 days to be "OFF" (0 to ${config.numDays-1}).
+    3. Pick days where 'LOCAL_WORK_TARGET' is low.
+    4. Ensure Specialist Roles (SL, LC, RMP, OPS) are available every single day. Do not give all SLs the same day off.
+    5. Roster staff do not get days off assigned here (they follow their contract/leave).
+    
+    OUTPUT FORMAT:
+    STRICTLY RETURN ONLY A RAW JSON OBJECT. NO MARKDOWN.
+    Format: { "Initials": [offDay1, offDay2], ... }
   `;
 
-  // Wrap the call in withRetry to handle 503s
-  const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
+  const daysOffResponse = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-3.1-pro-preview',
-      contents: prompt,
-      config: { 
-        temperature: 0.1, 
-        responseMimeType: 'application/json'
-      }
+      contents: daysOffPrompt,
+      config: { temperature: 0.1, responseMimeType: 'application/json' }
   }));
 
-  const parsed = safeParseJson(response.text);
-  
-  // SANITIZED INITIALIZATION: Create empty days ONLY for the requested period.
+  const plannedDaysOff: Record<string, number[]> = safeParseJson(daysOffResponse.text) || {};
+
+  // SANITIZED INITIALIZATION
   const finalPrograms: DailyProgram[] = Array.from({length: config.numDays}).map((_, i) => {
       const d = new Date(config.startDate);
       d.setDate(d.getDate() + i);
@@ -382,8 +323,6 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   });
 
   let validAssignmentsCount = 0;
-
-  // 1. Initialize trackers
   const staffLastEndTime = new Map<string, Date>();
   if (data.incomingDuties) {
     data.incomingDuties.forEach(d => {
@@ -393,75 +332,126 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   const staffWorkload = new Map<string, number>();
   data.staff.forEach(s => staffWorkload.set(s.id, 0));
 
-  // 2. Process AI assignments with strict validation
-  if (Array.isArray(parsed)) {
-    // Sort parsed items chronologically by shift start time
-    const sortedParsed = parsed.map((item: any) => {
-      const [dayOffset, shiftIdx, initials, role] = Array.isArray(item) ? item : [item.d, item.s, item.st, item.r];
-      return { dayOffset, shiftIdx, initials, role };
-    }).filter(item => {
-      return typeof item.dayOffset === 'number' && item.dayOffset >= 0 && item.dayOffset < config.numDays && data.shifts[item.shiftIdx];
-    }).sort((a, b) => {
-      const shiftA = data.shifts[a.shiftIdx];
-      const shiftB = data.shifts[b.shiftIdx];
-      return `${shiftA.pickupDate}T${shiftA.pickupTime}`.localeCompare(`${shiftB.pickupDate}T${shiftB.pickupTime}`);
-    });
+  // --- PHASE 3: SEQUENTIAL DAILY SHIFT ALLOCATION ---
+  for (let dayOffset = 0; dayOffset < config.numDays; dayOffset++) {
+      const d = new Date(config.startDate);
+      d.setDate(d.getDate() + dayOffset);
+      const dStr = d.toISOString().split('T')[0];
 
-    sortedParsed.forEach((item: any) => {
-        const { dayOffset, shiftIdx, initials, role } = item;
-        const staffId = staffMap[String(initials).toUpperCase()];
-        const shift = data.shifts[shiftIdx];
+      const dailyShifts = data.shifts.filter(s => s.pickupDate === dStr);
+      if (dailyShifts.length === 0) continue;
+
+      const dailyShiftContext = dailyShifts.map(s => {
+          const originalIdx = data.shifts.findIndex(os => os.id === s.id);
+          const needs = Object.entries(s.roleCounts || {}).filter(([k,v]) => v && v > 0).map(([k,v]) => `${k.substring(0,2).toUpperCase()}:${v}`).join(', ');
+          return `Ref: ${originalIdx}, Slot: ${s.pickupTime}-${s.endTime}, MinReq: ${s.minStaff}, Needs: [${needs}]`;
+      }).join('\n');
+
+      const availableStaffContext = data.staff.map(s => {
+          const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+          let outOfContract = false;
+          if (s.type === 'Roster') {
+              if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                  outOfContract = !s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+              } else if (s.workFromDate && s.workToDate) {
+                  outOfContract = dStr < s.workFromDate || dStr > s.workToDate;
+              }
+          }
+          
+          const isPlannedOff = plannedDaysOff[s.initials.toUpperCase()]?.includes(dayOffset);
+
+          if (onLeave || outOfContract || isPlannedOff) return null;
+
+          let availAfter = '00:00';
+          const lastEnd = staffLastEndTime.get(s.id);
+          if (lastEnd) {
+              const availableAfter = new Date(lastEnd.getTime() + config.minRestHours * 60 * 60 * 1000);
+              if (availableAfter.toISOString().split('T')[0] > dStr) return null;
+              if (availableAfter.toISOString().split('T')[0] === dStr) {
+                  availAfter = availableAfter.toTimeString().substring(0, 5);
+              }
+          }
+
+          return `ID: ${s.initials}, Role: ${s.type}, Skills: [${s.isLoadControl?'LC':''},${s.isShiftLeader?'SL':''},${s.isOps?'OPS':''},${s.isRamp?'RMP':''},${s.isLostFound?'LF':''}], AvailAfter: ${availAfter}`;
+      }).filter(Boolean).join('\n');
+
+      const dailyPrompt = `
+        ROLE: Daily Shift Allocator
+        MISSION: Assign staff to shifts for Day ${dayOffset} (${dStr}).
         
-        if (staffId && shift && finalPrograms[dayOffset]) {
-            const staff = data.staff.find(s => s.id === staffId);
-            if (!staff) return;
+        SHIFTS TODAY:
+        ${dailyShiftContext}
+        
+        AVAILABLE STAFF TODAY:
+        ${availableStaffContext}
+        
+        RULES:
+        1. Assign staff to meet the MinReq and Needs of each shift.
+        2. DO NOT assign a staff member to a shift that starts before their 'AvailAfter' time (Minimum Rest Rule).
+        3. A staff member can only do ONE shift per day.
+        
+        OUTPUT FORMAT:
+        STRICTLY RETURN ONLY A RAW JSON ARRAY. NO MARKDOWN.
+        Format: [[ShiftRef, "Initials", "AssignedRole"], ...]
+      `;
 
-            // Check Leave & Contract
-            const dStr = shift.pickupDate;
-            const onLeave = data.leaveRequests?.some(l => l.staffId === staff.id && l.startDate <= dStr && l.endDate >= dStr);
-            let outOfContract = false;
-            if (staff.type === 'Roster') {
-                if (staff.rosterPeriods && staff.rosterPeriods.length > 0) {
-                    outOfContract = !staff.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
-                } else if (staff.workFromDate && staff.workToDate) {
-                    outOfContract = dStr < staff.workFromDate || dStr > staff.workToDate;
-                }
-            }
-            if (onLeave || outOfContract) return;
+      const dailyResponse = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: dailyPrompt,
+          config: { temperature: 0.1, responseMimeType: 'application/json' }
+      }));
 
-            // Check Rest
-            const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
-            const lastEnd = staffLastEndTime.get(staffId);
-            if (lastEnd) {
-                const restHours = (shiftStart.getTime() - lastEnd.getTime()) / (1000 * 60 * 60);
-                if (restHours < config.minRestHours) return;
-            }
+      const dailyParsed = safeParseJson(dailyResponse.text);
+      
+      if (Array.isArray(dailyParsed)) {
+          const sortedParsed = dailyParsed.map((item: any) => {
+              const [shiftIdx, initials, role] = Array.isArray(item) ? item : [item.s, item.st, item.r];
+              return { shiftIdx, initials, role };
+          }).filter(item => data.shifts[item.shiftIdx]).sort((a, b) => {
+              const shiftA = data.shifts[a.shiftIdx];
+              const shiftB = data.shifts[b.shiftIdx];
+              return `${shiftA.pickupDate}T${shiftA.pickupTime}`.localeCompare(`${shiftB.pickupDate}T${shiftB.pickupTime}`);
+          });
 
-            // Check Skills
-            let finalRole = role || 'AGT';
-            if (finalRole === 'LC' && !staff.isLoadControl) finalRole = 'AGT';
-            if (finalRole === 'SL' && !staff.isShiftLeader) finalRole = 'AGT';
-            if (finalRole === 'RMP' && !staff.isRamp) finalRole = 'AGT';
-            if (finalRole === 'OPS' && !staff.isOps) finalRole = 'AGT';
-            if (finalRole === 'LF' && !staff.isLostFound) finalRole = 'AGT';
+          sortedParsed.forEach((item: any) => {
+              const { shiftIdx, initials, role } = item;
+              const staffId = staffMap[String(initials).toUpperCase()];
+              const shift = data.shifts[shiftIdx];
+              
+              if (staffId && shift && finalPrograms[dayOffset]) {
+                  const staff = data.staff.find(s => s.id === staffId);
+                  if (!staff) return;
 
-            // Check if already working this shift
-            const alreadyAssigned = finalPrograms[dayOffset].assignments.some(a => a.staffId === staffId && a.shiftId === shift.id);
-            if (alreadyAssigned) return;
+                  const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+                  const lastEnd = staffLastEndTime.get(staffId);
+                  if (lastEnd) {
+                      const restHours = (shiftStart.getTime() - lastEnd.getTime()) / (1000 * 60 * 60);
+                      if (restHours < config.minRestHours) return;
+                  }
 
-            // Assign
-            finalPrograms[dayOffset].assignments.push({
-                id: Math.random().toString(36).substr(2, 9),
-                staffId,
-                shiftId: shift.id,
-                role: finalRole,
-                flightId: '' 
-            });
-            validAssignmentsCount++;
-            staffLastEndTime.set(staffId, new Date(`${shift.endDate}T${shift.endTime}`));
-            staffWorkload.set(staffId, (staffWorkload.get(staffId) || 0) + 1);
-        }
-    });
+                  const alreadyAssigned = finalPrograms[dayOffset].assignments.some(a => a.staffId === staffId);
+                  if (alreadyAssigned) return;
+
+                  let finalRole = role || 'AGT';
+                  if (finalRole === 'LC' && !staff.isLoadControl) finalRole = 'AGT';
+                  if (finalRole === 'SL' && !staff.isShiftLeader) finalRole = 'AGT';
+                  if (finalRole === 'RMP' && !staff.isRamp) finalRole = 'AGT';
+                  if (finalRole === 'OPS' && !staff.isOps) finalRole = 'AGT';
+                  if (finalRole === 'LF' && !staff.isLostFound) finalRole = 'AGT';
+
+                  finalPrograms[dayOffset].assignments.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      staffId,
+                      shiftId: shift.id,
+                      role: finalRole,
+                      flightId: '' 
+                  });
+                  validAssignmentsCount++;
+                  staffLastEndTime.set(staffId, new Date(`${shift.endDate}T${shift.endTime}`));
+                  staffWorkload.set(staffId, (staffWorkload.get(staffId) || 0) + 1);
+              }
+          });
+      }
   }
 
   // 3. Algorithmic Fill / Repair Pass
