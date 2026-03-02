@@ -35,6 +35,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   const [editingDuration, setEditingDuration] = useState<Staff | null>(null);
+  const [editPeriods, setEditPeriods] = useState<{start: string, end: string}[]>([]);
 
   const getTimelineStyle = (start?: string, end?: string) => {
     if (!start || !end) return { left: '0%', width: '100%' };
@@ -124,7 +125,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       isLostFound: !!newStaff.isLostFound,
       maxShiftsPerWeek: defaultMaxShifts,
       workFromDate: isRoster ? newStaff.workFromDate : undefined,
-      workToDate: isRoster ? newStaff.workToDate : undefined
+      workToDate: isRoster ? newStaff.workToDate : undefined,
+      rosterPeriods: isRoster ? [{ start: newStaff.workFromDate || '', end: newStaff.workToDate || '' }] : undefined
     };
     onUpdate(staffData);
     setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, isRamp: false, isShiftLeader: false, isOps: false, isLoadControl: false, isLostFound: false, workFromDate: '', workToDate: '' });
@@ -200,7 +202,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Initials': s.initials,
       'Category': s.type,
       'Power Rate': `${s.powerRate}%`,
-      'Work Pattern': s.workPattern,
+      'Work Pattern': s.workPattern.split('|')[0],
       'From Date': s.type === 'Roster' ? (s.workFromDate || 'N/A') : 'Permanent',
       'To Date': s.type === 'Roster' ? (s.workToDate || 'N/A') : 'Permanent',
       'Ramp': s.isRamp ? 'Yes' : 'No',
@@ -386,7 +388,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                   <div className="space-y-4 md:space-y-6">
                     <div className="flex items-center gap-3 text-slate-400">
                       <Briefcase size={12} />
-                      <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest">{member.workPattern}</span>
+                      <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest">{member.workPattern.split('|')[0]}</span>
                     </div>
 
                     {isRoster && (
@@ -433,7 +435,6 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
           <div className="p-4 md:p-8 border-b border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-slate-50/50">
             <h4 className="text-sm md:text-lg font-black uppercase italic text-slate-800">Duration Matrix (Current Year)</h4>
             <div className="flex gap-3 text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400">
-              <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-slate-200"></div> Local</span>
               <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-400"></div> Roster</span>
             </div>
           </div>
@@ -446,17 +447,16 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                 ))}
               </div>
               
-              {filteredStaff.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 text-xs font-black uppercase tracking-widest">No personnel found</div>
+              {filteredStaff.filter(s => s.type === 'Roster').length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs font-black uppercase tracking-widest">No roster personnel found</div>
               ) : (
-                filteredStaff.map(member => {
-                  const isRoster = member.type === 'Roster';
-                  const style = isRoster ? getTimelineStyle(member.workFromDate, member.workToDate) : { left: '0%', width: '100%' };
+                filteredStaff.filter(s => s.type === 'Roster').map(member => {
+                  const periods = member.rosterPeriods?.length ? member.rosterPeriods : [{start: member.workFromDate, end: member.workToDate}];
                   
                   return (
                     <div key={member.id} className="flex items-center gap-4 group">
                       <div className="w-[184px] shrink-0 flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black ${isRoster ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black bg-amber-100 text-amber-700">
                           {member.initials}
                         </div>
                         <div className="truncate">
@@ -473,18 +473,25 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
                           ))}
                         </div>
                         
-                        {/* Bar */}
-                        <div 
-                          className={`absolute top-2 bottom-2 rounded-md transition-all duration-500 ${isRoster ? 'bg-amber-400 cursor-pointer hover:brightness-110 shadow-sm' : 'bg-slate-200'}`}
-                          style={style}
-                          onClick={() => isRoster && setEditingDuration(member)}
-                        >
-                          {isRoster && (
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <span className="text-[8px] font-black text-amber-900 uppercase tracking-widest bg-white/50 px-2 py-0.5 rounded backdrop-blur-sm">Edit Duration</span>
+                        {/* Bars */}
+                        {periods.map((period, idx) => {
+                          const style = getTimelineStyle(period.start, period.end);
+                          return (
+                            <div 
+                              key={idx}
+                              className="absolute top-2 bottom-2 rounded-md transition-all duration-500 bg-amber-400 cursor-pointer hover:brightness-110 shadow-sm"
+                              style={style}
+                              onClick={() => {
+                                setEditingDuration(member);
+                                setEditPeriods(member.rosterPeriods?.length ? [...member.rosterPeriods] : [{start: member.workFromDate || '', end: member.workToDate || ''}]);
+                              }}
+                            >
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-[8px] font-black text-amber-900 uppercase tracking-widest bg-white/50 px-2 py-0.5 rounded backdrop-blur-sm">Edit</span>
+                              </div>
                             </div>
-                          )}
-                        </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -497,9 +504,9 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
 
       {editingDuration && (
         <div className="fixed inset-0 z-[2000] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl w-full max-w-sm p-6 pb-8 md:p-8 animate-in slide-in-from-bottom-4 md:zoom-in-95">
+          <div className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl w-full max-w-md p-6 pb-8 md:p-8 animate-in slide-in-from-bottom-4 md:zoom-in-95 max-h-[90vh] overflow-y-auto no-scrollbar">
             <h4 className="text-lg font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
-              <CalendarRange className="text-amber-500" /> Edit Duration
+              <CalendarRange className="text-amber-500" /> Edit Roster Periods
             </h4>
             <div className="flex items-center gap-3 mb-6 p-3 bg-amber-50 rounded-xl border border-amber-100">
               <div className="w-10 h-10 bg-amber-200 text-amber-700 rounded-lg flex items-center justify-center font-black">{editingDuration.initials}</div>
@@ -509,30 +516,73 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
               </div>
             </div>
             
-            <div className="space-y-4 mb-8">
-              <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Contract Start</label>
-                <input 
-                  type="date" 
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-400"
-                  value={editingDuration.workFromDate || ''}
-                  onChange={e => setEditingDuration({...editingDuration, workFromDate: e.target.value})}
-                />
-              </div>
-              <div>
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Contract End</label>
-                <input 
-                  type="date" 
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-400"
-                  value={editingDuration.workToDate || ''}
-                  onChange={e => setEditingDuration({...editingDuration, workToDate: e.target.value})}
-                />
-              </div>
+            <div className="space-y-4 mb-6">
+              {editPeriods.map((period, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl relative group">
+                  <div className="flex-1">
+                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Start</label>
+                    <input 
+                      type="date" 
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs outline-none focus:border-amber-400"
+                      value={period.start}
+                      onChange={e => {
+                        const newPeriods = [...editPeriods];
+                        newPeriods[idx].start = e.target.value;
+                        setEditPeriods(newPeriods);
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block">End</label>
+                    <input 
+                      type="date" 
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs outline-none focus:border-amber-400"
+                      value={period.end}
+                      onChange={e => {
+                        const newPeriods = [...editPeriods];
+                        newPeriods[idx].end = e.target.value;
+                        setEditPeriods(newPeriods);
+                      }}
+                    />
+                  </div>
+                  {editPeriods.length > 1 && (
+                    <button 
+                      onClick={() => setEditPeriods(editPeriods.filter((_, i) => i !== idx))}
+                      className="w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shrink-0 mt-4"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
+
+            <button 
+              onClick={() => setEditPeriods([...editPeriods, {start: '', end: ''}])}
+              className="w-full py-3 mb-8 border-2 border-dashed border-slate-200 text-slate-500 rounded-xl font-black uppercase text-[10px] tracking-widest hover:border-amber-400 hover:text-amber-600 transition-all flex items-center justify-center gap-2"
+            >
+              <Plus size={14} /> Add Another Period
+            </button>
             
             <div className="flex gap-3">
               <button onClick={() => setEditingDuration(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-              <button onClick={() => { onUpdate(editingDuration); setEditingDuration(null); }} className="flex-[2] py-3 bg-amber-500 text-slate-900 rounded-xl font-black uppercase italic tracking-widest hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20">Save Dates</button>
+              <button onClick={() => { 
+                const validPeriods = editPeriods.filter(p => p.start && p.end);
+                if (validPeriods.length === 0) {
+                  alert("Please add at least one valid period.");
+                  return;
+                }
+                const starts = validPeriods.map(p => p.start).sort();
+                const ends = validPeriods.map(p => p.end).sort();
+                
+                onUpdate({
+                  ...editingDuration, 
+                  rosterPeriods: validPeriods,
+                  workFromDate: starts[0],
+                  workToDate: ends[ends.length - 1]
+                }); 
+                setEditingDuration(null); 
+              }} className="flex-[2] py-3 bg-amber-500 text-slate-900 rounded-xl font-black uppercase italic tracking-widest hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20">Save Periods</button>
             </div>
           </div>
         </div>

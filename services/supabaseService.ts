@@ -74,22 +74,34 @@ export const db = {
           day: f.day || 0,
           priority: 'Standard' as 'High' | 'Standard' | 'Low'
         })),
-        staff: (sRes.data || []).map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          initials: s.initials,
-          type: s.type,
-          workPattern: s.work_pattern,
-          isRamp: !!s.is_ramp,
-          isShiftLeader: !!s.is_shift_leader,
-          isOps: !!s.is_operations,
-          isLoadControl: !!s.is_load_control,
-          isLostFound: !!s.is_lost_found,
-          powerRate: s.power_rate || 75,
-          maxShiftsPerWeek: s.max_shifts_per_week || 5,
-          workFromDate: s.work_from_date,
-          workToDate: s.work_to_date
-        })),
+        staff: (sRes.data || []).map((s: any) => {
+          let workPattern = s.work_pattern;
+          let rosterPeriods = undefined;
+          if (workPattern && workPattern.includes('|')) {
+            const parts = workPattern.split('|');
+            workPattern = parts[0];
+            try {
+              rosterPeriods = JSON.parse(parts[1]);
+            } catch (e) {}
+          }
+          return {
+            id: s.id,
+            name: s.name,
+            initials: s.initials,
+            type: s.type,
+            workPattern: workPattern,
+            isRamp: !!s.is_ramp,
+            isShiftLeader: !!s.is_shift_leader,
+            isOps: !!s.is_operations,
+            isLoadControl: !!s.is_load_control,
+            isLostFound: !!s.is_lost_found,
+            powerRate: s.power_rate || 75,
+            maxShiftsPerWeek: s.max_shifts_per_week || 5,
+            workFromDate: s.work_from_date,
+            workToDate: s.work_to_date,
+            rosterPeriods
+          };
+        }),
         shifts: (shRes.data || []).map((s: any) => ({
           id: s.id,
           day: s.day || 0,
@@ -158,7 +170,7 @@ export const db = {
       name: s.name, 
       initials: s.initials,
       type: s.type, 
-      work_pattern: s.workPattern, 
+      work_pattern: s.type === 'Roster' && s.rosterPeriods ? `${s.workPattern}|${JSON.stringify(s.rosterPeriods)}` : s.workPattern, 
       is_ramp: s.isRamp,
       is_shift_leader: s.isShiftLeader, 
       is_operations: s.isOps,

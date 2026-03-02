@@ -2,7 +2,7 @@
 export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
-export type WorkPattern = 'Continuous (Roster)' | '5 Days On / 2 Off';
+export type WorkPattern = string;
 export type LeaveType = 'Day off' | 'Annual leave' | 'Lieu leave' | 'Sick leave' | 'Roster leave' | 'NIL';
 
 export interface Flight {
@@ -35,6 +35,7 @@ export interface Staff {
   maxShiftsPerWeek: number;
   workFromDate?: string;
   workToDate?: string;
+  rosterPeriods?: { start: string; end: string }[];
 }
 
 export interface IncomingDuty {

@@ -268,7 +268,14 @@ export const ProgramDisplay: React.FC<Props> = ({
              }
          }
          const label = `${s.initials} (${count})`;
-         const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
+         let isRosterOutOfContract = false;
+         if (s.type === 'Roster') {
+           if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+             isRosterOutOfContract = !s.rosterPeriods.some(p => prog.dateString! >= p.start && prog.dateString! <= p.end);
+           } else if (s.workFromDate && s.workToDate) {
+             isRosterOutOfContract = prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate;
+           }
+         }
 
          if (leave) {
             if (leave.type === 'Annual leave') pdfCategories['ANNUAL LEAVE'].push(label);
@@ -658,7 +665,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                          }
                      }
                      
-                     const isRosterOutOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate);
+                     let isRosterOutOfContract = false;
+                     if (s.type === 'Roster') {
+                       if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                         isRosterOutOfContract = !s.rosterPeriods.some(p => prog.dateString! >= p.start && prog.dateString! <= p.end);
+                       } else if (s.workFromDate && s.workToDate) {
+                         isRosterOutOfContract = prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate;
+                       }
+                     }
                      const item = { staff: s, count };
 
                      if (leave) {

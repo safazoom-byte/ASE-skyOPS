@@ -63,12 +63,20 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, leaveRequests
     // --- ROSTER CAPACITY CALCULATION ---
     let rosterCapacity = 0;
     rosterStaff.forEach(s => {
-      if (!s.workFromDate || !s.workToDate) return;
-      
-      const contractStart = new Date(s.workFromDate);
-      const contractEnd = new Date(s.workToDate);
-      
-      const days = getOverlapDays(start, end, contractStart, contractEnd);
+      let days = 0;
+      if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+        s.rosterPeriods.forEach(p => {
+          const pStart = new Date(p.start);
+          const pEnd = new Date(p.end);
+          days += getOverlapDays(start, end, pStart, pEnd);
+        });
+      } else if (s.workFromDate && s.workToDate) {
+        const contractStart = new Date(s.workFromDate);
+        const contractEnd = new Date(s.workToDate);
+        days = getOverlapDays(start, end, contractStart, contractEnd);
+      } else {
+        return;
+      }
       
       // Also deduct leaves for Roster staff if they exist
       let leaveDays = 0;

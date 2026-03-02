@@ -109,7 +109,19 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
     // Fallback for short periods (e.g. 1-4 days) to allow utilization
     if (duration < 7 && duration > 0) grossCredits = Math.ceil(duration * 0.8);
   } else {
-    if (!staff.workFromDate || !staff.workToDate) {
+    if (staff.rosterPeriods && staff.rosterPeriods.length > 0) {
+      grossCredits = 0;
+      staff.rosterPeriods.forEach(period => {
+        const pStart = new Date(period.start);
+        const pEnd = new Date(period.end);
+        const overlapStart = progStart > pStart ? progStart : pStart;
+        const overlapEnd = progEnd < pEnd ? progEnd : pEnd;
+        if (overlapStart <= overlapEnd) {
+           const diffTime = overlapEnd.getTime() - overlapStart.getTime();
+           grossCredits += Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        }
+      });
+    } else if (!staff.workFromDate || !staff.workToDate) {
       grossCredits = duration;
     } else {
       const contractStart = new Date(staff.workFromDate);
@@ -171,8 +183,13 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         if (s.type !== 'Roster') return false;
         
         // Contract Check
-        if (!s.workFromDate || !s.workToDate) return false;
-        if (dStr < s.workFromDate || dStr > s.workToDate) return false;
+        if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+            const inPeriod = s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+            if (!inPeriod) return false;
+        } else {
+            if (!s.workFromDate || !s.workToDate) return false;
+            if (dStr < s.workFromDate || dStr > s.workToDate) return false;
+        }
 
         // Leave Check
         const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
@@ -236,7 +253,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
         const dStr = d.toISOString().split('T')[0];
         
         const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        const outOfContract = s.type === 'Roster' && s.workFromDate && s.workToDate && (dStr < s.workFromDate || dStr > s.workToDate);
+        let outOfContract = false;
+        if (s.type === 'Roster') {
+            if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                outOfContract = !s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+            } else if (s.workFromDate && s.workToDate) {
+                outOfContract = dStr < s.workFromDate || dStr > s.workToDate;
+            }
+        }
         
         if (onLeave || outOfContract) {
             dailyAvail += "0";
@@ -349,24 +373,220 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   let validAssignmentsCount = 0;
 
+  // 1. Initialize trackers
+  const staffLastEndTime = new Map<string, Date>();
+  if (data.incomingDuties) {
+    data.incomingDuties.forEach(d => {
+      staffLastEndTime.set(d.staffId, new Date(`${d.date}T${d.shiftEndTime}`));
+    });
+  }
+  const staffWorkload = new Map<string, number>();
+  data.staff.forEach(s => staffWorkload.set(s.id, 0));
+
+  // 2. Process AI assignments with strict validation
   if (Array.isArray(parsed)) {
-    parsed.forEach((item: any) => {
-        const [dayOffset, shiftIdx, initials, role] = Array.isArray(item) ? item : [item.d, item.s, item.st, item.r];
+    // Sort parsed items chronologically by shift start time
+    const sortedParsed = parsed.map((item: any) => {
+      const [dayOffset, shiftIdx, initials, role] = Array.isArray(item) ? item : [item.d, item.s, item.st, item.r];
+      return { dayOffset, shiftIdx, initials, role };
+    }).filter(item => {
+      return typeof item.dayOffset === 'number' && item.dayOffset >= 0 && item.dayOffset < config.numDays && data.shifts[item.shiftIdx];
+    }).sort((a, b) => {
+      const shiftA = data.shifts[a.shiftIdx];
+      const shiftB = data.shifts[b.shiftIdx];
+      return `${shiftA.pickupDate}T${shiftA.pickupTime}`.localeCompare(`${shiftB.pickupDate}T${shiftB.pickupTime}`);
+    });
+
+    sortedParsed.forEach((item: any) => {
+        const { dayOffset, shiftIdx, initials, role } = item;
         const staffId = staffMap[String(initials).toUpperCase()];
+        const shift = data.shifts[shiftIdx];
         
-        // Strict Boundary Check: Ensure dayOffset is within the 0..numDays-1 range
-        if (typeof dayOffset === 'number' && dayOffset >= 0 && dayOffset < config.numDays && finalPrograms[dayOffset] && data.shifts[shiftIdx] && staffId) {
+        if (staffId && shift && finalPrograms[dayOffset]) {
+            const staff = data.staff.find(s => s.id === staffId);
+            if (!staff) return;
+
+            // Check Leave & Contract
+            const dStr = shift.pickupDate;
+            const onLeave = data.leaveRequests?.some(l => l.staffId === staff.id && l.startDate <= dStr && l.endDate >= dStr);
+            let outOfContract = false;
+            if (staff.type === 'Roster') {
+                if (staff.rosterPeriods && staff.rosterPeriods.length > 0) {
+                    outOfContract = !staff.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+                } else if (staff.workFromDate && staff.workToDate) {
+                    outOfContract = dStr < staff.workFromDate || dStr > staff.workToDate;
+                }
+            }
+            if (onLeave || outOfContract) return;
+
+            // Check Rest
+            const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+            const lastEnd = staffLastEndTime.get(staffId);
+            if (lastEnd) {
+                const restHours = (shiftStart.getTime() - lastEnd.getTime()) / (1000 * 60 * 60);
+                if (restHours < config.minRestHours) return;
+            }
+
+            // Check Skills
+            let finalRole = role || 'AGT';
+            if (finalRole === 'LC' && !staff.isLoadControl) finalRole = 'AGT';
+            if (finalRole === 'SL' && !staff.isShiftLeader) finalRole = 'AGT';
+            if (finalRole === 'RMP' && !staff.isRamp) finalRole = 'AGT';
+            if (finalRole === 'OPS' && !staff.isOps) finalRole = 'AGT';
+            if (finalRole === 'LF' && !staff.isLostFound) finalRole = 'AGT';
+
+            // Check if already working this shift
+            const alreadyAssigned = finalPrograms[dayOffset].assignments.some(a => a.staffId === staffId && a.shiftId === shift.id);
+            if (alreadyAssigned) return;
+
+            // Assign
             finalPrograms[dayOffset].assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
                 staffId,
-                shiftId: data.shifts[shiftIdx].id,
-                role: role || 'AGT',
+                shiftId: shift.id,
+                role: finalRole,
                 flightId: '' 
             });
             validAssignmentsCount++;
+            staffLastEndTime.set(staffId, new Date(`${shift.endDate}T${shift.endTime}`));
+            staffWorkload.set(staffId, (staffWorkload.get(staffId) || 0) + 1);
         }
     });
   }
+
+  // 3. Algorithmic Fill / Repair Pass
+  // Sort shifts chronologically
+  const sortedShifts = [...data.shifts].sort((a,b) => `${a.pickupDate}T${a.pickupTime}`.localeCompare(`${b.pickupDate}T${b.pickupTime}`));
+  
+  sortedShifts.forEach(shift => {
+      const dayOffset = finalPrograms.findIndex(p => p.dateString === shift.pickupDate);
+      if (dayOffset === -1) return;
+      
+      const program = finalPrograms[dayOffset];
+      const shiftAssignments = program.assignments.filter(a => a.shiftId === shift.id);
+      
+      // Check required roles
+      if (shift.roleCounts) {
+          Object.entries(shift.roleCounts).forEach(([role, count]) => {
+              if (!count) return;
+              // Map role strings
+              let roleKey = role;
+              if (role === 'Load Control') roleKey = 'LC';
+              if (role === 'Shift Leader') roleKey = 'SL';
+              if (role === 'Ramp') roleKey = 'RMP';
+              if (role === 'Operations') roleKey = 'OPS';
+              if (role === 'Lost and Found') roleKey = 'LF';
+
+              let currentCount = shiftAssignments.filter(a => a.role === roleKey || a.role.includes(roleKey)).length;
+              
+              while (currentCount < count) {
+                  // Find available staff
+                  const availableStaff = data.staff.filter(s => {
+                      // Skill check
+                      if (roleKey === 'LC' && !s.isLoadControl) return false;
+                      if (roleKey === 'SL' && !s.isShiftLeader) return false;
+                      if (roleKey === 'RMP' && !s.isRamp) return false;
+                      if (roleKey === 'OPS' && !s.isOps) return false;
+                      if (roleKey === 'LF' && !s.isLostFound) return false;
+
+                      // Already assigned to this shift?
+                      if (shiftAssignments.some(a => a.staffId === s.id)) return false;
+
+                      // Contract / Leave check
+                      const dStr = shift.pickupDate;
+                      const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+                      let outOfContract = false;
+                      if (s.type === 'Roster') {
+                          if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                              outOfContract = !s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+                          } else if (s.workFromDate && s.workToDate) {
+                              outOfContract = dStr < s.workFromDate || dStr > s.workToDate;
+                          }
+                      }
+                      if (onLeave || outOfContract) return false;
+
+                      // Rest check
+                      const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+                      const lastEnd = staffLastEndTime.get(s.id);
+                      if (lastEnd) {
+                          const restHours = (shiftStart.getTime() - lastEnd.getTime()) / (1000 * 60 * 60);
+                          if (restHours < config.minRestHours) return false;
+                      }
+
+                      return true;
+                  });
+
+                  if (availableStaff.length === 0) break; // Cannot fill this role
+
+                  // Sort by workload to balance
+                  availableStaff.sort((a, b) => (staffWorkload.get(a.id) || 0) - (staffWorkload.get(b.id) || 0));
+                  
+                  const chosenStaff = availableStaff[0];
+                  const newAssignment = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      staffId: chosenStaff.id,
+                      shiftId: shift.id,
+                      role: roleKey,
+                      flightId: ''
+                  };
+                  program.assignments.push(newAssignment);
+                  shiftAssignments.push(newAssignment);
+                  validAssignmentsCount++;
+                  staffLastEndTime.set(chosenStaff.id, new Date(`${shift.endDate}T${shift.endTime}`));
+                  staffWorkload.set(chosenStaff.id, (staffWorkload.get(chosenStaff.id) || 0) + 1);
+                  currentCount++;
+              }
+          });
+      }
+
+      // Fill remaining minStaff
+      let currentTotal = shiftAssignments.length;
+      while (currentTotal < shift.minStaff) {
+          const availableStaff = data.staff.filter(s => {
+              if (shiftAssignments.some(a => a.staffId === s.id)) return false;
+
+              const dStr = shift.pickupDate;
+              const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+              let outOfContract = false;
+              if (s.type === 'Roster') {
+                  if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                      outOfContract = !s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+                  } else if (s.workFromDate && s.workToDate) {
+                      outOfContract = dStr < s.workFromDate || dStr > s.workToDate;
+                  }
+              }
+              if (onLeave || outOfContract) return false;
+
+              const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+              const lastEnd = staffLastEndTime.get(s.id);
+              if (lastEnd) {
+                  const restHours = (shiftStart.getTime() - lastEnd.getTime()) / (1000 * 60 * 60);
+                  if (restHours < config.minRestHours) return false;
+              }
+
+              return true;
+          });
+
+          if (availableStaff.length === 0) break; 
+
+          availableStaff.sort((a, b) => (staffWorkload.get(a.id) || 0) - (staffWorkload.get(b.id) || 0));
+          
+          const chosenStaff = availableStaff[0];
+          const newAssignment = {
+              id: Math.random().toString(36).substr(2, 9),
+              staffId: chosenStaff.id,
+              shiftId: shift.id,
+              role: 'AGT',
+              flightId: ''
+          };
+          program.assignments.push(newAssignment);
+          shiftAssignments.push(newAssignment);
+          validAssignmentsCount++;
+          staffLastEndTime.set(chosenStaff.id, new Date(`${shift.endDate}T${shift.endTime}`));
+          staffWorkload.set(chosenStaff.id, (staffWorkload.get(chosenStaff.id) || 0) + 1);
+          currentTotal++;
+      }
+  });
   
   const stationHealth = (parsed && validAssignmentsCount > 0) ? 100 : 0;
   

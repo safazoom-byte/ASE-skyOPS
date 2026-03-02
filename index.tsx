@@ -198,6 +198,9 @@ const App: React.FC = () => {
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
     const eligibleStaff = staff.filter(s => {
       if (s.type === 'Local') return true;
+      if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+        return s.rosterPeriods.some(p => p.start <= endDate && p.end >= startDate);
+      }
       return (!s.workFromDate || !s.workToDate) || (s.workFromDate <= endDate && s.workToDate >= startDate);
     });
     if (activeShifts.length === 0) { alert(`No shifts found for period.`); return; }

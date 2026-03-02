@@ -101,7 +101,12 @@ export const StationStatistics: React.FC<Props> = ({ staff, shifts, leaveRequest
       // Calculate generic roster availability for the day
       staff.filter(s => s.type === 'Roster').forEach(s => {
         const onLeave = leaveRequests.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        const inContract = s.workFromDate && s.workToDate && dStr >= s.workFromDate && dStr <= s.workToDate;
+        let inContract = false;
+        if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+          inContract = s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+        } else {
+          inContract = !!(s.workFromDate && s.workToDate && dStr >= s.workFromDate && dStr <= s.workToDate);
+        }
         if (!onLeave && inContract) rosterAvailable++;
       });
 
@@ -123,8 +128,13 @@ export const StationStatistics: React.FC<Props> = ({ staff, shifts, leaveRequest
 
               // Check contract if roster
               if (s.type === 'Roster') {
+                if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                  const inPeriod = s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+                  if (!inPeriod) return false;
+                } else {
                   if (!s.workFromDate || !s.workToDate) return false;
                   if (dStr < s.workFromDate || dStr > s.workToDate) return false;
+                }
               }
               return true;
           }).length;
