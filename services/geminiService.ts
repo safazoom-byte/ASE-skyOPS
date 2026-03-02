@@ -359,9 +359,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       contents: prompt,
       config: { 
         temperature: 0.1, 
-        responseMimeType: 'application/json',
-        // Increased thinking budget for complex solving
-        thinkingConfig: { thinkingBudget: 4096 } 
+        responseMimeType: 'application/json'
       }
   }));
 
