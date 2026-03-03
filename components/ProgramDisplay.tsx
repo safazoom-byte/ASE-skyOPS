@@ -307,8 +307,34 @@ export const ProgramDisplay: React.FC<Props> = ({
       const tableData = shiftsToday.map((shift, idx) => {
         const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
         const flightStrs = (shift.flightIds || []).map(fid => { const f = getFlight(fid); return f ? f.flightNumber : ''; }).filter(Boolean).join(' / ') || 'NIL';
-        const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return `${st.initials} (${a.role})`; }).join(' | ');
-        return [(idx + 1).toString(), shift.pickupTime, shift.endTime, flightStrs, `${assignments.length} / ${shift.maxStaff}`, personnelStrs];
+        
+        const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return st.initials; }).join(' | ');
+        
+        const roleChecks = Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, _]) => {
+            let roleKey = role;
+            if (role === 'Load Control') roleKey = 'LC';
+            if (role === 'Shift Leader') roleKey = 'SL';
+            if (role === 'Ramp') roleKey = 'RMP';
+            if (role === 'Operations') roleKey = 'OPS';
+            if (role === 'Lost and Found') roleKey = 'LF';
+
+            const isFulfilled = assignments.some(a => {
+                const st = getStaff(a.staffId);
+                if (!st) return false;
+                if (a.role === roleKey || a.role === role) return true;
+                if (roleKey === 'LC' && st.isLoadControl) return true;
+                if (roleKey === 'SL' && st.isShiftLeader) return true;
+                if (roleKey === 'RMP' && st.isRamp) return true;
+                if (roleKey === 'OPS' && st.isOps) return true;
+                if (roleKey === 'LF' && st.isLostFound) return true;
+                return false;
+            });
+            return `${roleKey} ${isFulfilled ? '(OK)' : '(X)'}`;
+        });
+        
+        const reqStr = roleChecks.length > 0 ? `\nReq: ${roleChecks.join(' | ')}` : '';
+        
+        return [(idx + 1).toString(), shift.pickupTime, shift.endTime, flightStrs, `${assignments.length} / ${shift.maxStaff}`, personnelStrs + reqStr];
       });
 
       autoTable(doc, {
@@ -745,69 +771,99 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             {assignments.length} / {shift.maxStaff}
                                          </td>
                                          <td className="px-4 py-3">
-                                            <div className="flex flex-wrap gap-2">
-                                               {assignments.map(a => {
-                                                   const st = getStaff(a.staffId);
-                                                   if (!st) return null;
-                                                   
-                                                   const pDate = new Date(prog.dateString!);
-                                                   const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                                                   const shiftStart = new Date(pDate);
-                                                   shiftStart.setHours(ph, pm, 0, 0);
-                                                   
-                                                   const rest = calculateRestHours(st.id, shiftStart);
-                                                   const daysWorked = getStaffWorkload(st.id);
-                                                   const colorClass = getStaffColor(st, daysWorked, rest);
-                                                   
-                                                   let target = 5;
-                                                   if (st.type === 'Roster') {
-                                                       const progStart = new Date(startDate);
-                                                       const progEnd = new Date(endDate);
-                                                       const workFrom = st.workFromDate ? new Date(st.workFromDate) : progStart;
-                                                       const workTo = st.workToDate ? new Date(st.workToDate) : progEnd;
-                                                       const overlapStart = workFrom > progStart ? workFrom : progStart;
-                                                       const overlapEnd = workTo < progEnd ? workTo : progEnd;
-                                                       if (overlapStart <= overlapEnd) {
-                                                          target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                                                       } else { target = 0; }
-                                                   }
-                                                   const showDays = daysWorked !== target;
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                   {assignments.map(a => {
+                                                       const st = getStaff(a.staffId);
+                                                       if (!st) return null;
+                                                       
+                                                       const pDate = new Date(prog.dateString!);
+                                                       const [ph, pm] = shift.pickupTime.split(':').map(Number);
+                                                       const shiftStart = new Date(pDate);
+                                                       shiftStart.setHours(ph, pm, 0, 0);
+                                                       
+                                                       const rest = calculateRestHours(st.id, shiftStart);
+                                                       const daysWorked = getStaffWorkload(st.id);
+                                                       const colorClass = getStaffColor(st, daysWorked, rest);
+                                                       
+                                                       let target = 5;
+                                                       if (st.type === 'Roster') {
+                                                           const progStart = new Date(startDate);
+                                                           const progEnd = new Date(endDate);
+                                                           const workFrom = st.workFromDate ? new Date(st.workFromDate) : progStart;
+                                                           const workTo = st.workToDate ? new Date(st.workToDate) : progEnd;
+                                                           const overlapStart = workFrom > progStart ? workFrom : progStart;
+                                                           const overlapEnd = workTo < progEnd ? workTo : progEnd;
+                                                           if (overlapStart <= overlapEnd) {
+                                                              target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                                                           } else { target = 0; }
+                                                       }
+                                                       const showDays = daysWorked !== target;
 
-                                                   const isLastShiftOfDay = !shiftsToday.slice(idx + 1).some(futureShift => 
-                                                       prog.assignments.some(ass => ass.shiftId === futureShift.id && ass.staffId === st.id)
-                                                   );
-                                                   let nextDayShiftTime: string | null = null;
-                                                   const nextProg = activePrograms[i + 1];
-                                                   if (isLastShiftOfDay && nextProg) {
-                                                       const shiftsTomorrow = shifts
-                                                           .filter(s => s.pickupDate === nextProg.dateString)
-                                                           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
-                                                       for (const tomorrowShift of shiftsTomorrow) {
-                                                           const nextAssignment = nextProg.assignments.find(ass => ass.shiftId === tomorrowShift.id && ass.staffId === st.id);
-                                                           if (nextAssignment) {
-                                                               nextDayShiftTime = tomorrowShift.pickupTime;
-                                                               break;
+                                                       const isLastShiftOfDay = !shiftsToday.slice(idx + 1).some(futureShift => 
+                                                           prog.assignments.some(ass => ass.shiftId === futureShift.id && ass.staffId === st.id)
+                                                       );
+                                                       let nextDayShiftTime: string | null = null;
+                                                       const nextProg = activePrograms[i + 1];
+                                                       if (isLastShiftOfDay && nextProg) {
+                                                           const shiftsTomorrow = shifts
+                                                               .filter(s => s.pickupDate === nextProg.dateString)
+                                                               .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                                                           for (const tomorrowShift of shiftsTomorrow) {
+                                                               const nextAssignment = nextProg.assignments.find(ass => ass.shiftId === tomorrowShift.id && ass.staffId === st.id);
+                                                               if (nextAssignment) {
+                                                                   nextDayShiftTime = tomorrowShift.pickupTime;
+                                                                   break;
+                                                               }
                                                            }
                                                        }
-                                                   }
 
-                                                   return (
-                                                      <div 
-                                                         key={a.id}
-                                                         draggable
-                                                         onDragStart={(e) => handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)}
-                                                         className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
-                                                         <span>{st.initials}</span>
-                                                         {['SL', 'LC', 'LF', 'RMP', 'OPS', 'Shift Leader', 'Load Control', 'Lost and Found', 'Ramp', 'Operations'].includes(a.role) && (
-                                                             <span className="opacity-70 text-[8px]">({a.role})</span>
-                                                         )}
-                                                         {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">{rest}H</span>}
-                                                         {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
-                                                         {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
-                                                      </div>
-                                                   );
-                                               })}
-                                               {assignments.length === 0 && <span className="text-[10px] italic text-slate-300">Drag staff here...</span>}
+                                                       return (
+                                                          <div 
+                                                             key={a.id}
+                                                             draggable
+                                                             onDragStart={(e) => handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)}
+                                                             className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
+                                                             <span>{st.initials}</span>
+                                                             {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">{rest}H</span>}
+                                                             {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
+                                                             {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
+                                                          </div>
+                                                       );
+                                                   })}
+                                                   {assignments.length === 0 && <span className="text-[10px] italic text-slate-300">Drag staff here...</span>}
+                                                </div>
+                                                
+                                                {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).length > 0 && (
+                                                    <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
+                                                        {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, _]) => {
+                                                            let roleKey = role;
+                                                            if (role === 'Load Control') roleKey = 'LC';
+                                                            if (role === 'Shift Leader') roleKey = 'SL';
+                                                            if (role === 'Ramp') roleKey = 'RMP';
+                                                            if (role === 'Operations') roleKey = 'OPS';
+                                                            if (role === 'Lost and Found') roleKey = 'LF';
+
+                                                            const isFulfilled = assignments.some(a => {
+                                                                const st = getStaff(a.staffId);
+                                                                if (!st) return false;
+                                                                if (a.role === roleKey || a.role === role) return true;
+                                                                if (roleKey === 'LC' && st.isLoadControl) return true;
+                                                                if (roleKey === 'SL' && st.isShiftLeader) return true;
+                                                                if (roleKey === 'RMP' && st.isRamp) return true;
+                                                                if (roleKey === 'OPS' && st.isOps) return true;
+                                                                if (roleKey === 'LF' && st.isLostFound) return true;
+                                                                return false;
+                                                            });
+
+                                                            return (
+                                                                <span key={roleKey} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 ${isFulfilled ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+                                                                    {roleKey} {isFulfilled ? '✅' : '❌'}
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
                                          </td>
                                       </tr>
