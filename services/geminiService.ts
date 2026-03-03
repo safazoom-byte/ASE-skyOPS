@@ -315,6 +315,37 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   const plannedDaysOff: Record<string, number[]> = safeParseJson(daysOffResponse.text) || {};
 
+  // --- IMPROVEMENT 1: AI HALLUCINATION FALLBACK ---
+  // Calculate daily demand to find the best days off if AI failed
+  const dailyDemand = new Array(config.numDays).fill(0);
+  data.shifts.forEach(s => {
+      const dayOffset = Math.floor((new Date(s.pickupDate).getTime() - new Date(config.startDate).getTime()) / (1000 * 60 * 60 * 24));
+      if (dayOffset >= 0 && dayOffset < config.numDays) {
+          dailyDemand[dayOffset] += (s.maxStaff || s.minStaff);
+      }
+  });
+
+  data.staff.forEach(s => {
+      if (s.type === 'Local') {
+          const init = s.initials.toUpperCase();
+          let daysOff = plannedDaysOff[init] || [];
+          // Filter out invalid days
+          daysOff = daysOff.filter(d => typeof d === 'number' && d >= 0 && d < config.numDays);
+          // Remove duplicates
+          daysOff = [...new Set(daysOff)];
+          
+          if (daysOff.length !== 2) {
+              // Fallback: Assign the 2 days with the lowest demand
+              const sortedDays = dailyDemand
+                  .map((demand, day) => ({ day, demand }))
+                  .sort((a, b) => a.demand - b.demand);
+              plannedDaysOff[init] = [sortedDays[0].day, sortedDays[1].day];
+          } else {
+              plannedDaysOff[init] = daysOff;
+          }
+      }
+  });
+
   // SANITIZED INITIALIZATION
   const finalPrograms: DailyProgram[] = Array.from({length: config.numDays}).map((_, i) => {
       const d = new Date(config.startDate);
@@ -456,13 +487,23 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       }
   });
 
-  const stationHealth = validAssignmentsCount > 0 ? 100 : 0;
+  // --- IMPROVEMENT 2: TRUE STATION HEALTH SCORE ---
+  let totalRequiredStaff = 0;
+  sortedShifts.forEach(shift => {
+      const dayOffset = finalPrograms.findIndex(p => p.dateString === shift.pickupDate);
+      if (dayOffset !== -1) {
+          totalRequiredStaff += (shift.maxStaff || shift.minStaff);
+      }
+  });
+
+  const stationHealth = totalRequiredStaff > 0 ? Math.round((validAssignmentsCount / totalRequiredStaff) * 100) : 100;
+  const boundedHealth = Math.min(100, Math.max(0, stationHealth));
   
   return {
     programs: finalPrograms,
-    stationHealth,
-    alerts: stationHealth === 0 ? [{ type: 'danger', message: 'CRITICAL: Engine failed to generate valid assignments. Check staff/shift inputs.' }] : [],
-    isCompliant: stationHealth === 100
+    stationHealth: boundedHealth,
+    alerts: boundedHealth < 100 ? [{ type: 'warning', message: `Station Health is ${boundedHealth}%. Some shifts are understaffed.` }] : [],
+    isCompliant: boundedHealth === 100
   };
 };
 

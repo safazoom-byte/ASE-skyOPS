@@ -608,8 +608,32 @@ const App: React.FC = () => {
           </div>
         )}
         {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} />}
-        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {setStaff(p => p.filter(s => s.id !== id)); db.deleteStaff(id);}} defaultMaxShifts={5} />}
-        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {setShifts(p => p.filter(s => s.id !== id)); db.deleteShift(id);}} />}
+        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {
+            setStaff(p => p.filter(s => s.id !== id)); 
+            db.deleteStaff(id);
+            // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
+            setPrograms(prev => {
+                const updated = prev.map(prog => ({
+                    ...prog,
+                    assignments: prog.assignments.filter(a => a.staffId !== id)
+                }));
+                if (supabase) db.savePrograms(updated);
+                return updated;
+            });
+        }} defaultMaxShifts={5} />}
+        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {
+            setShifts(p => p.filter(s => s.id !== id)); 
+            db.deleteShift(id);
+            // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
+            setPrograms(prev => {
+                const updated = prev.map(prog => ({
+                    ...prog,
+                    assignments: prog.assignments.filter(a => a.shiftId !== id)
+                }));
+                if (supabase) db.savePrograms(updated);
+                return updated;
+            });
+        }} />}
         {activeTab === 'program' && (
           <ProgramDisplay 
             programs={programs} 

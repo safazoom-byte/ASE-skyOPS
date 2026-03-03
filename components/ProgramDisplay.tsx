@@ -310,7 +310,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         
         const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return st.initials; }).join(' | ');
         
-        const roleChecks = Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, _]) => {
+        const roleChecks = Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
             let roleKey = role;
             if (role === 'Load Control') roleKey = 'LC';
             if (role === 'Shift Leader') roleKey = 'SL';
@@ -318,7 +318,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             if (role === 'Operations') roleKey = 'OPS';
             if (role === 'Lost and Found') roleKey = 'LF';
 
-            const isFulfilled = assignments.some(a => {
+            const fulfilledCount = assignments.filter(a => {
                 const st = getStaff(a.staffId);
                 if (!st) return false;
                 if (a.role === roleKey || a.role === role) return true;
@@ -328,7 +328,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                 if (roleKey === 'OPS' && st.isOps) return true;
                 if (roleKey === 'LF' && st.isLostFound) return true;
                 return false;
-            });
+            }).length;
+            const isFulfilled = fulfilledCount >= count;
             return `${roleKey} ${isFulfilled ? '(OK)' : '(X)'}`;
         });
         
@@ -836,15 +837,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                 
                                                 {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).length > 0 && (
                                                     <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
-                                                        {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, _]) => {
+                                                        {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
                                                             let roleKey = role;
-                                                            if (role === 'Load Control') roleKey = 'LC';
                                                             if (role === 'Shift Leader') roleKey = 'SL';
                                                             if (role === 'Ramp') roleKey = 'RMP';
                                                             if (role === 'Operations') roleKey = 'OPS';
                                                             if (role === 'Lost and Found') roleKey = 'LF';
 
-                                                            const isFulfilled = assignments.some(a => {
+                                                            const fulfilledCount = assignments.filter(a => {
                                                                 const st = getStaff(a.staffId);
                                                                 if (!st) return false;
                                                                 if (a.role === roleKey || a.role === role) return true;
@@ -854,7 +854,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                                 if (roleKey === 'OPS' && st.isOps) return true;
                                                                 if (roleKey === 'LF' && st.isLostFound) return true;
                                                                 return false;
-                                                            });
+                                                            }).length;
+                                                            const isFulfilled = fulfilledCount >= count;
 
                                                             return (
                                                                 <span key={roleKey} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 ${isFulfilled ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>

@@ -102,6 +102,13 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     e.preventDefault();
     if (!newStaff.name) return;
     const initials = (newStaff.initials || generateInitials(newStaff.name)).toUpperCase();
+    
+    // --- IMPROVEMENT 3: DUPLICATE INITIALS WARNING ---
+    if (staff.some(s => s.initials.toUpperCase() === initials)) {
+        alert(`Warning: The initials "${initials}" are already in use. Please use unique initials.`);
+        return;
+    }
+
     const id = Math.random().toString(36).substring(2, 11);
     const isRoster = newStaff.type === 'Roster';
     
@@ -594,7 +601,17 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
             <h4 className="text-xl md:text-2xl font-black uppercase italic mb-6 md:mb-10 flex items-center gap-4">
               <Edit2 className="text-indigo-600" /> Refine Profile
             </h4>
-            <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingStaff); setEditingStaff(null); }} className="space-y-6 md:space-y-8">
+            <form onSubmit={(e) => { 
+                e.preventDefault(); 
+                // --- IMPROVEMENT 3: DUPLICATE INITIALS WARNING (EDIT) ---
+                const initials = editingStaff.initials.toUpperCase();
+                if (staff.some(s => s.id !== editingStaff.id && s.initials.toUpperCase() === initials)) {
+                    alert(`Warning: The initials "${initials}" are already in use by another staff member.`);
+                    return;
+                }
+                onUpdate(editingStaff); 
+                setEditingStaff(null); 
+            }} className="space-y-6 md:space-y-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                 <div>
                   <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">Full Name</label>
