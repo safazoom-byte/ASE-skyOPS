@@ -164,187 +164,134 @@ export const calculateCredits = (staff: Staff, startDate: string, duration: numb
 };
 
 export const generateAIProgram = async (data: ProgramData, constraintsLog: string, config: { numDays: number, minRestHours: number, startDate: string }): Promise<BuildResult> => {
-  if (!process.env.API_KEY) {
-    throw new Error("Missing Gemini API Key. Please set VITE_API_KEY in your Vercel environment variables.");
-  }
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
   const programEndStr = programEnd.toISOString().split('T')[0];
 
-  const staffMap: Record<string, string> = {};
-  data.staff.forEach(s => staffMap[s.initials.toUpperCase()] = s.id);
+  // --- PHASE 1: DEMAND-DRIVEN DAYS OFF PLANNING (DETERMINISTIC) ---
+  const plannedDaysOff: Record<string, number[]> = {};
+  const localDaysWorked: Record<string, number> = {};
+  const localStaff = data.staff.filter(s => s.type === 'Local');
+  const maxWorkDays = Math.max(0, config.numDays - 2);
 
-  // --- PHASE 1: GENERATE MANPOWER BLUEPRINT (THE "GOLD AUDIT" LOGIC) ---
-  const totalLocalCount = data.staff.filter(s => s.type === 'Local').length;
-  const dailyBlueprint: string[] = [];
-
-  for(let i=0; i<config.numDays; i++) {
-    const d = new Date(config.startDate);
-    d.setDate(d.getDate() + i);
-    const dStr = d.toISOString().split('T')[0];
-    
-    // 1. Calculate Demand
-    const dailyDemand = data.shifts
-      .filter(s => s.pickupDate === dStr)
-      .reduce((acc, curr) => acc + curr.minStaff, 0);
-
-    // 2. Calculate Roster Availability
-    const activeRosterCount = data.staff.filter(s => {
-        if (s.type !== 'Roster') return false;
-        
-        // Contract Check
-        if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-            const inPeriod = s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
-            if (!inPeriod) return false;
-        } else {
-            if (!s.workFromDate || !s.workToDate) return false;
-            if (dStr < s.workFromDate || dStr > s.workToDate) return false;
-        }
-
-        // Leave Check
-        const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        if (onLeave) return false;
-
-        return true;
-    }).length;
-
-    // 3. Calculate Local Requirements
-    const localNeeded = Math.max(0, dailyDemand - activeRosterCount);
-    
-    // 4. Calculate Forced Off-Duty
-    const localForceOff = Math.max(0, totalLocalCount - localNeeded);
-
-    dailyBlueprint.push(
-        `DATE ${dStr} (D${i}): Demand=${dailyDemand}. RosterAvailable=${activeRosterCount}. LOCAL_WORK_TARGET=${localNeeded}. LOCAL_FORCE_OFF=${localForceOff}.`
-    );
-  }
-
-  const blueprintBlock = dailyBlueprint.join('\n');
-
-  // --- PHASE 2: STAFF CONTEXT & AVAILABILITY MAPPING (V2 ENHANCED) ---
-  const staffContext = data.staff.map(s => {
-    const skills = [
-      s.isLoadControl?'LC':'', 
-      s.isShiftLeader?'SL':'', 
-      s.isOps?'OPS':'', 
-      s.isRamp?'RMP':'', 
-      s.isLostFound?'LF':''
-    ].filter(Boolean).join(',');
-    
-    // Check for Dual Role Super-Token
-    const isDualLCSL = s.isLoadControl && s.isShiftLeader;
-    const dualTag = isDualLCSL ? ' [DUAL_LC_SL]' : '';
-    
-    // Fatigue Score Calculation
-    const lastDuty = (data.incomingDuties || []).filter(iduty => iduty.staffId === s.id).sort((a,b) => b.date.localeCompare(a.date))[0];
-    let fatigueLevel = "FRESH";
-    let lastDutyInfo = "No recent duty";
-
-    if (lastDuty) {
-        const lastDutyDate = new Date(lastDuty.date);
-        const programStartDate = new Date(config.startDate);
-        const diffTime = programStartDate.getTime() - lastDutyDate.getTime();
-        const diffDays = diffTime / (1000 * 3600 * 24);
-
-        if (diffDays <= 1) {
-             const [h] = lastDuty.shiftEndTime.split(':').map(Number);
-             if (h >= 20 || h <= 4) fatigueLevel = "CRITICAL_FATIGUE (Night Turnaround)";
-             else fatigueLevel = "MODERATE_FATIGUE";
-        }
-        lastDutyInfo = `Ended ${lastDuty.date} ${lastDuty.shiftEndTime}`;
-    }
-
-    const credits = calculateCredits(s, config.startDate, config.numDays, data.leaveRequests || []);
-    
-    let dailyAvail = "";
-    for(let i=0; i<config.numDays; i++) {
-        const d = new Date(config.startDate);
-        d.setDate(d.getDate() + i);
-        const dStr = d.toISOString().split('T')[0];
-        
-        const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
-        let outOfContract = false;
-        if (s.type === 'Roster') {
-            if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-                outOfContract = !s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
-            } else if (s.workFromDate && s.workToDate) {
-                outOfContract = dStr < s.workFromDate || dStr > s.workToDate;
-            }
-        }
-        
-        if (onLeave || outOfContract) {
-            dailyAvail += "0";
-        } else {
-            dailyAvail += "1";
-        }
-    }
-
-    return `ID: ${s.initials}, Role: ${s.type}, Rank: ${s.powerRate}%, Skills: [${skills}]${dualTag}, AllocatableShifts: ${credits}, Fatigue: ${fatigueLevel} (${lastDutyInfo}), AvailPattern: ${dailyAvail}`; 
-  }).join('\n');
-
-  // --- PHASE 2: MASTER ROSTER PLANNING (DAYS OFF) ---
-  const daysOffPrompt = `
-    ROLE: Global Strategic Roster Architect
-    MISSION: Assign exactly 2 Days Off for each 'Local' staff member for the ${config.numDays}-day period.
-    
-    MANPOWER BLUEPRINT (DAILY TARGETS):
-    ${blueprintBlock}
-    
-    STAFF CONTEXT:
-    ${staffContext}
-    
-    INSTRUCTIONS:
-    1. Analyze the Blueprint to see which days need the most people.
-    2. For every Local staff member, pick exactly 2 days to be "OFF" (0 to ${config.numDays-1}).
-    3. Pick days where 'LOCAL_WORK_TARGET' is low.
-    4. Ensure Specialist Roles (SL, LC, RMP, OPS) are available every single day. Do not give all SLs the same day off.
-    5. Roster staff do not get days off assigned here (they follow their contract/leave).
-    
-    OUTPUT FORMAT:
-    STRICTLY RETURN ONLY A RAW JSON OBJECT. NO MARKDOWN.
-    Format: { "Initials": [offDay1, offDay2], ... }
-  `;
-
-  const daysOffResponse = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
-      contents: daysOffPrompt,
-      config: { temperature: 0.1, responseMimeType: 'application/json' }
-  }));
-
-  const plannedDaysOff: Record<string, number[]> = safeParseJson(daysOffResponse.text) || {};
-
-  // --- IMPROVEMENT 1: AI HALLUCINATION FALLBACK ---
-  // Calculate daily demand to find the best days off if AI failed
-  const dailyDemand = new Array(config.numDays).fill(0);
-  data.shifts.forEach(s => {
-      const dayOffset = Math.floor((new Date(s.pickupDate).getTime() - new Date(config.startDate).getTime()) / (1000 * 60 * 60 * 24));
-      if (dayOffset >= 0 && dayOffset < config.numDays) {
-          dailyDemand[dayOffset] += (s.maxStaff || s.minStaff);
-      }
+  localStaff.forEach(s => {
+      plannedDaysOff[s.initials.toUpperCase()] = [];
+      localDaysWorked[s.id] = 0;
   });
 
-  data.staff.forEach(s => {
-      if (s.type === 'Local') {
-          const init = s.initials.toUpperCase();
-          let daysOff = plannedDaysOff[init] || [];
-          // Filter out invalid days
-          daysOff = daysOff.filter(d => typeof d === 'number' && d >= 0 && d < config.numDays);
-          // Remove duplicates
-          daysOff = [...new Set(daysOff)];
-          
-          if (daysOff.length !== 2) {
-              // Fallback: Assign the 2 days with the lowest demand
-              const sortedDays = dailyDemand
-                  .map((demand, day) => ({ day, demand }))
-                  .sort((a, b) => a.demand - b.demand);
-              plannedDaysOff[init] = [sortedDays[0].day, sortedDays[1].day];
-          } else {
-              plannedDaysOff[init] = daysOff;
+  for (let dayOffset = 0; dayOffset < config.numDays; dayOffset++) {
+      const d = new Date(config.startDate);
+      d.setDate(d.getDate() + dayOffset);
+      const dStr = d.toISOString().split('T')[0];
+
+      const dailyShifts = data.shifts.filter(s => s.pickupDate === dStr);
+      
+      let targetHeadcount = 0;
+      const roleNeeds: Record<string, number> = { LC: 0, SL: 0, RMP: 0, OPS: 0, LF: 0 };
+      
+      dailyShifts.forEach(s => {
+          targetHeadcount += (s.maxStaff || s.minStaff);
+          if (s.roleCounts) {
+              Object.entries(s.roleCounts).forEach(([role, count]) => {
+                  let roleKey = role;
+                  if (role === 'Load Control') roleKey = 'LC';
+                  if (role === 'Shift Leader') roleKey = 'SL';
+                  if (role === 'Ramp') roleKey = 'RMP';
+                  if (role === 'Operations') roleKey = 'OPS';
+                  if (role === 'Lost and Found') roleKey = 'LF';
+                  if (roleNeeds[roleKey] !== undefined) roleNeeds[roleKey] += count;
+              });
           }
+      });
+
+      // 1. Evaluate Roster Staff Contribution
+      let rosterCount = 0;
+      data.staff.filter(s => s.type === 'Roster').forEach(s => {
+          const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+          let inContract = false;
+          if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+              inContract = s.rosterPeriods.some(p => dStr >= p.start && dStr <= p.end);
+          } else if (s.workFromDate && s.workToDate) {
+              inContract = dStr >= s.workFromDate && dStr <= s.workToDate;
+          }
+          if (!onLeave && inContract) {
+              rosterCount++;
+              if (s.isLoadControl) roleNeeds.LC = Math.max(0, roleNeeds.LC - 1);
+              if (s.isShiftLeader) roleNeeds.SL = Math.max(0, roleNeeds.SL - 1);
+              if (s.isRamp) roleNeeds.RMP = Math.max(0, roleNeeds.RMP - 1);
+              if (s.isOps) roleNeeds.OPS = Math.max(0, roleNeeds.OPS - 1);
+              if (s.isLostFound) roleNeeds.LF = Math.max(0, roleNeeds.LF - 1);
+          }
+      });
+
+      // 2. Draft Local Staff
+      let remainingHeadcount = Math.max(0, targetHeadcount - rosterCount);
+      
+      const availableLocals = localStaff.filter(s => {
+          const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
+          return !onLeave;
+      });
+
+      const draftedLocals = new Set<string>();
+      const daysLeftInPeriod = config.numDays - dayOffset;
+
+      // A. MUST WORK (to hit maxWorkDays)
+      availableLocals.forEach(s => {
+          const daysNeeded = maxWorkDays - localDaysWorked[s.id];
+          if (daysNeeded >= daysLeftInPeriod && daysNeeded > 0) {
+              draftedLocals.add(s.id);
+          }
+      });
+
+      // B. MUST OFF (already hit maxWorkDays)
+      const mustOffLocals = new Set<string>();
+      availableLocals.forEach(s => {
+          if (localDaysWorked[s.id] >= maxWorkDays) {
+              mustOffLocals.add(s.id);
+          }
+      });
+
+      // C. Draft for Roles
+      const roleDraftPool = availableLocals.filter(s => !draftedLocals.has(s.id) && !mustOffLocals.has(s.id));
+      roleDraftPool.sort((a, b) => localDaysWorked[a.id] - localDaysWorked[b.id]);
+      
+      roleDraftPool.forEach(s => {
+          let draftedForRole = false;
+          if (roleNeeds.LC > 0 && s.isLoadControl) { roleNeeds.LC--; draftedForRole = true; }
+          if (roleNeeds.SL > 0 && s.isShiftLeader) { roleNeeds.SL--; draftedForRole = true; }
+          if (roleNeeds.RMP > 0 && s.isRamp) { roleNeeds.RMP--; draftedForRole = true; }
+          if (roleNeeds.OPS > 0 && s.isOps) { roleNeeds.OPS--; draftedForRole = true; }
+          if (roleNeeds.LF > 0 && s.isLostFound) { roleNeeds.LF--; draftedForRole = true; }
+          
+          if (draftedForRole) {
+              draftedLocals.add(s.id);
+          }
+      });
+
+      // D. Draft for Headcount
+      const hcDraftPool = availableLocals.filter(s => !draftedLocals.has(s.id) && !mustOffLocals.has(s.id));
+      hcDraftPool.sort((a, b) => localDaysWorked[a.id] - localDaysWorked[b.id]);
+      
+      for (const s of hcDraftPool) {
+          if (draftedLocals.size >= remainingHeadcount) break;
+          draftedLocals.add(s.id);
       }
-  });
+
+      // E. Assign Days Off
+      availableLocals.forEach(s => {
+          const init = s.initials.toUpperCase();
+          if (draftedLocals.has(s.id)) {
+              localDaysWorked[s.id]++;
+          } else {
+              if (plannedDaysOff[init].length < 2) {
+                  plannedDaysOff[init].push(dayOffset);
+              } else {
+                  localDaysWorked[s.id]++;
+              }
+          }
+      });
+  }
 
   // SANITIZED INITIALIZATION
   const finalPrograms: DailyProgram[] = Array.from({length: config.numDays}).map((_, i) => {
