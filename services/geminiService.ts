@@ -295,20 +295,14 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
   // We now use pure TypeScript to assign shifts based on the AI's Days Off plan.
   // This guarantees 0 mistakes, perfect 12h rest compliance, and blazing speed.
 
-  // Sort shifts chronologically across the entire period
-  const sortedShifts = [...data.shifts].sort((a,b) => `${a.pickupDate}T${a.pickupTime}`.localeCompare(`${b.pickupDate}T${b.pickupTime}`));
-
-  sortedShifts.forEach(shift => {
-      const dayOffset = finalPrograms.findIndex(p => p.dateString === shift.pickupDate);
-      if (dayOffset === -1) return;
-      
+  for (let dayOffset = 0; dayOffset < config.numDays; dayOffset++) {
       const program = finalPrograms[dayOffset];
-      const dStr = shift.pickupDate;
-      const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
-      const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
+      const dStr = program.dateString;
+      const dailyShifts = data.shifts.filter(s => s.pickupDate === dStr).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
 
-      // Helper to find available staff
-      const getAvailableStaff = (roleKey?: string) => {
+      // Helper to find available staff for a specific shift
+      const getAvailableStaff = (shift: any, roleKey?: string) => {
+          const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
           return data.staff.filter(s => {
               // 1. Check Leave
               const onLeave = data.leaveRequests?.some(l => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr);
@@ -361,63 +355,117 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
           });
       };
 
-      // PASS 1: Fulfill specific role requirements
-      if (shift.roleCounts) {
-          Object.entries(shift.roleCounts).forEach(([role, count]) => {
-              if (!count) return;
-              let roleKey = role;
-              if (role === 'Load Control') roleKey = 'LC';
-              if (role === 'Shift Leader') roleKey = 'SL';
-              if (role === 'Ramp') roleKey = 'RMP';
-              if (role === 'Operations') roleKey = 'OPS';
-              if (role === 'Lost and Found') roleKey = 'LF';
+      // PASS 1: Fulfill specific role requirements for all shifts today
+      dailyShifts.forEach(shift => {
+          const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
+          if (shift.roleCounts) {
+              Object.entries(shift.roleCounts).forEach(([role, count]) => {
+                  if (!count) return;
+                  let roleKey = role;
+                  if (role === 'Load Control') roleKey = 'LC';
+                  if (role === 'Shift Leader') roleKey = 'SL';
+                  if (role === 'Ramp') roleKey = 'RMP';
+                  if (role === 'Operations') roleKey = 'OPS';
+                  if (role === 'Lost and Found') roleKey = 'LF';
 
-              for (let i = 0; i < count; i++) {
-                  const available = getAvailableStaff(roleKey);
+                  for (let i = 0; i < count; i++) {
+                      // Check if someone ALREADY on this shift can fulfill this role
+                      const shiftAssignments = program.assignments.filter(a => a.shiftId === shift.id);
+                      const fulfilledCount = shiftAssignments.filter(a => {
+                          const st = data.staff.find(s => s.id === a.staffId);
+                          if (!st) return false;
+                          if (a.role === roleKey || a.role === role) return true;
+                          if (roleKey === 'LC' && st.isLoadControl) return true;
+                          if (roleKey === 'SL' && st.isShiftLeader) return true;
+                          if (roleKey === 'RMP' && st.isRamp) return true;
+                          if (roleKey === 'OPS' && st.isOps) return true;
+                          if (roleKey === 'LF' && st.isLostFound) return true;
+                          return false;
+                      }).length;
+
+                      // If we already have enough people with this skill on the shift, skip assigning a new one
+                      if (fulfilledCount > i) {
+                          continue;
+                      }
+
+                      const available = getAvailableStaff(shift, roleKey);
+                      if (available.length > 0) {
+                          const chosen = available[0];
+                          program.assignments.push({
+                              id: Math.random().toString(36).substr(2, 9),
+                              staffId: chosen.id,
+                              shiftId: shift.id,
+                              role: roleKey,
+                              flightId: ''
+                          });
+                          validAssignmentsCount++;
+                          staffLastEndTime.set(chosen.id, shiftEnd);
+                          staffWorkload.set(chosen.id, (staffWorkload.get(chosen.id) || 0) + 1);
+                      }
+                  }
+              });
+          }
+      });
+
+      // PASS 2: Fill all shifts up to minStaff (Round Robin)
+      let addedInPass2 = true;
+      while (addedInPass2) {
+          addedInPass2 = false;
+          dailyShifts.forEach(shift => {
+              const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
+              const currentAssigned = program.assignments.filter(a => a.shiftId === shift.id).length;
+              if (currentAssigned < shift.minStaff) {
+                  const available = getAvailableStaff(shift);
                   if (available.length > 0) {
                       const chosen = available[0];
                       program.assignments.push({
                           id: Math.random().toString(36).substr(2, 9),
                           staffId: chosen.id,
                           shiftId: shift.id,
-                          role: roleKey,
+                          role: 'AGT',
                           flightId: ''
                       });
                       validAssignmentsCount++;
                       staffLastEndTime.set(chosen.id, shiftEnd);
                       staffWorkload.set(chosen.id, (staffWorkload.get(chosen.id) || 0) + 1);
+                      addedInPass2 = true;
                   }
               }
           });
       }
 
-      // PASS 2: Fill remaining headcount up to maxStaff
-      const currentAssigned = program.assignments.filter(a => a.shiftId === shift.id).length;
-      const targetStaff = shift.maxStaff || shift.minStaff;
-      
-      for (let i = currentAssigned; i < targetStaff; i++) {
-          const available = getAvailableStaff(); // No specific role required
-          if (available.length > 0) {
-              const chosen = available[0];
-              program.assignments.push({
-                  id: Math.random().toString(36).substr(2, 9),
-                  staffId: chosen.id,
-                  shiftId: shift.id,
-                  role: 'AGT',
-                  flightId: ''
-              });
-              validAssignmentsCount++;
-              staffLastEndTime.set(chosen.id, shiftEnd);
-              staffWorkload.set(chosen.id, (staffWorkload.get(chosen.id) || 0) + 1);
-          } else {
-              break; // No more available staff for this shift
-          }
+      // PASS 3: Fill all shifts up to maxStaff (Round Robin)
+      let addedInPass3 = true;
+      while (addedInPass3) {
+          addedInPass3 = false;
+          dailyShifts.forEach(shift => {
+              const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
+              const currentAssigned = program.assignments.filter(a => a.shiftId === shift.id).length;
+              const targetStaff = shift.maxStaff || shift.minStaff;
+              if (currentAssigned < targetStaff) {
+                  const available = getAvailableStaff(shift);
+                  if (available.length > 0) {
+                      const chosen = available[0];
+                      program.assignments.push({
+                          id: Math.random().toString(36).substr(2, 9),
+                          staffId: chosen.id,
+                          shiftId: shift.id,
+                          role: 'AGT',
+                          flightId: ''
+                      });
+                      validAssignmentsCount++;
+                      staffLastEndTime.set(chosen.id, shiftEnd);
+                      staffWorkload.set(chosen.id, (staffWorkload.get(chosen.id) || 0) + 1);
+                      addedInPass3 = true;
+                  }
+              }
+          });
       }
-  });
+  }
 
   // --- IMPROVEMENT 2: TRUE STATION HEALTH SCORE ---
   let totalRequiredStaff = 0;
-  sortedShifts.forEach(shift => {
+  data.shifts.forEach(shift => {
       const dayOffset = finalPrograms.findIndex(p => p.dateString === shift.pickupDate);
       if (dayOffset !== -1) {
           totalRequiredStaff += (shift.maxStaff || shift.minStaff);
