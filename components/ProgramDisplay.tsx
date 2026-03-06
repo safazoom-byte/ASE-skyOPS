@@ -458,8 +458,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                 if (!st) return false;
                 const roleCode = targetRole === 'Shift Leader' ? 'SL' : targetRole === 'Load Control' ? 'LC' : targetRole === 'Ramp' ? 'RMP' : targetRole === 'Operations' ? 'OPS' : targetRole === 'Lost and Found' ? 'LF' : targetRole;
                 if (a.role === roleCode || a.role === targetRole) return true;
-                if (targetRole === 'Load Control' && (a.role === 'SL' || a.role === 'Shift Leader') && st.isLoadControl) return true;
-                if (targetRole === 'Shift Leader' && (a.role === 'LC' || a.role === 'Load Control') && st.isShiftLeader) return true;
+                
+                // Multi-role checks
+                if (targetRole === 'Load Control' && st.isLoadControl) return true;
+                if (targetRole === 'Shift Leader' && st.isShiftLeader) return true;
+                if (targetRole === 'Ramp' && st.isRamp) return true;
+                if (targetRole === 'Operations' && st.isOps) return true;
+                if (targetRole === 'Lost and Found' && st.isLostFound) return true;
+                
                 return false;
             };
             const getStaffForRole = (role: string) => { return assignments.filter(a => coversRole(a, role)).map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(', '); };
