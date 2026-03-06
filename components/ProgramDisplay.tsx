@@ -475,7 +475,13 @@ export const ProgramDisplay: React.FC<Props> = ({
             const ops = getStaffForRole('Operations');
             const lf = getStaffForRole('Lost and Found');
             roleMatrixData.push([dateLabel, `${s.pickupTime}-${s.endTime}`, sl, lc, rmp, ops, lf]);
-            roleMatrixMeta.push({ slReq: (s.roleCounts?.['Shift Leader'] || 0) > 0, lcReq: (s.roleCounts?.['Load Control'] || 0) > 0, rmpReq: (s.roleCounts?.['Ramp'] || 0) > 0, opsReq: (s.roleCounts?.['Operations'] || 0) > 0, lfReq: (s.roleCounts?.['Lost and Found'] || 0) > 0 });
+            roleMatrixMeta.push({ 
+                slReq: (s.roleCounts?.['Shift Leader'] || s.roleCounts?.['SL'] || 0) > 0, 
+                lcReq: (s.roleCounts?.['Load Control'] || s.roleCounts?.['LC'] || 0) > 0, 
+                rmpReq: (s.roleCounts?.['Ramp'] || s.roleCounts?.['RMP'] || 0) > 0, 
+                opsReq: (s.roleCounts?.['Operations'] || s.roleCounts?.['OPS'] || 0) > 0, 
+                lfReq: (s.roleCounts?.['Lost and Found'] || s.roleCounts?.['LF'] || 0) > 0 
+            });
         });
     });
     autoTable(doc, { startY: 20, head: [['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF']], body: roleMatrixData, theme: 'grid', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 7, halign: 'center', valign: 'middle', cellPadding: 1.5 }, didParseCell: (data) => { if (data.section === 'body' && data.column.index > 1) { const rowIndex = data.row.index; const meta = roleMatrixMeta[rowIndex]; if (!meta) return; const colIdx = data.column.index; let isRequired = false; if (colIdx === 2) isRequired = meta.slReq; if (colIdx === 3) isRequired = meta.lcReq; if (colIdx === 4) isRequired = meta.rmpReq; if (colIdx === 5) isRequired = meta.opsReq; if (colIdx === 6) isRequired = meta.lfReq; const content = data.cell.raw as string; const hasContent = content && content.length > 0; if (hasContent) { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (isRequired) { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; data.cell.text = ['MISSING']; } } } });
@@ -845,6 +851,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
                                                         {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
                                                             let roleKey = role;
+                                                            if (role === 'Load Control') roleKey = 'LC';
                                                             if (role === 'Shift Leader') roleKey = 'SL';
                                                             if (role === 'Ramp') roleKey = 'RMP';
                                                             if (role === 'Operations') roleKey = 'OPS';
