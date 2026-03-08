@@ -105,6 +105,7 @@ const App: React.FC = () => {
   const [programs, setPrograms] = useState<DailyProgram[]>(() => {
     try { return JSON.parse(localStorage.getItem(DATA_KEYS.PROGRAMS) || '[]'); } catch { return []; }
   });
+  const [manualAssignments, setManualAssignments] = useState<ManualAssignment[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
     try { return JSON.parse(localStorage.getItem(DATA_KEYS.LEAVES) || '[]'); } catch { return []; }
   });
@@ -210,6 +211,7 @@ const App: React.FC = () => {
     if (activeShifts.length === 0) { alert(`No shifts found for period.`); return; }
     setIsGenerating(true);
     try {
+      setManualAssignments(manualAssignments);
       const result = await generateAIProgram({ flights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties, manualAssignments }, "", { numDays: programDuration, minRestHours, startDate });
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs); 
@@ -646,6 +648,7 @@ const App: React.FC = () => {
             shifts={shifts} 
             leaveRequests={leaveRequests} 
             incomingDuties={incomingDuties} 
+            manualAssignments={manualAssignments}
             startDate={startDate} 
             endDate={endDate} 
             stationHealth={stationHealth} 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Skill, ProgramVersion } from '../types';
+import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Skill, ProgramVersion, ManualAssignment } from '../types';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -29,6 +29,7 @@ interface Props {
   shifts: ShiftConfig[];
   leaveRequests: LeaveRequest[];
   incomingDuties: IncomingDuty[];
+  manualAssignments?: ManualAssignment[];
   startDate: string;
   endDate: string;
   stationHealth: number;
@@ -45,6 +46,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   shifts, 
   leaveRequests, 
   incomingDuties,
+  manualAssignments = [],
   startDate, 
   endDate,
   stationHealth,
@@ -485,6 +487,39 @@ export const ProgramDisplay: React.FC<Props> = ({
         });
     });
     autoTable(doc, { startY: 20, head: [['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF']], body: roleMatrixData, theme: 'grid', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 7, halign: 'center', valign: 'middle', cellPadding: 1.5 }, didParseCell: (data) => { if (data.section === 'body' && data.column.index > 1) { const rowIndex = data.row.index; const meta = roleMatrixMeta[rowIndex]; if (!meta) return; const colIdx = data.column.index; let isRequired = false; if (colIdx === 2) isRequired = meta.slReq; if (colIdx === 3) isRequired = meta.lcReq; if (colIdx === 4) isRequired = meta.rmpReq; if (colIdx === 5) isRequired = meta.opsReq; if (colIdx === 6) isRequired = meta.lfReq; const content = data.cell.raw as string; const hasContent = content && content.length > 0; if (hasContent) { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (isRequired) { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; data.cell.text = ['MISSING']; } } } });
+
+    // --- 4. REQUESTED SHIFTS (MANUAL ASSIGNMENTS) ---
+    if (manualAssignments && manualAssignments.length > 0) {
+      doc.addPage();
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("Requested Shifts (Pre-Assigned)", 14, 15);
+      
+      const requestedShiftsData = manualAssignments.map(ma => {
+        const st = staff.find(s => s.id === ma.staffId);
+        const sh = shifts.find(s => s.id === ma.shiftId);
+        const staffName = st ? `${st.initials} - ${st.name}` : ma.staffId;
+        const shiftDetails = sh ? `${sh.pickupDate} ${sh.pickupTime}-${sh.endTime}` : ma.shiftId;
+        return [staffName, shiftDetails, 'Done'];
+      });
+
+      autoTable(doc, {
+        startY: 20,
+        head: [['STAFF MEMBER', 'REQUESTED SHIFT', 'STATUS']],
+        body: requestedShiftsData,
+        theme: 'grid',
+        headStyles: { fillColor: [0, 0, 0] },
+        styles: { fontSize: 9, halign: 'center', valign: 'middle', cellPadding: 2 },
+        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 2) {
+            data.cell.styles.fillColor = [22, 163, 74]; // Emerald green
+            data.cell.styles.textColor = [255, 255, 255];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      });
+    }
 
     doc.save(`SkyOPS_Full_Report_${startDate}.pdf`);
     setIsGeneratingPdf(false);

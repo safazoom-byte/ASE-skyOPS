@@ -153,12 +153,12 @@ export const ProgramChat: React.FC<Props> = ({ data, onUpdate }) => {
     <>
       <button 
         onClick={() => setIsOpen(true)}
-        className={`fixed bottom-6 right-6 z-[50] w-14 h-14 bg-slate-950 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all border-2 border-white/10 ${isOpen ? 'opacity-0' : 'opacity-100'}`}
+        className={`fixed bottom-24 xl:bottom-6 right-6 z-[3000] w-14 h-14 bg-slate-950 text-white rounded-2xl shadow-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all border-2 border-white/10 ${isOpen ? 'opacity-0' : 'opacity-100'}`}
       >
         <MessageSquare size={20} />
       </button>
 
-      <div className={`fixed inset-y-0 right-0 z-[100] w-full md:w-[400px] bg-white shadow-2xl transition-transform duration-500 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'} border-l border-slate-100`}>
+      <div className={`fixed inset-y-0 right-0 z-[3000] w-full md:w-[400px] bg-white shadow-2xl transition-transform duration-500 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'} border-l border-slate-100`}>
         <div className="flex items-center justify-between p-4 bg-slate-950 text-white">
           <div className="flex items-center gap-3">
             <Sparkles size={16} className="text-blue-400" />
