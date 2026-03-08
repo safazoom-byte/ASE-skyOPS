@@ -101,6 +101,12 @@ export interface ProgramVersion {
   isAutoSave?: boolean;
 }
 
+export interface ManualAssignment {
+  staffId: string;
+  shiftId: string;
+  roles: string[];
+}
+
 export interface ProgramData {
   flights: Flight[];
   staff: Staff[];
@@ -108,6 +114,7 @@ export interface ProgramData {
   programs: DailyProgram[];
   leaveRequests?: LeaveRequest[];
   incomingDuties?: IncomingDuty[];
+  manualAssignments?: ManualAssignment[];
 }
 
 declare global {

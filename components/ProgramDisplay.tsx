@@ -322,8 +322,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                 const st = getStaff(a.staffId);
                 if (!st) return false;
                 if (a.role === roleKey || a.role === role) return true;
-                if (roleKey === 'LC' && st.isLoadControl) return true;
-                if (roleKey === 'SL' && st.isShiftLeader) return true;
+                if (roleKey === 'LC' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
+                if (roleKey === 'SL' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
                 if (roleKey === 'RMP' && st.isRamp) return true;
                 if (roleKey === 'OPS' && st.isOps) return true;
                 if (roleKey === 'LF' && st.isLostFound) return true;
@@ -460,8 +460,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                 if (a.role === roleCode || a.role === targetRole) return true;
                 
                 // Multi-role checks
-                if (targetRole === 'Load Control' && st.isLoadControl) return true;
-                if (targetRole === 'Shift Leader' && st.isShiftLeader) return true;
+                if (targetRole === 'Load Control' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
+                if (targetRole === 'Shift Leader' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
                 if (targetRole === 'Ramp' && st.isRamp) return true;
                 if (targetRole === 'Operations' && st.isOps) return true;
                 if (targetRole === 'Lost and Found' && st.isLostFound) return true;
@@ -476,11 +476,11 @@ export const ProgramDisplay: React.FC<Props> = ({
             const lf = getStaffForRole('Lost and Found');
             roleMatrixData.push([dateLabel, `${s.pickupTime}-${s.endTime}`, sl, lc, rmp, ops, lf]);
             roleMatrixMeta.push({ 
-                slReq: (s.roleCounts?.['Shift Leader'] || s.roleCounts?.['SL'] || 0) > 0, 
-                lcReq: (s.roleCounts?.['Load Control'] || s.roleCounts?.['LC'] || 0) > 0, 
-                rmpReq: (s.roleCounts?.['Ramp'] || s.roleCounts?.['RMP'] || 0) > 0, 
-                opsReq: (s.roleCounts?.['Operations'] || s.roleCounts?.['OPS'] || 0) > 0, 
-                lfReq: (s.roleCounts?.['Lost and Found'] || s.roleCounts?.['LF'] || 0) > 0 
+                slReq: (s.roleCounts?.['Shift Leader'] || (s.roleCounts as any)?.['SL'] || 0) > 0, 
+                lcReq: (s.roleCounts?.['Load Control'] || (s.roleCounts as any)?.['LC'] || 0) > 0, 
+                rmpReq: (s.roleCounts?.['Ramp'] || (s.roleCounts as any)?.['RMP'] || 0) > 0, 
+                opsReq: (s.roleCounts?.['Operations'] || (s.roleCounts as any)?.['OPS'] || 0) > 0, 
+                lfReq: (s.roleCounts?.['Lost and Found'] || (s.roleCounts as any)?.['LF'] || 0) > 0 
             });
         });
     });
@@ -767,8 +767,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                    const isFull = assignments.length >= shift.maxStaff;
                                    const isOver = assignments.length > shift.maxStaff;
                                    
-                                   const hasSL = assignments.some(a => a.role === 'SL' || a.role === 'Shift Leader' || getStaff(a.staffId)?.isShiftLeader);
-                                   const hasLC = assignments.some(a => a.role === 'LC' || a.role === 'Load Control' || getStaff(a.staffId)?.isLoadControl);
+                                   const hasSL = assignments.some(a => a.role === 'SL' || a.role === 'Shift Leader' || getStaff(a.staffId)?.isShiftLeader || getStaff(a.staffId)?.initials.toUpperCase() === 'SK-ATZ');
+                                   const hasLC = assignments.some(a => a.role === 'LC' || a.role === 'Load Control' || getStaff(a.staffId)?.isLoadControl || getStaff(a.staffId)?.initials.toUpperCase() === 'SK-ATZ');
                                    const isCriticalMissing = (!hasSL && (shift.roleCounts?.['Shift Leader'] || 0) > 0) || (!hasLC && (shift.roleCounts?.['Load Control'] || 0) > 0);
 
                                    return (
@@ -861,8 +861,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                                 const st = getStaff(a.staffId);
                                                                 if (!st) return false;
                                                                 if (a.role === roleKey || a.role === role) return true;
-                                                                if (roleKey === 'LC' && st.isLoadControl) return true;
-                                                                if (roleKey === 'SL' && st.isShiftLeader) return true;
+                                                                if (roleKey === 'LC' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
+                                                                if (roleKey === 'SL' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
                                                                 if (roleKey === 'RMP' && st.isRamp) return true;
                                                                 if (roleKey === 'OPS' && st.isOps) return true;
                                                                 if (roleKey === 'LF' && st.isLostFound) return true;
@@ -921,7 +921,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                               e.preventDefault();
                                                               return;
                                                           }
-                                                          handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, s.isShiftLeader ? 'SL' : s.isLoadControl ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')
+                                                          handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, (s.isShiftLeader || s.initials.toUpperCase() === 'SK-ATZ') ? 'SL' : (s.isLoadControl || s.initials.toUpperCase() === 'SK-ATZ') ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')
                                                       }}
                                                       className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-move hover:scale-105'}`}>
                                                       <span>{s.initials}</span>

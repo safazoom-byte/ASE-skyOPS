@@ -32,8 +32,8 @@ interface Props {
 
 export const StationStatistics: React.FC<Props> = ({ staff, shifts, leaveRequests = [], startDate, endDate, className = '' }) => {
   const hasSkill = (s: Staff, skill: Skill) => {
-    if (skill === 'Shift Leader') return s.isShiftLeader;
-    if (skill === 'Load Control') return s.isLoadControl;
+    if (skill === 'Shift Leader') return s.isShiftLeader || s.initials.toUpperCase() === 'SK-ATZ';
+    if (skill === 'Load Control') return s.isLoadControl || s.initials.toUpperCase() === 'SK-ATZ';
     if (skill === 'Ramp') return s.isRamp;
     if (skill === 'Operations') return s.isOps;
     if (skill === 'Lost and Found') return s.isLostFound;

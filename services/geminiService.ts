@@ -297,7 +297,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
   for (let dayOffset = 0; dayOffset < config.numDays; dayOffset++) {
       const program = finalPrograms[dayOffset];
-      const dStr = program.dateString;
+      const dStr = program.dateString || '';
       const dailyShifts = data.shifts.filter(s => s.pickupDate === dStr).sort((a,b) => a.pickupTime.localeCompare(b.pickupTime));
 
       // Helper to find available staff for a specific shift
@@ -355,6 +355,33 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
           });
       };
 
+      // PASS 0: Process Manual Assignments
+      if (data.manualAssignments && data.manualAssignments.length > 0) {
+          data.manualAssignments.forEach(ma => {
+              const shift = dailyShifts.find(s => s.id === ma.shiftId);
+              if (shift) {
+                  const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
+                  const st = data.staff.find(s => s.id === ma.staffId);
+                  if (st) {
+                      // Only add if not already added to this shift
+                      const alreadyAssigned = program.assignments.some(a => a.staffId === ma.staffId && a.shiftId === ma.shiftId);
+                      if (!alreadyAssigned) {
+                          program.assignments.push({
+                              id: Math.random().toString(36).substr(2, 9),
+                              staffId: ma.staffId,
+                              shiftId: ma.shiftId,
+                              role: ma.roles.length > 0 ? ma.roles.join('+') : 'AGT',
+                              flightId: ''
+                          });
+                          validAssignmentsCount++;
+                          staffLastEndTime.set(ma.staffId, shiftEnd);
+                          staffWorkload.set(ma.staffId, (staffWorkload.get(ma.staffId) || 0) + 1);
+                      }
+                  }
+              }
+          });
+      }
+
       // PASS 1: Fulfill specific role requirements for all shifts today
       dailyShifts.forEach(shift => {
           const shiftEnd = new Date(`${shift.endDate}T${shift.endTime}`);
@@ -374,7 +401,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                       const fulfilledCount = shiftAssignments.filter(a => {
                           const st = data.staff.find(s => s.id === a.staffId);
                           if (!st) return false;
-                          if (a.role === roleKey || a.role === role) return true;
+                          if (a.role === roleKey || a.role === role || a.role.includes(roleKey)) return true;
                           if (roleKey === 'LC' && st.isLoadControl) return true;
                           if (roleKey === 'SL' && st.isShiftLeader) return true;
                           if (roleKey === 'RMP' && st.isRamp) return true;

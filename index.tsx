@@ -59,9 +59,11 @@ import { CapacityForecast } from './components/CapacityForecast';
 import { StationStatistics } from './components/StationStatistics';
 import { Auth } from './components/Auth';
 import { SkyOpsLogo } from './components/Logo';
+import { PreRosterModal } from './components/PreRosterModal';
 import { generateAIProgram } from './services/geminiService';
 import { db, supabase, auth } from './services/supabaseService';
 import { Session } from '@supabase/supabase-js';
+import { ManualAssignment } from './types';
 
 const UI_PREF_KEYS = {
   START_DATE: 'skyops_pref_start_date',
@@ -113,6 +115,7 @@ const App: React.FC = () => {
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning', message: string }[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreRosterModalOpen, setIsPreRosterModalOpen] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
   // Incoming Duties Logic (Rest Log)
@@ -194,7 +197,8 @@ const App: React.FC = () => {
     return () => { mounted = false; };
   }, []);
 
-  const confirmGenerateProgram = async () => {
+  const confirmGenerateProgram = async (manualAssignments: ManualAssignment[] = []) => {
+    setIsPreRosterModalOpen(false);
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
     const eligibleStaff = staff.filter(s => {
       if (s.type === 'Local') return true;
@@ -206,7 +210,7 @@ const App: React.FC = () => {
     if (activeShifts.length === 0) { alert(`No shifts found for period.`); return; }
     setIsGenerating(true);
     try {
-      const result = await generateAIProgram({ flights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties }, "", { numDays: programDuration, minRestHours, startDate });
+      const result = await generateAIProgram({ flights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties, manualAssignments }, "", { numDays: programDuration, minRestHours, startDate });
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs); 
       setActiveTab('program'); 
@@ -599,7 +603,7 @@ const App: React.FC = () => {
                         <input type="range" min="8" max="24" value={minRestHours} onChange={(e) => setMinRestHours(parseInt(e.target.value))} className="w-full accent-indigo-600 h-1.5" /><p className="text-center font-black mt-3 text-indigo-600 text-sm italic tracking-widest">{minRestHours}H</p>
                      </div>
                    </div>
-                   <button onClick={confirmGenerateProgram} disabled={isGenerating} className="w-full py-8 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
+                   <button onClick={() => setIsPreRosterModalOpen(true)} disabled={isGenerating} className="w-full py-8 bg-slate-950 text-white rounded-[2rem] font-black uppercase italic tracking-[0.2em] shadow-2xl hover:bg-blue-600 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
                      {isGenerating ? <Loader2 size={24} className="animate-spin" /> : <Sparkles size={24} className="text-blue-400" />}
                      {isGenerating ? 'AI Analysis...' : 'Build AI Program'}
                    </button>
@@ -713,6 +717,16 @@ const App: React.FC = () => {
       </nav>
 
       <ProgramChat data={{ flights, staff, shifts, programs }} onUpdate={setPrograms} />
+      
+      <PreRosterModal
+        isOpen={isPreRosterModalOpen}
+        onClose={() => setIsPreRosterModalOpen(false)}
+        onConfirm={confirmGenerateProgram}
+        staff={staff}
+        shifts={shifts}
+        startDate={startDate}
+        endDate={endDate}
+      />
     </div>
   );
 };
