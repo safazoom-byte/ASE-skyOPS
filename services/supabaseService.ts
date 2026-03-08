@@ -53,12 +53,12 @@ export const db = {
       if (!session) return null;
 
       const [fRes, sRes, shRes, pRes, lRes, iRes] = await Promise.all([
-        client.from('flights').select('*'),
-        client.from('staff').select('*'),
-        client.from('shifts').select('*'),
-        client.from('programs').select('*'),
-        client.from('leave_requests').select('*'),
-        client.from('incoming_duties').select('*')
+        client.from('flights').select('*').eq('user_id', session.user.id),
+        client.from('staff').select('*').eq('user_id', session.user.id),
+        client.from('shifts').select('*').eq('user_id', session.user.id),
+        client.from('programs').select('*').eq('user_id', session.user.id),
+        client.from('leave_requests').select('*').eq('user_id', session.user.id),
+        client.from('incoming_duties').select('*').eq('user_id', session.user.id)
       ]);
 
       return {
@@ -291,11 +291,11 @@ export const db = {
     );
   },
 
-  async deleteFlight(id: string) { const client = supabase; if (client) await client.from('flights').delete().eq('id', id); },
-  async deleteStaff(id: string) { const client = supabase; if (client) await client.from('staff').delete().eq('id', id); },
-  async deleteShift(id: string) { const client = supabase; if (client) await client.from('shifts').delete().eq('id', id); },
-  async deleteLeave(id: string) { const client = supabase; if (client) await client.from('leave_requests').delete().eq('id', id); },
-  async deleteIncomingDuty(id: string) { const client = supabase; if (client) await client.from('incoming_duties').delete().eq('id', id); },
+  async deleteFlight(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('flights').delete().eq('id', id).eq('user_id', session.user.id); },
+  async deleteStaff(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('staff').delete().eq('id', id).eq('user_id', session.user.id); },
+  async deleteShift(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); },
+  async deleteLeave(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('leave_requests').delete().eq('id', id).eq('user_id', session.user.id); },
+  async deleteIncomingDuty(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('incoming_duties').delete().eq('id', id).eq('user_id', session.user.id); },
 
   async saveProgramVersion(v: ProgramVersion) {
     const client = supabase;
@@ -321,7 +321,7 @@ export const db = {
     if (!client) return [];
     const session = await auth.getSession();
     if (!session) return [];
-    const { data } = await client.from('program_versions').select('*').order('created_at', { ascending: false });
+    const { data } = await client.from('program_versions').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
     if (!data) return [];
     return data.map((v: any) => ({
       id: v.id,
@@ -338,6 +338,7 @@ export const db = {
 
   async deleteProgramVersion(id: string) {
     const client = supabase;
-    if (client) await client.from('program_versions').delete().eq('id', id);
+    const session = await auth.getSession();
+    if (client && session) await client.from('program_versions').delete().eq('id', id).eq('user_id', session.user.id);
   }
 };
