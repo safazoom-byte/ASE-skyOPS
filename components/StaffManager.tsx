@@ -240,10 +240,6 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto relative z-10">
-          <button onClick={onOpenScanner} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-indigo-600/20 group">
-            <Sparkles size={16} className="group-hover:animate-pulse" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">AI Smart Sync</span>
-          </button>
           <button onClick={exportStaffCSV} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl font-black uppercase text-[9px] md:text-[10px] flex items-center justify-center gap-3 transition-all">
             <FileSpreadsheet size={18} /> Export
           </button>

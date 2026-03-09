@@ -327,10 +327,6 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
             <Layers size={16} className="group-hover:scale-110 transition-transform" />
             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Bulk Creator</span>
           </button>
-          <button onClick={onOpenScanner} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-indigo-600/20">
-            <Sparkles size={16} className="group-hover:animate-pulse" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">AI Sync</span>
-          </button>
           <button className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center gap-3 hover:bg-white/10 transition-all">
             <FileDown size={18} className="text-emerald-400" />
             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white">Report</span>

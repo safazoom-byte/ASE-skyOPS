@@ -410,6 +410,41 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
                       <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Rest Logs</p>
                    </div>
                 </div>
+                
+                {extractedData.flights.length > 0 && (
+                  <div className="mt-10">
+                    <h5 className="text-sm font-black uppercase tracking-widest text-slate-500 mb-4">Extracted Flights Preview</h5>
+                    <div className="bg-slate-50 rounded-[2rem] border border-slate-100 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-100/50">
+                              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-100">Flight</th>
+                              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-100">Route</th>
+                              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-100">Date</th>
+                              <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-100">STA/STD</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {extractedData.flights.slice(0, 5).map((f, i) => (
+                              <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-white transition-colors">
+                                <td className="p-4 text-xs font-bold text-slate-900">{f.flightNumber}</td>
+                                <td className="p-4 text-xs text-slate-600">{f.from} → {f.to}</td>
+                                <td className="p-4 text-xs text-slate-600">{f.date}</td>
+                                <td className="p-4 text-xs font-mono text-slate-500">{f.sta || '--:--'} / {f.std || '--:--'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {extractedData.flights.length > 5 && (
+                        <div className="p-4 text-center border-t border-slate-100 bg-slate-100/30">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">+ {extractedData.flights.length - 5} more flights</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
              </div>
           </div>
         )}

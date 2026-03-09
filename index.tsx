@@ -54,6 +54,7 @@ import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
 import { ProgramDisplay } from './components/ProgramDisplay';
 import { ProgramChat } from './components/ProgramChat';
+import { ProgramScanner } from './components/ProgramScanner';
 import { GithubSync } from './components/GithubSync';
 import { CapacityForecast } from './components/CapacityForecast';
 import { StationStatistics } from './components/StationStatistics';
@@ -117,6 +118,8 @@ const App: React.FC = () => {
   const [alerts, setAlerts] = useState<{ type: 'danger' | 'warning', message: string }[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPreRosterModalOpen, setIsPreRosterModalOpen] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannerTarget, setScannerTarget] = useState<'flights' | 'staff' | 'shifts' | 'all'>('all');
   const [notification, setNotification] = useState<string | null>(null);
 
   // Incoming Duties Logic (Rest Log)
@@ -213,6 +216,29 @@ const App: React.FC = () => {
     try {
       setManualAssignments(manualAssignments);
       const result = await generateAIProgram({ flights, staff: eligibleStaff, shifts: activeShifts, programs: [], leaveRequests, incomingDuties, manualAssignments }, "", { numDays: programDuration, minRestHours, startDate });
+      
+      // Save current program as a version before overwriting if it has assignments
+      if (programs.some(p => p.assignments.length > 0)) {
+        const savedVersions = localStorage.getItem('skyops_program_versions');
+        let versions: ProgramVersion[] = savedVersions ? JSON.parse(savedVersions) : [];
+        const newVersion: ProgramVersion = {
+          id: Math.random().toString(36).substr(2, 9),
+          versionNumber: versions.length + 1,
+          name: `Auto-Save before AI Gen (${new Date().toLocaleTimeString()})`,
+          createdAt: new Date().toISOString(),
+          periodStart: startDate,
+          periodEnd: endDate,
+          programs: JSON.parse(JSON.stringify(programs)),
+          stationHealth,
+          isAutoSave: true
+        };
+        const updatedVersions = [newVersion, ...versions];
+        localStorage.setItem('skyops_program_versions', JSON.stringify(updatedVersions));
+        if (supabase) {
+          await db.saveProgramVersion(newVersion);
+        }
+      }
+
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
       if (supabase) await db.savePrograms(result.programs); 
       setActiveTab('program'); 
@@ -228,6 +254,49 @@ const App: React.FC = () => {
     } finally { 
       setIsGenerating(false); 
     }
+  };
+
+  const handleDataExtracted = async (data: any) => {
+    setShowScanner(false);
+    
+    if (data.flights && data.flights.length > 0) {
+      setFlights(prev => {
+        const updated = [...prev];
+        data.flights.forEach((f: Flight) => {
+          const idx = updated.findIndex(existing => existing.id === f.id);
+          if (idx >= 0) updated[idx] = f; else updated.push(f);
+          if (supabase) db.upsertFlight(f);
+        });
+        return updated;
+      });
+    }
+    
+    if (data.staff && data.staff.length > 0) {
+      setStaff(prev => {
+        const updated = [...prev];
+        data.staff.forEach((s: Staff) => {
+          const idx = updated.findIndex(existing => existing.id === s.id);
+          if (idx >= 0) updated[idx] = s; else updated.push(s);
+          if (supabase) db.upsertStaff(s);
+        });
+        return updated;
+      });
+    }
+    
+    if (data.shifts && data.shifts.length > 0) {
+      setShifts(prev => {
+        const updated = [...prev];
+        data.shifts.forEach((s: ShiftConfig) => {
+          const idx = updated.findIndex(existing => existing.id === s.id);
+          if (idx >= 0) updated[idx] = s; else updated.push(s);
+          if (supabase) db.upsertShift(s);
+        });
+        return updated;
+      });
+    }
+
+    setNotification("AI Sync Complete: Registry Updated");
+    setTimeout(() => setNotification(null), 3000);
   };
 
   // Improved matching logic to handle suffixes (e.g. MS-ATZ)
@@ -426,8 +495,7 @@ const App: React.FC = () => {
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab}</button>
               ))}
            </nav>
-           <GithubSync data={{ flights, staff, shifts, programs, leaveRequests }} />
-           {supabase && <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>}
+           <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>
         </div>
       </header>
 
@@ -613,7 +681,7 @@ const App: React.FC = () => {
              </div>
           </div>
         )}
-        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} />}
+        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} onOpenScanner={() => { setScannerTarget('flights'); setShowScanner(true); }} />}
         {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {
             setStaff(p => p.filter(s => s.id !== id)); 
             db.deleteStaff(id);
@@ -730,6 +798,22 @@ const App: React.FC = () => {
         startDate={startDate}
         endDate={endDate}
       />
+
+      {showScanner && (
+        <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[3rem] w-full max-w-5xl h-[85vh] overflow-hidden shadow-2xl flex flex-col relative animate-in zoom-in-95 duration-300">
+            <button onClick={() => setShowScanner(false)} className="absolute top-6 right-6 z-10 p-3 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors">
+              <X size={20} />
+            </button>
+            <ProgramScanner 
+              onDataExtracted={handleDataExtracted} 
+              startDate={startDate} 
+              numDays={programDuration} 
+              initialTarget={scannerTarget === 'all' ? undefined : scannerTarget} 
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
