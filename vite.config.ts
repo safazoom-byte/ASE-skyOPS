@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
   // Robust collection of variables from Vercel/Local env
-  const apiKey = env.API_KEY || env.VITE_API_KEY || '';
+  const apiKey = env.GEMINI_API_KEY || env.API_KEY || env.VITE_API_KEY || '';
   const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL || '';
   const supabaseAnonKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
 

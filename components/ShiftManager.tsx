@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ShiftConfig, Flight, Skill, Staff, LeaveRequest } from '../types';
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from '../constants';
 import * as XLSX from 'xlsx';
@@ -279,6 +279,61 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     }
   };
 
+  const [isAutoLinkEnabled, setIsAutoLinkEnabled] = useState(() => {
+    return localStorage.getItem('autoLinkFlights') === 'true';
+  });
+
+  const onUpdateRef = React.useRef(onUpdate);
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
+  useEffect(() => {
+    if (!isAutoLinkEnabled || !flights.length || !shifts.length) return;
+
+    shifts.forEach(shift => {
+      const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+      let shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
+      
+      if (shiftEnd <= shiftStart) {
+        shiftEnd.setDate(shiftEnd.getDate() + 1);
+      }
+      
+      const linkedFlights = flights.filter(f => {
+        let isLinked = false;
+        
+        const staTime = f.sta ? new Date(`${f.date}T${f.sta}`) : null;
+        let stdTime = f.std ? new Date(`${f.date}T${f.std}`) : null;
+        
+        // Handle turnaround flights spanning midnight
+        if (staTime && stdTime && f.std && f.sta && f.std < f.sta) {
+          stdTime.setDate(stdTime.getDate() + 1);
+        }
+        
+        if (staTime && staTime >= shiftStart && staTime <= shiftEnd) isLinked = true;
+        if (stdTime && stdTime >= shiftStart && stdTime <= shiftEnd) isLinked = true;
+        
+        return isLinked;
+      });
+      
+      const newFlightIds = linkedFlights.map(f => f.id);
+      const currentFlightIds = shift.flightIds || [];
+      
+      const isChanged = newFlightIds.length !== currentFlightIds.length || 
+                        !newFlightIds.every(id => currentFlightIds.includes(id));
+                        
+      if (isChanged) {
+        onUpdateRef.current({ ...shift, flightIds: newFlightIds });
+      }
+    });
+  }, [isAutoLinkEnabled, flights, shifts]);
+
+  const toggleAutoLink = () => {
+    const newVal = !isAutoLinkEnabled;
+    setIsAutoLinkEnabled(newVal);
+    localStorage.setItem('autoLinkFlights', String(newVal));
+  };
+
   const getPhaseStyle = (time: string) => {
     const hour = parseInt(time.split(':')[0]);
     if (hour >= 4 && hour < 12) return { label: 'Morning', color: 'text-blue-500', bg: 'bg-blue-500/10' };
@@ -323,6 +378,22 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto relative z-10">
+          <button 
+            onClick={toggleAutoLink} 
+            className={`flex-1 px-6 py-4 md:px-8 md:py-5 rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl ${
+              isAutoLinkEnabled 
+                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 shadow-slate-900/20'
+            }`}
+          >
+            <Zap size={16} className={`transition-transform ${isAutoLinkEnabled ? 'text-yellow-300 group-hover:scale-110' : 'text-slate-500'}`} />
+            <div className="flex flex-col items-start text-left">
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic leading-none">Auto-Link</span>
+              <span className={`text-[7px] font-bold uppercase tracking-wider mt-1 ${isAutoLinkEnabled ? 'text-blue-200' : 'text-slate-500'}`}>
+                {isAutoLinkEnabled ? 'Active' : 'Disabled'}
+              </span>
+            </div>
+          </button>
           <button onClick={() => setShowBulkModal(true)} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-amber-500/20">
             <Layers size={16} className="group-hover:scale-110 transition-transform" />
             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Bulk Creator</span>

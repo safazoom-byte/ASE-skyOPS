@@ -113,13 +113,11 @@ export const Auth: React.FC = () => {
           </form>
 
           <div className="mt-8 text-center">
-            <button 
-              onClick={() => setIsLogin(!isLogin)} 
-              disabled={!isConfigured}
-              className="text-[9px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-colors disabled:opacity-30"
+            <span 
+              className="text-[9px] font-black text-slate-500 uppercase tracking-widest"
             >
-              {isLogin ? 'Request New Station Access →' : 'Already Authorized? Login →'}
-            </button>
+              System Access Restricted
+            </span>
           </div>
         </div>
 

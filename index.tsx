@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import './style.css'; 
 
-import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty } from './types';
+import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty, ProgramVersion } from './types';
 import { FlightManager } from './components/FlightManager';
 import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
@@ -694,7 +694,15 @@ const App: React.FC = () => {
                 if (supabase) db.savePrograms(updated);
                 return updated;
             });
-        }} defaultMaxShifts={5} />}
+        }} onClearAll={() => {
+            staff.forEach(s => db.deleteStaff(s.id));
+            setStaff([]);
+            setPrograms(prev => {
+                const updated = prev.map(prog => ({ ...prog, assignments: [] }));
+                if (supabase) db.savePrograms(updated);
+                return updated;
+            });
+        }} onOpenScanner={() => { setScannerTarget('staff'); setShowScanner(true); }} defaultMaxShifts={5} />}
         {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {
             setShifts(p => p.filter(s => s.id !== id)); 
             db.deleteShift(id);

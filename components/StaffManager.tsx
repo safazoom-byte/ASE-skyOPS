@@ -78,7 +78,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     if (/^\d{5}$/.test(dateStr)) {
       const serial = parseInt(dateStr);
       date = new Date(0);
-      date.setUTCMilliseconds(Math.round((serial - 25569) * 86400 * 1000));
+      date.setTime(Math.round((serial - 25569) * 86400 * 1000));
     } else {
       date = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00Z'));
     }

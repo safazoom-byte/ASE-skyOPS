@@ -98,7 +98,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     if (val === null || val === undefined || val === '') return startDate || '';
     if (typeof val === 'number') {
       const date = new Date(0);
-      date.setUTCMilliseconds(Math.round((val - 25569) * 86400 * 1000));
+      date.setTime(Math.round((val - 25569) * 86400 * 1000));
       return date.getUTCFullYear() + '-' + 
              String(date.getUTCMonth() + 1).padStart(2, '0') + '-' + 
              String(date.getUTCDate()).padStart(2, '0');
