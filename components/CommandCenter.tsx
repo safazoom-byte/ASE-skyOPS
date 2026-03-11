@@ -46,6 +46,23 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
     l.actionType.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Group logs by user email
+  const logsByUser = filteredLogs.reduce((acc, log) => {
+    if (!acc[log.userEmail]) {
+      acc[log.userEmail] = [];
+    }
+    acc[log.userEmail].push(log);
+    return acc;
+  }, {} as Record<string, AuditLog[]>);
+
+  // Sort users alphabetically
+  const sortedUsers = Object.keys(logsByUser).sort();
+
+  // Sort logs within each user chronologically (newest first)
+  sortedUsers.forEach(email => {
+    logsByUser[email].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  });
+
   if (currentUser.role !== 'master') {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
@@ -103,33 +120,45 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
               />
             </div>
           </div>
-          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-            {filteredLogs.length === 0 ? (
+          <div className="max-h-[600px] overflow-y-auto p-6 space-y-8 bg-slate-50/30">
+            {sortedUsers.length === 0 ? (
               <div className="p-8 text-center text-slate-500">No logs found.</div>
             ) : (
-              filteredLogs.map(log => (
-                <div key={log.id} className="p-4 hover:bg-slate-50 transition-colors flex items-start gap-4">
-                  <div className={`mt-1 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                    log.actionType === 'CREATE' ? 'bg-blue-100 text-blue-600' :
-                    log.actionType === 'UPDATE' ? 'bg-amber-100 text-amber-600' :
-                    log.actionType === 'DELETE' ? 'bg-red-100 text-red-600' :
-                    'bg-purple-100 text-purple-600'
-                  }`}>
-                    {log.actionType === 'CREATE' && <CheckCircle2 size={14} />}
-                    {log.actionType === 'UPDATE' && <Settings size={14} />}
-                    {log.actionType === 'DELETE' && <AlertTriangle size={14} />}
-                    {log.actionType === 'GENERATE_AI' && <Activity size={14} />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-900 truncate">
-                        <span className="font-bold">{log.userEmail}</span> {log.actionType.toLowerCase()}d a {log.entityType.toLowerCase()}
-                      </p>
-                      <span className="text-xs text-slate-400 whitespace-nowrap">
-                        {new Date(log.createdAt).toLocaleString()}
-                      </span>
+              sortedUsers.map(email => (
+                <div key={email} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs uppercase">
+                      {email.substring(0, 2)}
                     </div>
-                    <p className="text-sm text-slate-500 mt-1">{log.details}</p>
+                    <h3 className="font-bold text-slate-800">{email}</h3>
+                    <span className="ml-auto text-xs font-bold text-slate-400 uppercase tracking-wider bg-white px-3 py-1 rounded-full border border-slate-200">
+                      {logsByUser[email].length} Actions
+                    </span>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {logsByUser[email].map(log => (
+                      <div key={log.id} className="p-4 hover:bg-slate-50 transition-colors flex items-start gap-4">
+                        <div className={`mt-1 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0 w-24 text-center ${
+                          log.actionType === 'CREATE' ? 'bg-emerald-100 text-emerald-700' :
+                          log.actionType === 'UPDATE' ? 'bg-blue-100 text-blue-700' :
+                          log.actionType === 'DELETE' ? 'bg-red-100 text-red-700' :
+                          'bg-purple-100 text-purple-700'
+                        }`}>
+                          {log.actionType}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="text-sm font-medium text-slate-900 truncate">
+                              {log.entityType}
+                            </p>
+                            <span className="text-xs font-mono text-slate-400 whitespace-nowrap">
+                              {new Date(log.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-500 mt-1">{log.details}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))
