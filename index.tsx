@@ -868,7 +868,7 @@ const App: React.FC = () => {
       </main>
       
       {/* Mobile Footer Navigation */}
-      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
+      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] overflow-x-auto gap-2">
          {[
            { id: 'dashboard', icon: LayoutDashboard, label: 'Dash' },
            { id: 'flights', icon: Plane, label: 'Flights' },
@@ -876,13 +876,14 @@ const App: React.FC = () => {
            { id: 'shifts', icon: Clock, label: 'Shifts' },
            { id: 'program', icon: CalendarDays, label: 'Roster' },
            { id: 'statistics', icon: PieChart, label: 'Stats' },
+           ...(userProfile?.role === 'master' ? [{ id: 'command', icon: Shield, label: 'Cmd' }] : [])
          ].map(item => (
            <button 
              key={item.id}
              onClick={() => setActiveTab(item.id as any)}
-             className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all w-16 ${
+             className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all min-w-[64px] ${
                activeTab === item.id 
-                 ? 'text-blue-600 bg-blue-50 scale-110' 
+                 ? item.id === 'command' ? 'text-emerald-600 bg-emerald-50 scale-110' : 'text-blue-600 bg-blue-50 scale-110' 
                  : 'text-slate-400 hover:bg-slate-50'
              }`}
            >
