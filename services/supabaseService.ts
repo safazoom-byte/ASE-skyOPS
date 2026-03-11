@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty, ProgramVersion } from '../types';
+import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty, ProgramVersion, UserProfile, AuditLog } from '../types';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
@@ -340,5 +340,198 @@ export const db = {
     const client = supabase;
     const session = await auth.getSession();
     if (client && session) await client.from('program_versions').delete().eq('id', id).eq('user_id', session.user.id);
+  },
+
+  async getUserProfile(): Promise<UserProfile | null> {
+    const session = await auth.getSession();
+    if (!session) return null;
+    
+    // Fallback to local storage if no DB
+    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    let profile = localProfiles.find((p: UserProfile) => p.id === session.user.id);
+    
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('user_profiles').select('*').eq('id', session.user.id).single();
+        if (data) {
+          profile = {
+            id: data.id,
+            email: data.email,
+            role: data.role || 'planner',
+            aiDailyLimit: data.ai_daily_limit ?? 5,
+            aiWeeklyLimit: data.ai_weekly_limit ?? 20,
+            aiMonthlyLimit: data.ai_monthly_limit ?? 50,
+            maxStaff: data.max_staff ?? 50,
+            maxShifts: data.max_shifts ?? 20,
+            isActive: data.is_active ?? true
+          };
+        }
+      } catch (e) { console.warn("Could not fetch profile from DB, using local"); }
+    }
+    
+    // If no profile exists, create a default one (first user is master)
+    if (!profile) {
+      const isFirstUser = localProfiles.length === 0;
+      profile = {
+        id: session.user.id,
+        email: session.user.email,
+        role: isFirstUser ? 'master' : 'planner',
+        aiDailyLimit: 5,
+        aiWeeklyLimit: 20,
+        aiMonthlyLimit: 50,
+        maxStaff: 50,
+        maxShifts: 20,
+        isActive: true
+      };
+      localProfiles.push(profile);
+      localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
+      
+      if (supabase) {
+        try {
+          await supabase.from('user_profiles').insert({
+            id: profile.id,
+            email: profile.email,
+            role: profile.role,
+            ai_daily_limit: profile.aiDailyLimit,
+            ai_weekly_limit: profile.aiWeeklyLimit,
+            ai_monthly_limit: profile.aiMonthlyLimit,
+            max_staff: profile.maxStaff,
+            max_shifts: profile.maxShifts,
+            is_active: profile.isActive
+          });
+        } catch (e) { console.warn("Could not insert profile to DB"); }
+      }
+    }
+    return profile;
+  },
+
+  async getAllUserProfiles(): Promise<UserProfile[]> {
+    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('user_profiles').select('*');
+        if (data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id,
+            email: d.email,
+            role: d.role,
+            aiDailyLimit: d.ai_daily_limit,
+            aiWeeklyLimit: d.ai_weekly_limit,
+            aiMonthlyLimit: d.ai_monthly_limit,
+            maxStaff: d.max_staff,
+            maxShifts: d.max_shifts,
+            isActive: d.is_active
+          }));
+        }
+      } catch (e) { console.warn("Could not fetch profiles from DB"); }
+    }
+    return localProfiles;
+  },
+
+  async updateUserProfile(profile: UserProfile) {
+    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    const index = localProfiles.findIndex((p: UserProfile) => p.id === profile.id);
+    if (index >= 0) {
+      localProfiles[index] = profile;
+    } else {
+      localProfiles.push(profile);
+    }
+    localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
+
+    if (supabase) {
+      try {
+        await supabase.from('user_profiles').upsert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive
+        });
+      } catch (e) { console.warn("Could not update profile in DB"); }
+    }
+  },
+
+  async logAction(actionType: AuditLog['actionType'], entityType: AuditLog['entityType'], entityId: string, details: string) {
+    const session = await auth.getSession();
+    if (!session) return;
+    
+    const log: AuditLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: session.user.id,
+      userEmail: session.user.email,
+      actionType,
+      entityType,
+      entityId,
+      details,
+      createdAt: new Date().toISOString()
+    };
+
+    const localLogs = JSON.parse(localStorage.getItem('skyops_audit_logs') || '[]');
+    localLogs.unshift(log);
+    localStorage.setItem('skyops_audit_logs', JSON.stringify(localLogs.slice(0, 1000))); // keep last 1000
+
+    if (supabase) {
+      try {
+        await supabase.from('audit_logs').insert({
+          id: log.id,
+          user_id: log.userId,
+          user_email: log.userEmail,
+          action_type: log.actionType,
+          entity_type: log.entityType,
+          entity_id: log.entityId,
+          details: log.details,
+          created_at: log.createdAt
+        });
+      } catch (e) { console.warn("Could not insert audit log to DB"); }
+    }
+  },
+
+  async getAuditLogs(): Promise<AuditLog[]> {
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500);
+        if (data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id,
+            userId: d.user_id,
+            userEmail: d.user_email,
+            actionType: d.action_type,
+            entityType: d.entity_type,
+            entityId: d.entity_id,
+            details: d.details,
+            createdAt: d.created_at
+          }));
+        }
+      } catch (e) { console.warn("Could not fetch audit logs from DB"); }
+    }
+    return JSON.parse(localStorage.getItem('skyops_audit_logs') || '[]');
+  },
+
+  async getAIGenerationCount(userId: string, period: 'daily' | 'weekly' | 'monthly'): Promise<number> {
+    const logs = await this.getAuditLogs();
+    const now = new Date();
+    let startDate = new Date();
+    
+    if (period === 'daily') {
+      startDate.setHours(0, 0, 0, 0);
+    } else if (period === 'weekly') {
+      const day = startDate.getDay();
+      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+      startDate.setDate(diff);
+      startDate.setHours(0, 0, 0, 0);
+    } else if (period === 'monthly') {
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+    }
+
+    return logs.filter(l => 
+      l.userId === userId && 
+      l.actionType === 'GENERATE_AI' && 
+      new Date(l.createdAt) >= startDate
+    ).length;
   }
 };

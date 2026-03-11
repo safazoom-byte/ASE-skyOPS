@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import './style.css'; 
 
-import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty, ProgramVersion } from './types';
+import { Flight, Staff, DailyProgram, ShiftConfig, LeaveRequest, LeaveType, IncomingDuty, ProgramVersion, UserProfile } from './types';
 import { FlightManager } from './components/FlightManager';
 import { StaffManager } from './components/StaffManager';
 import { ShiftManager } from './components/ShiftManager';
@@ -58,6 +58,7 @@ import { ProgramScanner } from './components/ProgramScanner';
 import { GithubSync } from './components/GithubSync';
 import { CapacityForecast } from './components/CapacityForecast';
 import { StationStatistics } from './components/StationStatistics';
+import { CommandCenter } from './components/CommandCenter';
 import { Auth } from './components/Auth';
 import { SkyOpsLogo } from './components/Logo';
 import { PreRosterModal } from './components/PreRosterModal';
@@ -84,8 +85,9 @@ const DATA_KEYS = {
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program' | 'statistics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'flights' | 'staff' | 'shifts' | 'program' | 'statistics' | 'command'>('dashboard');
   const [cloudStatus, setCloudStatus] = useState<'connected' | 'offline' | 'unconfigured' | 'error'>('unconfigured');
   
   const [startDate, setStartDate] = useState<string>(() => localStorage.getItem(UI_PREF_KEYS.START_DATE) || new Date().toISOString().split('T')[0]);
@@ -191,7 +193,11 @@ const App: React.FC = () => {
         const s = await auth.getSession();
         if (mounted) {
           setSession(s);
-          if (s) await syncCloudData();
+          if (s) {
+            const profile = await db.getUserProfile();
+            setUserProfile(profile);
+            await syncCloudData();
+          }
           else setCloudStatus('offline');
           setIsInitializing(false);
         }
@@ -203,6 +209,29 @@ const App: React.FC = () => {
 
   const confirmGenerateProgram = async (manualAssignments: ManualAssignment[] = []) => {
     setIsPreRosterModalOpen(false);
+    
+    if (userProfile) {
+      if (!userProfile.isActive) {
+        alert("Your account has been frozen by the Master User. You cannot generate programs.");
+        return;
+      }
+      const dailyCount = await db.getAIGenerationCount(userProfile.id, 'daily');
+      if (dailyCount >= userProfile.aiDailyLimit) {
+        alert(`Quota Reached: You have hit your daily limit of ${userProfile.aiDailyLimit} AI generations. Please contact your Master User to increase your limits.`);
+        return;
+      }
+      const weeklyCount = await db.getAIGenerationCount(userProfile.id, 'weekly');
+      if (weeklyCount >= userProfile.aiWeeklyLimit) {
+        alert(`Quota Reached: You have hit your weekly limit of ${userProfile.aiWeeklyLimit} AI generations.`);
+        return;
+      }
+      const monthlyCount = await db.getAIGenerationCount(userProfile.id, 'monthly');
+      if (monthlyCount >= userProfile.aiMonthlyLimit) {
+        alert(`Quota Reached: You have hit your monthly limit of ${userProfile.aiMonthlyLimit} AI generations.`);
+        return;
+      }
+    }
+
     const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
     const eligibleStaff = staff.filter(s => {
       if (s.type === 'Local') return true;
@@ -240,7 +269,10 @@ const App: React.FC = () => {
       }
 
       setPrograms(result.programs); setStationHealth(result.stationHealth); setAlerts(result.alerts || []);
-      if (supabase) await db.savePrograms(result.programs); 
+      if (supabase) {
+        await db.savePrograms(result.programs);
+        await db.logAction('GENERATE_AI', 'PROGRAM', 'AI_GEN', `Generated ${programDuration}-day program for ${activeShifts.length} shifts`);
+      }
       setActiveTab('program'); 
     } catch (err: any) { 
       console.error("Generation Error:", err);
@@ -398,7 +430,10 @@ const App: React.FC = () => {
     }));
     
     setIncomingDuties(prev => [...prev, ...newDuties]);
-    if (supabase) await db.upsertIncomingDuties(newDuties);
+    if (supabase) {
+      await db.upsertIncomingDuties(newDuties);
+      await db.logAction('CREATE', 'LEAVE', 'BULK', `Added ${newDuties.length} rest log entries`);
+    }
     
     setIncomingSelectedStaffIds([]);
     setNotification(`${newDuties.length} Rest Log Entries Added`);
@@ -452,20 +487,31 @@ const App: React.FC = () => {
     }));
     
     setLeaveRequests(prev => [...prev, ...newLeaves]);
-    if (supabase) await db.upsertLeaves(newLeaves);
+    if (supabase) {
+      await db.upsertLeaves(newLeaves);
+      await db.logAction('CREATE', 'LEAVE', 'BULK', `Added ${newLeaves.length} absence entries`);
+    }
     
     setQuickLeaveStaffIds([]);
     setNotification(`${newLeaves.length} Absence Entries Added`);
   };
 
   const deleteIncomingDuty = async (id: string) => {
+    if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
     setIncomingDuties(prev => prev.filter(d => d.id !== id));
-    if (supabase) await db.deleteIncomingDuty(id);
+    if (supabase) {
+      await db.deleteIncomingDuty(id);
+      await db.logAction('DELETE', 'LEAVE', id, `Deleted rest log entry`);
+    }
   };
 
   const deleteLeaveRequest = async (id: string) => {
+    if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
     setLeaveRequests(prev => prev.filter(l => l.id !== id));
-    if (supabase) await db.deleteLeave(id);
+    if (supabase) {
+      await db.deleteLeave(id);
+      await db.logAction('DELETE', 'LEAVE', id, `Deleted absence entry`);
+    }
   };
 
   if (isInitializing) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="text-blue-500 animate-spin" size={64} /></div>;
@@ -494,12 +540,18 @@ const App: React.FC = () => {
               {['dashboard', 'flights', 'staff', 'shifts', 'program', 'statistics'].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? 'bg-slate-950 text-white shadow-md' : 'text-slate-500'}`}>{tab}</button>
               ))}
+              {userProfile?.role === 'master' && (
+                <button onClick={() => setActiveTab('command')} className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 ${activeTab === 'command' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-600 hover:bg-emerald-50'}`}>
+                  <Shield size={12} /> Command
+                </button>
+              )}
            </nav>
            <button onClick={() => auth.signOut()} className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-500 transition-colors"><LogOut size={16} /></button>
         </div>
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
+        {activeTab === 'command' && userProfile?.role === 'master' && <CommandCenter currentUser={userProfile} />}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500">
              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
@@ -681,10 +733,37 @@ const App: React.FC = () => {
              </div>
           </div>
         )}
-        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {setFlights(p => [...p, f]); db.upsertFlight(f);}} onUpdate={f => {setFlights(p => p.map(o => o.id === f.id ? f : o)); db.upsertFlight(f);}} onDelete={id => {setFlights(p => p.filter(f => f.id !== id)); db.deleteFlight(id);}} onOpenScanner={() => { setScannerTarget('flights'); setShowScanner(true); }} />}
-        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); db.upsertStaff(s);}} onDelete={id => {
+        {activeTab === 'flights' && <FlightManager flights={flights} startDate={startDate} endDate={endDate} onAdd={f => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            setFlights(p => [...p, f]); 
+            db.upsertFlight(f);
+            db.logAction('CREATE', 'FLIGHT', f.id, `Added flight ${f.flightNumber}`);
+          }} onUpdate={f => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            setFlights(p => p.map(o => o.id === f.id ? f : o)); 
+            db.upsertFlight(f);
+            db.logAction('UPDATE', 'FLIGHT', f.id, `Updated flight ${f.flightNumber}`);
+          }} onDelete={id => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            setFlights(p => p.filter(f => f.id !== id)); 
+            db.deleteFlight(id);
+            db.logAction('DELETE', 'FLIGHT', id, `Deleted flight`);
+          }} onOpenScanner={() => { setScannerTarget('flights'); setShowScanner(true); }} />}
+        {activeTab === 'staff' && <StaffManager staff={staff} onUpdate={s => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            const isNew = !staff.find(o => o.id === s.id);
+            if (isNew && userProfile && staff.length >= userProfile.maxStaff) {
+              alert(`Quota Reached: You have hit your limit of ${userProfile.maxStaff} staff members.`);
+              return;
+            }
+            setStaff(p => p.find(o => o.id === s.id) ? p.map(o => o.id === s.id ? s : o) : [...p, s]); 
+            db.upsertStaff(s);
+            db.logAction(isNew ? 'CREATE' : 'UPDATE', 'STAFF', s.id, `${isNew ? 'Added' : 'Updated'} staff ${s.initials}`);
+          }} onDelete={id => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
             setStaff(p => p.filter(s => s.id !== id)); 
             db.deleteStaff(id);
+            db.logAction('DELETE', 'STAFF', id, `Deleted staff member`);
             // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
             setPrograms(prev => {
                 const updated = prev.map(prog => ({
@@ -695,17 +774,35 @@ const App: React.FC = () => {
                 return updated;
             });
         }} onClearAll={() => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
             staff.forEach(s => db.deleteStaff(s.id));
             setStaff([]);
+            db.logAction('DELETE', 'STAFF', 'ALL', `Cleared all staff members`);
             setPrograms(prev => {
                 const updated = prev.map(prog => ({ ...prog, assignments: [] }));
                 if (supabase) db.savePrograms(updated);
                 return updated;
             });
         }} onOpenScanner={() => { setScannerTarget('staff'); setShowScanner(true); }} defaultMaxShifts={5} />}
-        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {setShifts(p => [...p, s]); db.upsertShift(s);}} onUpdate={s => {setShifts(p => p.map(o => o.id === s.id ? s : o)); db.upsertShift(s);}} onDelete={id => {
+        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            if (userProfile && shifts.length >= userProfile.maxShifts) {
+              alert(`Quota Reached: You have hit your limit of ${userProfile.maxShifts} shifts.`);
+              return;
+            }
+            setShifts(p => [...p, s]); 
+            db.upsertShift(s);
+            db.logAction('CREATE', 'SHIFT', s.id, `Added shift on ${s.pickupDate} ${s.pickupTime}`);
+          }} onUpdate={s => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
+            setShifts(p => p.map(o => o.id === s.id ? s : o)); 
+            db.upsertShift(s);
+            db.logAction('UPDATE', 'SHIFT', s.id, `Updated shift on ${s.pickupDate} ${s.pickupTime}`);
+          }} onDelete={id => {
+            if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
             setShifts(p => p.filter(s => s.id !== id)); 
             db.deleteShift(id);
+            db.logAction('DELETE', 'SHIFT', id, `Deleted shift`);
             // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
             setPrograms(prev => {
                 const updated = prev.map(prog => ({

@@ -107,6 +107,29 @@ export interface ManualAssignment {
   roles: string[];
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: 'master' | 'planner';
+  aiDailyLimit: number;
+  aiWeeklyLimit: number;
+  aiMonthlyLimit: number;
+  maxStaff: number;
+  maxShifts: number;
+  isActive: boolean;
+}
+
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userEmail: string;
+  actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'GENERATE_AI';
+  entityType: 'FLIGHT' | 'STAFF' | 'SHIFT' | 'PROGRAM' | 'LEAVE' | 'USER_PROFILE';
+  entityId: string;
+  details: string;
+  createdAt: string;
+}
+
 export interface ProgramData {
   flights: Flight[];
   staff: Staff[];
