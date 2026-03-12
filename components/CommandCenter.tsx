@@ -118,6 +118,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
     logsByUser[email].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
 
+  const sortedUsersList = [...users].sort((a, b) => {
+    if (a.role === 'master' && b.role !== 'master') return -1;
+    if (a.role !== 'master' && b.role === 'master') return 1;
+    return a.email.localeCompare(b.email);
+  });
+
   if (currentUser.role !== 'master') {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
@@ -236,18 +242,25 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {users.map(user => (
-              <div key={user.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
+            {sortedUsersList.map(user => (
+              <div key={user.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h4 className="font-bold text-slate-900">{user.email}</h4>
-                    <span className={`inline-block mt-2 px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md ${
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-inner ${
                       user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                     }`}>
-                      {user.role}
-                    </span>
+                      {user.email.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-lg">{user.email}</h4>
+                      <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md ${
+                        user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {user.role}
+                      </span>
+                    </div>
                   </div>
-                  <label className="flex items-center cursor-pointer">
+                  <label className="flex items-center cursor-pointer bg-slate-50 p-2 rounded-xl border border-slate-100">
                     <div className="relative">
                       <input type="checkbox" className="sr-only" checked={user.isActive} onChange={e => handleUpdateUser({...user, isActive: e.target.checked})} />
                       <div className={`block w-10 h-6 rounded-full transition-colors ${user.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
@@ -257,64 +270,74 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                   </label>
                 </div>
 
-                <div className="space-y-4 flex-1">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Role</label>
-                      <select 
-                        value={user.role}
-                        onChange={e => handleUpdateUser({...user, role: e.target.value as 'master' | 'planner'})}
-                        disabled={user.id === currentUser.id} // Cannot change own role
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                      >
-                        <option value="planner">Planner</option>
-                        <option value="master">Master</option>
-                      </select>
+                <div className="space-y-6 flex-1">
+                  <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Account Settings</h5>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Role</label>
+                        <select 
+                          value={user.role}
+                          onChange={e => handleUpdateUser({...user, role: e.target.value as 'master' | 'planner'})}
+                          disabled={user.id === currentUser.id} // Cannot change own role
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        >
+                          <option value="planner">Planner</option>
+                          <option value="master">Master</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Max Staff</label>
+                        <input 
+                          type="number" 
+                          value={user.maxStaff}
+                          onChange={e => handleUpdateUser({...user, maxStaff: parseInt(e.target.value) || 0})}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Max Shifts</label>
+                        <input 
+                          type="number" 
+                          value={user.maxShifts}
+                          onChange={e => handleUpdateUser({...user, maxShifts: parseInt(e.target.value) || 0})}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        />
+                      </div>
                     </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Max Staff</label>
-                    <input 
-                      type="number" 
-                      value={user.maxStaff}
-                      onChange={e => handleUpdateUser({...user, maxStaff: parseInt(e.target.value) || 0})}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Max Shifts</label>
-                    <input 
-                      type="number" 
-                      value={user.maxShifts}
-                      onChange={e => handleUpdateUser({...user, maxShifts: parseInt(e.target.value) || 0})}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">AI Daily Limit</label>
-                    <input 
-                      type="number" 
-                      value={user.aiDailyLimit}
-                      onChange={e => handleUpdateUser({...user, aiDailyLimit: parseInt(e.target.value) || 0})}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">AI Weekly Limit</label>
-                    <input 
-                      type="number" 
-                      value={user.aiWeeklyLimit}
-                      onChange={e => handleUpdateUser({...user, aiWeeklyLimit: parseInt(e.target.value) || 0})}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">AI Monthly Limit</label>
-                    <input 
-                      type="number" 
-                      value={user.aiMonthlyLimit}
-                      onChange={e => handleUpdateUser({...user, aiMonthlyLimit: parseInt(e.target.value) || 0})}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    />
+
+                  <div className="bg-emerald-50/30 p-4 rounded-2xl border border-emerald-100/50">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-600/70 mb-3">AI Quotas</h5>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Daily</label>
+                        <input 
+                          type="number" 
+                          value={user.aiDailyLimit}
+                          onChange={e => handleUpdateUser({...user, aiDailyLimit: parseInt(e.target.value) || 0})}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Weekly</label>
+                        <input 
+                          type="number" 
+                          value={user.aiWeeklyLimit}
+                          onChange={e => handleUpdateUser({...user, aiWeeklyLimit: parseInt(e.target.value) || 0})}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Monthly</label>
+                        <input 
+                          type="number" 
+                          value={user.aiMonthlyLimit}
+                          onChange={e => handleUpdateUser({...user, aiMonthlyLimit: parseInt(e.target.value) || 0})}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
                 
@@ -324,17 +347,16 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                     disabled={user.id === currentUser.id}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
                       user.id === currentUser.id 
-                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-                        : 'bg-red-50 text-red-600 hover:bg-red-100'
+                        ? 'bg-slate-50 text-slate-400 cursor-not-allowed' 
+                        : 'bg-red-50 text-red-600 hover:bg-red-100 shadow-sm'
                     }`}
                   >
                     <Trash2 size={16} /> Delete User
                   </button>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         </div>
       )}
 
