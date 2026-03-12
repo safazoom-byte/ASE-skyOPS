@@ -365,6 +365,28 @@ export const db = {
             maxShifts: data.max_shifts ?? 20,
             isActive: data.is_active ?? true
           };
+        } else {
+          // Check if a profile was pre-created by email
+          const { data: emailData } = await supabase.from('user_profiles').select('*').eq('email', session.user.email).single();
+          if (emailData) {
+            // Update the ID to match the real auth ID
+            await supabase.from('user_profiles').delete().eq('id', emailData.id); // Delete the temp one
+            await supabase.from('user_profiles').insert({
+              ...emailData,
+              id: session.user.id // Insert with real ID
+            });
+            profile = {
+              id: session.user.id,
+              email: emailData.email,
+              role: emailData.role || 'planner',
+              aiDailyLimit: emailData.ai_daily_limit ?? 5,
+              aiWeeklyLimit: emailData.ai_weekly_limit ?? 20,
+              aiMonthlyLimit: emailData.ai_monthly_limit ?? 50,
+              maxStaff: emailData.max_staff ?? 50,
+              maxShifts: emailData.max_shifts ?? 20,
+              isActive: emailData.is_active ?? true
+            };
+          }
         }
       } catch (e) { console.warn("Could not fetch profile from DB, using local"); }
     }
@@ -452,6 +474,40 @@ export const db = {
           is_active: profile.isActive
         });
       } catch (e) { console.warn("Could not update profile in DB"); }
+    }
+  },
+
+  async deleteUserProfile(id: string) {
+    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    const updated = localProfiles.filter((p: UserProfile) => p.id !== id);
+    localStorage.setItem('skyops_user_profiles', JSON.stringify(updated));
+
+    if (supabase) {
+      try {
+        await supabase.from('user_profiles').delete().eq('id', id);
+      } catch (e) { console.warn("Could not delete profile from DB"); }
+    }
+  },
+
+  async createUserProfile(profile: UserProfile) {
+    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    localProfiles.push(profile);
+    localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
+
+    if (supabase) {
+      try {
+        await supabase.from('user_profiles').insert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive
+        });
+      } catch (e) { console.warn("Could not insert profile to DB"); }
     }
   },
 

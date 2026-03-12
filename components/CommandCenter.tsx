@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, Activity, Settings, Search, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
+import { Shield, Users, Activity, Settings, Search, AlertTriangle, CheckCircle2, Lock, Plus, Trash2, X } from 'lucide-react';
 import { UserProfile, AuditLog } from '../types';
 import { db } from '../services/supabaseService';
 
@@ -13,6 +13,13 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'master' | 'planner'>('planner');
+  
+  const [errorModalMessage, setErrorModalMessage] = useState<string | null>(null);
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<{id: string, email: string} | null>(null);
 
   useEffect(() => {
     loadData();
@@ -38,6 +45,54 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
     await db.updateUserProfile(updatedUser);
     setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
     db.logAction('UPDATE', 'USER_PROFILE', updatedUser.id, `Updated quotas/role for ${updatedUser.email}`);
+  };
+
+  const handleDeleteUserClick = (id: string, email: string) => {
+    if (id === currentUser.id) {
+      setErrorModalMessage("You cannot delete your own account.");
+      return;
+    }
+    setDeleteConfirmUser({ id, email });
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteConfirmUser) return;
+    
+    await db.deleteUserProfile(deleteConfirmUser.id);
+    setUsers(users.filter(u => u.id !== deleteConfirmUser.id));
+    db.logAction('DELETE', 'USER_PROFILE', deleteConfirmUser.id, `Deleted user ${deleteConfirmUser.email}`);
+    setDeleteConfirmUser(null);
+  };
+
+  const handleAddUser = async () => {
+    if (!newUserEmail.trim() || !newUserEmail.includes('@')) {
+      setErrorModalMessage("Please enter a valid email address.");
+      return;
+    }
+    if (users.some(u => u.email.toLowerCase() === newUserEmail.toLowerCase())) {
+      setErrorModalMessage("A user with this email already exists.");
+      return;
+    }
+
+    const newProfile: UserProfile = {
+      id: crypto.randomUUID(), // Will be updated when they actually sign in via Supabase Auth
+      email: newUserEmail.trim(),
+      role: newUserRole,
+      aiDailyLimit: 5,
+      aiWeeklyLimit: 20,
+      aiMonthlyLimit: 50,
+      maxStaff: 50,
+      maxShifts: 20,
+      isActive: true
+    };
+
+    await db.createUserProfile(newProfile);
+    setUsers([...users, newProfile]);
+    db.logAction('CREATE', 'USER_PROFILE', newProfile.id, `Created pre-approved user ${newProfile.email}`);
+    
+    setNewUserEmail('');
+    setNewUserRole('planner');
+    setIsAddUserModalOpen(false);
   };
 
   const filteredLogs = logs.filter(l => 
@@ -166,42 +221,56 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {users.map(user => (
-            <div key={user.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h4 className="font-bold text-slate-900">{user.email}</h4>
-                  <span className={`inline-block mt-2 px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md ${
-                    user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {user.role}
-                  </span>
-                </div>
-                <label className="flex items-center cursor-pointer">
-                  <div className="relative">
-                    <input type="checkbox" className="sr-only" checked={user.isActive} onChange={e => handleUpdateUser({...user, isActive: e.target.checked})} />
-                    <div className={`block w-10 h-6 rounded-full transition-colors ${user.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                    <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${user.isActive ? 'transform translate-x-4' : ''}`}></div>
-                  </div>
-                  <span className="ml-3 text-xs font-bold text-slate-500 uppercase tracking-wider">{user.isActive ? 'Active' : 'Frozen'}</span>
-                </label>
-              </div>
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <div>
+              <h4 className="font-bold text-slate-800">User Management</h4>
+              <p className="text-xs text-slate-500 mt-1">Manage access, roles, and AI quotas for all users.</p>
+            </div>
+            <button 
+              onClick={() => setIsAddUserModalOpen(true)}
+              className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
+            >
+              <Plus size={16} /> Add User
+            </button>
+          </div>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {users.map(user => (
+              <div key={user.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
+                <div className="flex justify-between items-start mb-6">
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Role</label>
-                    <select 
-                      value={user.role}
-                      onChange={e => handleUpdateUser({...user, role: e.target.value as 'master' | 'planner'})}
-                      disabled={user.id === currentUser.id} // Cannot change own role
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                    >
-                      <option value="planner">Planner</option>
-                      <option value="master">Master</option>
-                    </select>
+                    <h4 className="font-bold text-slate-900">{user.email}</h4>
+                    <span className={`inline-block mt-2 px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md ${
+                      user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {user.role}
+                    </span>
                   </div>
+                  <label className="flex items-center cursor-pointer">
+                    <div className="relative">
+                      <input type="checkbox" className="sr-only" checked={user.isActive} onChange={e => handleUpdateUser({...user, isActive: e.target.checked})} />
+                      <div className={`block w-10 h-6 rounded-full transition-colors ${user.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
+                      <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${user.isActive ? 'transform translate-x-4' : ''}`}></div>
+                    </div>
+                    <span className="ml-3 text-xs font-bold text-slate-500 uppercase tracking-wider">{user.isActive ? 'Active' : 'Frozen'}</span>
+                  </label>
+                </div>
+
+                <div className="space-y-4 flex-1">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Role</label>
+                      <select 
+                        value={user.role}
+                        onChange={e => handleUpdateUser({...user, role: e.target.value as 'master' | 'planner'})}
+                        disabled={user.id === currentUser.id} // Cannot change own role
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      >
+                        <option value="planner">Planner</option>
+                        <option value="master">Master</option>
+                      </select>
+                    </div>
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Max Staff</label>
                     <input 
@@ -248,9 +317,133 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                     />
                   </div>
                 </div>
+                
+                <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteUserClick(user.id, user.email)}
+                    disabled={user.id === currentUser.id}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+                      user.id === currentUser.id 
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                        : 'bg-red-50 text-red-600 hover:bg-red-100'
+                    }`}
+                  >
+                    <Trash2 size={16} /> Delete User
+                  </button>
+                </div>
               </div>
             </div>
           ))}
+        </div>
+        </div>
+      )}
+
+      {/* Add User Modal */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">Add New User</h3>
+              <button 
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Email Address</label>
+                <input 
+                  type="email" 
+                  value={newUserEmail}
+                  onChange={e => setNewUserEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Role</label>
+                <select 
+                  value={newUserRole}
+                  onChange={e => setNewUserRole(e.target.value as 'master' | 'planner')}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  <option value="planner">Planner</option>
+                  <option value="master">Master</option>
+                </select>
+              </div>
+              <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm">
+                <strong>Note:</strong> The user will be able to log in using this email address. Their quotas and limits will be set to the default values, which you can edit later.
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">
+              <button 
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleAddUser}
+                className="px-6 py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
+              >
+                Add User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {errorModalMessage && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Error</h3>
+              <p className="text-slate-500">{errorModalMessage}</p>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-center">
+              <button 
+                onClick={() => setErrorModalMessage(null)}
+                className="px-8 py-3 rounded-xl font-bold bg-slate-800 text-white hover:bg-slate-900 transition-colors w-full"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmUser && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Delete User?</h3>
+              <p className="text-slate-500">Are you sure you want to delete the user <strong>{deleteConfirmUser.email}</strong>? This action cannot be undone.</p>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">
+              <button 
+                onClick={() => setDeleteConfirmUser(null)}
+                className="flex-1 px-4 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmDeleteUser}
+                className="flex-1 px-4 py-3 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm shadow-red-600/20"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
