@@ -260,9 +260,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                       </span>
                     </div>
                   </div>
-                  <label className="flex items-center cursor-pointer bg-slate-50 p-2 rounded-xl border border-slate-100">
+                  <label className={`flex items-center ${user.email === 'safazoom@gmail.com' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} bg-slate-50 p-2 rounded-xl border border-slate-100`}>
                     <div className="relative">
-                      <input type="checkbox" className="sr-only" checked={user.isActive} onChange={e => handleUpdateUser({...user, isActive: e.target.checked})} />
+                      <input type="checkbox" className="sr-only" checked={user.isActive} disabled={user.email === 'safazoom@gmail.com'} onChange={e => handleUpdateUser({...user, isActive: e.target.checked})} />
                       <div className={`block w-10 h-6 rounded-full transition-colors ${user.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
                       <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${user.isActive ? 'transform translate-x-4' : ''}`}></div>
                     </div>
@@ -279,8 +279,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                         <select 
                           value={user.role}
                           onChange={e => handleUpdateUser({...user, role: e.target.value as 'master' | 'planner'})}
-                          disabled={user.id === currentUser.id} // Cannot change own role
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          disabled={user.id === currentUser.id || user.email === 'safazoom@gmail.com'} // Cannot change own role or master
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="planner">Planner</option>
                           <option value="master">Master</option>
@@ -344,9 +344,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                 <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
                   <button
                     onClick={() => handleDeleteUserClick(user.id, user.email)}
-                    disabled={user.id === currentUser.id}
+                    disabled={user.id === currentUser.id || user.email === 'safazoom@gmail.com'}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-                      user.id === currentUser.id 
+                      user.id === currentUser.id || user.email === 'safazoom@gmail.com'
                         ? 'bg-slate-50 text-slate-400 cursor-not-allowed' 
                         : 'bg-red-50 text-red-600 hover:bg-red-100 shadow-sm'
                     }`}
