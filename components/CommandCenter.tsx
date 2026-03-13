@@ -121,7 +121,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
   const sortedUsersList = [...users].sort((a, b) => {
     if (a.role === 'master' && b.role !== 'master') return -1;
     if (a.role !== 'master' && b.role === 'master') return 1;
-    return a.email.localeCompare(b.email);
+    return (a.email || '').localeCompare(b.email || '');
   });
 
   if (currentUser.role !== 'master') {
@@ -249,10 +249,10 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({ currentUser }) => 
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-inner ${
                       user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                     }`}>
-                      {user.email.charAt(0).toUpperCase()}
+                      {(user.email || '?').charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 text-lg">{user.email}</h4>
+                      <h4 className="font-bold text-slate-900 text-lg">{user.email || 'Unknown User'}</h4>
                       <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md ${
                         user.role === 'master' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                       }`}>
