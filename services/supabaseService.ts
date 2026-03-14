@@ -431,9 +431,12 @@ export const db = {
     const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
     if (supabase) {
       try {
-        const { data } = await supabase.from('user_profiles').select('*');
-        if (data && data.length > 0) {
-          return data.map((d: any) => ({
+        const { data, error } = await supabase.from('user_profiles').select('*');
+        if (error) {
+          console.error("Supabase select error:", error);
+        }
+        if (data) {
+          const dbProfiles = data.map((d: any) => ({
             id: d.id,
             email: d.email,
             role: d.role,
@@ -444,8 +447,13 @@ export const db = {
             maxShifts: d.max_shifts,
             isActive: d.is_active
           }));
+          
+          // Merge local profiles that aren't in the DB yet
+          const missingInDb = localProfiles.filter((lp: UserProfile) => !dbProfiles.some((dp: UserProfile) => dp.email === lp.email));
+          
+          return [...dbProfiles, ...missingInDb];
         }
-      } catch (e) { console.warn("Could not fetch profiles from DB"); }
+      } catch (e) { console.warn("Could not fetch profiles from DB", e); }
     }
     return localProfiles;
   },
@@ -496,7 +504,7 @@ export const db = {
 
     if (supabase) {
       try {
-        await supabase.from('user_profiles').insert({
+        const { error } = await supabase.from('user_profiles').insert({
           id: profile.id,
           email: profile.email,
           role: profile.role,
@@ -507,7 +515,8 @@ export const db = {
           max_shifts: profile.maxShifts,
           is_active: profile.isActive
         });
-      } catch (e) { console.warn("Could not insert profile to DB"); }
+        if (error) console.error("Supabase insert error:", error);
+      } catch (e) { console.warn("Could not insert profile to DB", e); }
     }
   },
 

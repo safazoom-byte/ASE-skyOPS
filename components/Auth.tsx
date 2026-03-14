@@ -113,11 +113,13 @@ export const Auth: React.FC = () => {
           </form>
 
           <div className="mt-8 text-center">
-            <span 
-              className="text-[9px] font-black text-slate-500 uppercase tracking-widest"
+            <button 
+              type="button"
+              onClick={() => setIsLogin(!isLogin)}
+              className="text-[9px] font-black text-slate-500 hover:text-blue-400 uppercase tracking-widest transition-colors"
             >
-              System Access Restricted
-            </span>
+              {isLogin ? 'Need Access? Register Terminal' : 'Have Access? Initialize Uplink'}
+            </button>
           </div>
         </div>
 
