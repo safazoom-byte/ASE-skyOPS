@@ -204,7 +204,25 @@ const App: React.FC = () => {
       } catch (e: any) { if (mounted) { setCloudStatus('error'); setIsInitializing(false); } }
     };
     checkAuth();
-    return () => { mounted = false; };
+
+    let unsubscribe = () => {};
+    if (supabase) {
+      unsubscribe = auth.onAuthStateChange(async (s) => {
+        if (mounted) {
+          setSession(s);
+          if (s) {
+            const profile = await db.getUserProfile();
+            setUserProfile(profile);
+            await syncCloudData();
+          } else {
+            setUserProfile(null);
+            setCloudStatus('offline');
+          }
+        }
+      });
+    }
+
+    return () => { mounted = false; unsubscribe(); };
   }, []);
 
   const confirmGenerateProgram = async (manualAssignments: ManualAssignment[] = []) => {

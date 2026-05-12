@@ -26,8 +26,20 @@ export const Auth: React.FC = () => {
         ? await auth.signIn(email, password)
         : await auth.signUp(email, password);
         
-      if (authError) throw authError;
-      if (!isLogin) alert("Registration successful! You can now log in.");
+      if (authError) {
+        if (authError.message.includes('Signups not allowed')) {
+           throw new Error("Signups are currently disabled in your Supabase dashboard. Please go to Authentication -> Providers -> Email and enable 'Enable Email Signup'.");
+        }
+        throw authError;
+      }
+      
+      if (!isLogin) {
+        alert("Registration successful! You can now log in.");
+        setIsLogin(true); // Automatically switch to login tab
+      } else {
+        // Bulletproof transition for React states getting stuck locally
+        window.location.reload();
+      }
     } catch (err: any) {
       setError(err.message || "Authentication failed");
     } finally {
