@@ -81,54 +81,84 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     d.setDate(d.getDate() + 6);
     return d.toISOString().split('T')[0];
   });
-  const [bulkDays, setBulkDays] = useState<number[]>([1,2,3,4,5]); // Mon-Fri default
-  const [bulkTemplates, setBulkTemplates] = useState<BulkShiftTemplate[]>([
-    {
-      id: Math.random().toString(36).substr(2, 9),
-      pickupTime: '06:00',
-      endTime: '14:00',
-      minStaff: 2,
-      maxStaff: 8,
-      roleCounts: {}
-    }
-  ]);
+  interface DailyPlan {
+    dateStr: string;
+    templates: BulkShiftTemplate[];
+  }
+  
+  const [weeklyPlan, setWeeklyPlan] = useState<DailyPlan[]>([]);
 
-  const handleBulkCreateWeekly = () => {
+  useEffect(() => {
+    if (!bulkStartDate || !bulkEndDate) return;
     const start = new Date(bulkStartDate);
     const end = new Date(bulkEndDate);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays >= 0 && diffDays <= 31 && start <= end) {
+      setWeeklyPlan(prev => {
+        const newPlan: DailyPlan[] = [];
+        let previousTemplates: BulkShiftTemplate[] = [
+          {
+            id: Math.random().toString(36).substr(2, 9),
+            pickupTime: '06:00',
+            endTime: '14:00',
+            minStaff: 2,
+            maxStaff: 8,
+            roleCounts: {}
+          }
+        ];
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dStr = d.toISOString().split('T')[0];
+          const existing = prev.find(p => p.dateStr === dStr);
+          if (existing) {
+            newPlan.push(existing);
+            previousTemplates = existing.templates;
+          } else {
+            // Copy previous day's template structure as default for new day
+            const newDayTemplates = previousTemplates.map(t => ({
+              ...t, 
+              id: Math.random().toString(36).substr(2, 9)
+            }));
+            newPlan.push({ dateStr: dStr, templates: newDayTemplates });
+          }
+        }
+        return newPlan;
+      });
+    }
+  }, [bulkStartDate, bulkEndDate]);
+
+  const handleBulkCreateWeekly = () => {
     const newShifts: ShiftConfig[] = [];
     
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (bulkDays.includes(d.getDay())) {
-        const dateStr = d.toISOString().split('T')[0];
-        
-        bulkTemplates.forEach(template => {
-          let endDateStr = dateStr;
-          if (template.endTime < template.pickupTime) {
-            const nextDay = new Date(d);
-            nextDay.setDate(nextDay.getDate() + 1);
-            endDateStr = nextDay.toISOString().split('T')[0];
-          }
+    weeklyPlan.forEach(dayPlan => {
+      dayPlan.templates.forEach(template => {
+        let endDateStr = dayPlan.dateStr;
+        if (template.endTime < template.pickupTime) {
+          const nextDay = new Date(dayPlan.dateStr);
+          nextDay.setDate(nextDay.getDate() + 1);
+          endDateStr = nextDay.toISOString().split('T')[0];
+        }
 
-          newShifts.push({
-            id: Math.random().toString(36).substr(2, 9),
-            day: getDayOffset(dateStr),
-            pickupDate: dateStr,
-            pickupTime: template.pickupTime,
-            endDate: endDateStr,
-            endTime: template.endTime,
-            minStaff: template.minStaff,
-            maxStaff: template.maxStaff,
-            targetPower: 75,
-            roleCounts: { ...template.roleCounts },
-            flightIds: []
-          });
+        newShifts.push({
+          id: Math.random().toString(36).substr(2, 9),
+          day: getDayOffset(dayPlan.dateStr),
+          pickupDate: dayPlan.dateStr,
+          pickupTime: template.pickupTime,
+          endDate: endDateStr,
+          endTime: template.endTime,
+          minStaff: template.minStaff,
+          maxStaff: template.maxStaff,
+          targetPower: 75,
+          roleCounts: { ...template.roleCounts },
+          flightIds: []
         });
-      }
-    }
+      });
+    });
     
     if (newShifts.length === 0) {
-      alert("No days matched your selection in this date range.");
+      alert("No shifts matched your selection.");
       return;
     }
     
@@ -396,7 +426,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
           </button>
           <button onClick={() => setShowBulkModal(true)} className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-amber-500/20">
             <Layers size={16} className="group-hover:scale-110 transition-transform" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Bulk Creator</span>
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">Master Template</span>
           </button>
           <button className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center gap-3 hover:bg-white/10 transition-all">
             <FileDown size={18} className="text-emerald-400" />
@@ -709,7 +739,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl md:rounded-2xl flex items-center justify-center text-amber-600"><Layers size={20} className="md:w-6 md:h-6" /></div>
                 <div>
-                  <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 leading-none">Bulk Shifts Creater</h3>
+                  <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 leading-none">Weekly Master Template</h3>
                   <p className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1.5">Mass Schedule Generation</p>
                 </div>
               </div>
@@ -729,78 +759,109 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Repeat On Days</label>
-                  <div className="flex flex-wrap gap-2">
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => (
-                      <button 
-                        key={day} 
-                        onClick={() => setBulkDays(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx].sort())}
-                        className={`px-4 py-3 rounded-xl text-xs font-black uppercase transition-all ${bulkDays.includes(idx) ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                      >
-                        {day}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Shift Templates</h4>
-                    <button 
-                      onClick={() => setBulkTemplates([...bulkTemplates, { id: Math.random().toString(36).substr(2, 9), pickupTime: '14:00', endTime: '22:00', minStaff: 2, maxStaff: 8, roleCounts: {} }])}
-                      className="text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
-                    >
-                      <Plus size={12} /> Add Another Shift
-                    </button>
-                  </div>
-
-                  {bulkTemplates.map((template, index) => (
-                    <div key={template.id} className="p-4 md:p-6 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-200 space-y-4 md:space-y-6 relative">
-                      {bulkTemplates.length > 1 && (
+                <div className="space-y-8">
+                  {weeklyPlan.map((dayPlan) => (
+                    <div key={dayPlan.dateStr} className="border-t border-slate-200 pt-6 first:border-0 first:pt-0">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-[14px] font-black uppercase text-indigo-900 tracking-widest flex items-center gap-2">
+                          <Calendar size={16} className="text-indigo-500" />
+                          {new Date(dayPlan.dateStr).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                        </h4>
                         <button 
-                          onClick={() => setBulkTemplates(bulkTemplates.filter(t => t.id !== template.id))}
-                          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 bg-white rounded-xl shadow-sm border border-slate-100"
+                          onClick={() => {
+                            setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                              ...p, 
+                              templates: [...p.templates, { id: Math.random().toString(36).substr(2, 9), pickupTime: '06:00', endTime: '14:00', minStaff: 2, maxStaff: 8, roleCounts: {} }]
+                            } : p));
+                          }}
+                          className="text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-700 flex items-center gap-1 px-3 py-2 bg-indigo-50 rounded-xl"
                         >
-                          <Trash2 size={16} />
+                          <Plus size={12} /> Add Shift
                         </button>
-                      )}
-                      
-                      <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">Shift {index + 1}</h5>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pickup Time (24H)</label>
-                          <input type="time" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none" value={template.pickupTime} onChange={e => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, pickupTime: e.target.value } : t))} />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Release Time (24H)</label>
-                          <input type="time" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none" value={template.endTime} onChange={e => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, endTime: e.target.value } : t))} />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min Staff</label>
-                          <input type="number" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none" value={template.minStaff} onChange={e => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, minStaff: Number(e.target.value) } : t))} />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max Staff</label>
-                          <input type="number" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none" value={template.maxStaff} onChange={e => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, maxStaff: Number(e.target.value) } : t))} />
-                        </div>
                       </div>
-                      
-                      <div className="space-y-3">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Specialist Roles Required</label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {AVAILABLE_SKILLS.map(skill => (
-                            <div key={skill} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200">
-                              <span className="text-[10px] font-bold text-slate-600 uppercase">{skill}</span>
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, roleCounts: { ...t.roleCounts, [skill]: Math.max(0, (t.roleCounts[skill]||0)-1) } } : t))} className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-200"><Minus size={10}/></button>
-                                <span className="text-xs font-black w-4 text-center">{template.roleCounts[skill] || 0}</span>
-                                <button onClick={() => setBulkTemplates(bulkTemplates.map(t => t.id === template.id ? { ...t, roleCounts: { ...t.roleCounts, [skill]: (t.roleCounts[skill]||0)+1 } } : t))} className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-200"><Plus size={10}/></button>
+
+                      <div className="space-y-4">
+                        {dayPlan.templates.length === 0 && (
+                          <div className="text-center p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs font-bold uppercase tracking-widest">
+                            No shifts for this day
+                          </div>
+                        )}
+                        {dayPlan.templates.map((template, index) => (
+                          <div key={template.id} className="p-4 md:p-6 bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-200 space-y-4 md:space-y-6 relative">
+                            <button 
+                              onClick={() => {
+                                setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                  ...p, 
+                                  templates: p.templates.filter(t => t.id !== template.id)
+                                } : p));
+                              }}
+                              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 bg-white rounded-xl shadow-sm border border-slate-100"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                            
+                            <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">Shift {index + 1}</h5>
+                            
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Shift Start (24H)</label>
+                                <input type="time" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={template.pickupTime} onChange={e => {
+                                  setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                    ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, pickupTime: e.target.value } : t)
+                                  } : p));
+                                }} />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Shift Release (24H)</label>
+                                <input type="time" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={template.endTime} onChange={e => {
+                                  setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                    ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, endTime: e.target.value } : t)
+                                  } : p));
+                                }} />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min Staff</label>
+                                <input type="number" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={template.minStaff} onChange={e => {
+                                  setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                    ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, minStaff: Number(e.target.value) } : t)
+                                  } : p));
+                                }} />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max Staff</label>
+                                <input type="number" className="h-[56px] w-full px-4 bg-white border border-slate-200 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={template.maxStaff} onChange={e => {
+                                  setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                    ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, maxStaff: Number(e.target.value) } : t)
+                                  } : p));
+                                }} />
                               </div>
                             </div>
-                          ))}
-                        </div>
+                            
+                            <div className="space-y-3">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Specialist Roles Required</label>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {AVAILABLE_SKILLS.map(skill => (
+                                  <div key={skill} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-200">
+                                    <span className="text-[10px] font-bold text-slate-600 uppercase">{skill}</span>
+                                    <div className="flex items-center gap-2">
+                                      <button onClick={() => {
+                                        setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                          ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, roleCounts: { ...t.roleCounts, [skill]: Math.max(0, (t.roleCounts[skill]||0)-1) } } : t)
+                                        } : p));
+                                      }} className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-200"><Minus size={10}/></button>
+                                      <span className="text-xs font-black w-4 text-center">{template.roleCounts[skill] || 0}</span>
+                                      <button onClick={() => {
+                                        setWeeklyPlan(prev => prev.map(p => p.dateStr === dayPlan.dateStr ? {
+                                          ...p, templates: p.templates.map(t => t.id === template.id ? { ...t, roleCounts: { ...t.roleCounts, [skill]: (t.roleCounts[skill]||0)+1 } } : t)
+                                        } : p));
+                                      }} className="w-6 h-6 bg-slate-100 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-200"><Plus size={10}/></button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
