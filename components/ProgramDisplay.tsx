@@ -126,6 +126,26 @@ export const ProgramDisplay: React.FC<Props> = ({
   const getFlight = (id: string) => flights.find(f => f.id === id);
   const getShift = (id: string) => shifts.find(s => s.id === id);
 
+  const getShiftHours = (shiftId: string) => {
+      const shift = getShift(shiftId);
+      if (!shift) return 0;
+      const [ph, pm] = shift.pickupTime.split(':').map(Number);
+      const [sh, sm] = shift.endTime.split(':').map(Number);
+      let hours = sh - ph + (sm - pm) / 60;
+      if (sh < ph) hours += 24;
+      return hours;
+  };
+
+  const getStaffTotalHours = (staffId: string) => {
+      return activePrograms.reduce((acc, p) => {
+          const assign = p.assignments.find(a => a.staffId === staffId);
+          if (assign) {
+              return acc + getShiftHours(assign.shiftId || '');
+          }
+          return acc;
+      }, 0);
+  };
+
   const activePrograms = programs.filter(p => {
         if (!p.dateString) return false;
         return p.dateString >= startDate && p.dateString <= endDate;
@@ -423,7 +443,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.text("Weekly Operations Matrix View", 14, 15);
     const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getDate()}/${d.getMonth()+1}`; });
     const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
-    const matrixBody = staff.map((s, idx) => {
+    
+    const sortedMatrixStaffPdf = [...staff].map(s => ({
+        ...s,
+        totalHours: getStaffTotalHours(s.id)
+    })).sort((a,b) => a.totalHours - b.totalHours);
+
+    const matrixBody = sortedMatrixStaffPdf.map((s, idx) => {
         const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
         let workedCount = 0;
         activePrograms.forEach(p => {
@@ -442,7 +468,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 } else { row.push('ERR'); }
             } else { row.push('-'); }
         });
-        row.push(`${workedCount}/${activePrograms.length}`);
+        row.push(`${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]`);
         return row;
     });
     autoTable(doc, { startY: 20, head: matrixHead, body: matrixBody, theme: 'grid', headStyles: { fillColor: [220, 100, 0] }, styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 }, columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } }, didParseCell: (data) => { if (data.section === 'body' && data.column.index > 1 && data.column.index < dateHeaders.length + 2) { const text = data.cell.raw as string; if (text && text.includes('[')) { const match = text.match(/\[([\d.]+)H\]/); if (match) { const rest = parseFloat(match[1]); if (rest < minRestHours) { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; data.cell.styles.fontStyle = 'bold'; } } } } } });
@@ -607,6 +633,11 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const renderMatrixTab = () => {
        const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getDate()}/${d.getMonth()+1}`; });
+       const sortedMatrixStaff = [...staff].map(s => ({
+           ...s,
+           totalHours: getStaffTotalHours(s.id)
+       })).sort((a,b) => a.totalHours - b.totalHours);
+
        return (
           <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
              <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">Weekly Operations Matrix View</h3>
@@ -620,7 +651,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                    </tr>
                 </thead>
                 <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                   {staff.map((s, idx) => {
+                   {sortedMatrixStaff.map((s, idx) => {
                        let workedCount = 0;
                        return (
                           <tr key={s.id} className="hover:bg-slate-50 transition-colors">
@@ -655,7 +686,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   }
                                   return <td key={i} className={cellClass}>{content}</td>;
                               })}
-                              <td className="px-4 py-2 text-center font-bold">{workedCount}/{activePrograms.length}</td>
+                              <td className="px-4 py-2 text-center">
+                                  <div className="font-bold">{workedCount}/{activePrograms.length}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">[{s.totalHours.toFixed(1)}H]</div>
+                              </td>
                           </tr>
                        );
                    })}
