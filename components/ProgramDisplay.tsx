@@ -18,7 +18,8 @@ import {
   History,
   Trash2,
   Eye,
-  Lock
+  Lock,
+  ShieldCheck
 } from 'lucide-react';
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from '../constants';
 import { db, supabase } from '../services/supabaseService';
@@ -58,7 +59,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Daily' | 'Matrix' | 'Roles'>('Daily');
+  const [activeTab, setActiveTab] = useState<'Daily' | 'Matrix' | 'Roles' | 'Staff Checks'>('Daily');
 
   useEffect(() => {
     const loadVersions = async () => {
@@ -736,6 +737,103 @@ export const ProgramDisplay: React.FC<Props> = ({
        );
   };
 
+  const renderStaffCheckTab = () => {
+       const localStaff = staff.filter(s => s.type === 'Local');
+       const rosterStaff = staff.filter(s => s.type === 'Roster');
+
+       const getStaffVars = (s: Staff) => {
+           const daysWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+           let target = 5;
+           if (s.type === 'Roster') {
+               const progStart = new Date(startDate);
+               const progEnd = new Date(endDate);
+               const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+               const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+               const overlapStart = workFrom > progStart ? workFrom : progStart;
+               const overlapEnd = workTo < progEnd ? workTo : progEnd;
+               if (overlapStart <= overlapEnd) {
+                  target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+               } else {
+                  target = 0;
+               }
+           }
+           const diff = daysWorked - target;
+           
+           let restViolations = 0;
+           activePrograms.forEach(p => {
+               const assign = p.assignments.find(a => a.staffId === s.id);
+               if (assign) {
+                   const shift = shifts.find(sh => sh.id === assign.shiftId);
+                   if (shift) {
+                       const pDate = new Date(p.dateString || startDate);
+                       const [ph, pm] = shift.pickupTime.split(':').map(Number);
+                       const shiftStart = new Date(pDate);
+                       shiftStart.setHours(ph, pm, 0, 0);
+                       const rest = calculateRestHours(s.id, shiftStart);
+                       if (rest !== null && rest < minRestHours) restViolations++;
+                   }
+               }
+           });
+           
+           return { daysWorked, target, diff, restViolations };
+       };
+
+       const renderTable = (staffList: Staff[], title: string) => (
+          <div className="mb-10 min-w-[800px]">
+             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">{title}</h4>
+             <table className="w-full text-left border-collapse">
+                <thead>
+                   <tr className="bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-4 py-3 border border-slate-200">Agent</th>
+                      <th className="px-4 py-3 border border-slate-200 text-center">Days Worked</th>
+                      <th className="px-4 py-3 border border-slate-200 text-center">Target Days</th>
+                      <th className="px-4 py-3 border border-slate-200 text-center">Variance</th>
+                      <th className="px-4 py-3 border border-slate-200 text-center">Rest Violations</th>
+                      <th className="px-4 py-3 border border-slate-200 text-center">Status</th>
+                   </tr>
+                </thead>
+                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                   {staffList.map((s) => {
+                       const { daysWorked, target, diff, restViolations } = getStaffVars(s);
+                       let statusNode = <span className="text-emerald-600 font-bold border border-emerald-200 bg-emerald-50 px-2 py-1 rounded">OPTIMAL</span>;
+                       if (restViolations > 0) {
+                           statusNode = <span className="text-rose-600 font-bold border border-rose-200 bg-rose-50 px-2 py-1 rounded">REST WARNING</span>;
+                       } else if (diff > 0) {
+                           statusNode = <span className="text-orange-600 font-bold border border-orange-200 bg-orange-50 px-2 py-1 rounded">OVERWORKED</span>;
+                       } else if (diff < 0) {
+                           statusNode = <span className="text-blue-600 font-bold border border-blue-200 bg-blue-50 px-2 py-1 rounded">UNDERWORKED</span>;
+                       }
+                       
+                       return (
+                          <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-2 border border-slate-100 font-bold">{s.initials}</td>
+                              <td className="px-4 py-2 border border-slate-100 text-center">{daysWorked}</td>
+                              <td className="px-4 py-2 border border-slate-100 text-center">{target}</td>
+                              <td className="px-4 py-2 border border-slate-100 text-center font-bold">{diff > 0 ? `+${diff}` : diff}</td>
+                              <td className="px-4 py-2 border border-slate-100 text-center">
+                                  {restViolations > 0 ? <span className="text-rose-600 font-bold bg-rose-100 px-2 py-0.5 rounded">{restViolations}</span> : <span className="text-slate-300">-</span>}
+                              </td>
+                              <td className="px-4 py-2 border border-slate-100 text-center">{statusNode}</td>
+                          </tr>
+                       );
+                   })}
+                </tbody>
+             </table>
+          </div>
+       );
+
+       return (
+          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
+                <ShieldCheck className="text-emerald-500 w-6 h-6 md:w-8 md:h-8" />
+                Staff Matrix Checks
+             </h3>
+             {renderTable(localStaff, 'Local Matrix Check')}
+             {renderTable(rosterStaff, 'Roster Staff Matrix Check')}
+          </div>
+       );
+  };
+
   return (
     <div className="space-y-8 pb-24 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-6 md:p-10 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
@@ -774,7 +872,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       </div>
 
       <div className="flex flex-wrap gap-2 md:gap-4 md:justify-center px-2">
-        {['Daily', 'Matrix', 'Roles'].map(tab => (
+        {['Daily', 'Matrix', 'Roles', 'Staff Checks'].map(tab => (
            <button
              key={tab}
              onClick={() => setActiveTab(tab as any)}
@@ -866,6 +964,7 @@ export const ProgramDisplay: React.FC<Props> = ({
               <>
                  {activeTab === 'Matrix' && renderMatrixTab()}
                  {activeTab === 'Roles' && renderRolesTab()}
+                 {activeTab === 'Staff Checks' && renderStaffCheckTab()}
                  {activeTab === 'Daily' && activePrograms.map((prog, i) => {
                     const d = new Date(prog.dateString || startDate);
                     const dateLabel = `${DAYS_OF_WEEK_FULL[d.getDay()].toUpperCase()} - ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
