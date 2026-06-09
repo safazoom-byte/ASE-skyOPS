@@ -741,79 +741,89 @@ export const ProgramDisplay: React.FC<Props> = ({
        const localStaff = staff.filter(s => s.type === 'Local');
        const rosterStaff = staff.filter(s => s.type === 'Roster');
 
-       const getStaffVars = (s: Staff) => {
-           const daysWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-           let target = 5;
-           if (s.type === 'Roster') {
-               const progStart = new Date(startDate);
-               const progEnd = new Date(endDate);
-               const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
-               const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
-               const overlapStart = workFrom > progStart ? workFrom : progStart;
-               const overlapEnd = workTo < progEnd ? workTo : progEnd;
-               if (overlapStart <= overlapEnd) {
-                  target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-               } else {
-                  target = 0;
-               }
-           }
-           const diff = daysWorked - target;
-           
-           let restViolations = 0;
-           activePrograms.forEach(p => {
-               const assign = p.assignments.find(a => a.staffId === s.id);
-               if (assign) {
-                   const shift = shifts.find(sh => sh.id === assign.shiftId);
-                   if (shift) {
-                       const pDate = new Date(p.dateString || startDate);
-                       const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                       const shiftStart = new Date(pDate);
-                       shiftStart.setHours(ph, pm, 0, 0);
-                       const rest = calculateRestHours(s.id, shiftStart);
-                       if (rest !== null && rest < minRestHours) restViolations++;
-                   }
-               }
-           });
-           
-           return { daysWorked, target, diff, restViolations };
-       };
-
-       const renderTable = (staffList: Staff[], title: string) => (
+       const renderLocalTable = () => (
           <div className="mb-10 min-w-[800px]">
-             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">{title}</h4>
+             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">Weekly Personnel Utilization Audit (Local)</h4>
              <table className="w-full text-left border-collapse">
                 <thead>
-                   <tr className="bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-wider">
-                      <th className="px-4 py-3 border border-slate-200">Agent</th>
-                      <th className="px-4 py-3 border border-slate-200 text-center">Days Worked</th>
-                      <th className="px-4 py-3 border border-slate-200 text-center">Target Days</th>
-                      <th className="px-4 py-3 border border-slate-200 text-center">Variance</th>
-                      <th className="px-4 py-3 border border-slate-200 text-center">Rest Violations</th>
-                      <th className="px-4 py-3 border border-slate-200 text-center">Status</th>
+                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">S/N</th>
+                      <th className="px-4 py-3 border-r border-slate-800">NAME</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">INIT</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK SHIFTS</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">OFF DAYS</th>
+                      <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
                    </tr>
                 </thead>
-                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                   {staffList.map((s) => {
-                       const { daysWorked, target, diff, restViolations } = getStaffVars(s);
-                       let statusNode = <span className="text-emerald-600 font-bold border border-emerald-200 bg-emerald-50 px-2 py-1 rounded">OPTIMAL</span>;
-                       if (restViolations > 0) {
-                           statusNode = <span className="text-rose-600 font-bold border border-rose-200 bg-rose-50 px-2 py-1 rounded">REST WARNING</span>;
-                       } else if (diff > 0) {
-                           statusNode = <span className="text-orange-600 font-bold border border-orange-200 bg-orange-50 px-2 py-1 rounded">OVERWORKED</span>;
-                       } else if (diff < 0) {
-                           statusNode = <span className="text-blue-600 font-bold border border-blue-200 bg-blue-50 px-2 py-1 rounded">UNDERWORKED</span>;
-                       }
+                <tbody className="text-xs font-medium divide-y divide-slate-100">
+                   {localStaff.map((s, idx) => {
+                       const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+                       const daysOff = activePrograms.length - shiftsWorked;
+                       const targetShifts = 5; 
+                       const targetOff = 2;
+                       const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
                        
                        return (
-                          <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-4 py-2 border border-slate-100 font-bold">{s.initials}</td>
-                              <td className="px-4 py-2 border border-slate-100 text-center">{daysWorked}</td>
-                              <td className="px-4 py-2 border border-slate-100 text-center">{target}</td>
-                              <td className="px-4 py-2 border border-slate-100 text-center font-bold">{diff > 0 ? `+${diff}` : diff}</td>
-                              <td className="px-4 py-2 border border-slate-100 text-center">
-                                  {restViolations > 0 ? <span className="text-rose-600 font-bold bg-rose-100 px-2 py-0.5 rounded">{restViolations}</span> : <span className="text-slate-300">-</span>}
+                          <tr key={s.id} className={isMatch ? "bg-emerald-50 text-emerald-900 border-b border-white" : "bg-rose-50 text-rose-900 border-b border-white"}>
+                              <td className="px-4 py-2 text-center">{idx + 1}</td>
+                              <td className="px-4 py-2 font-bold">{s.name}</td>
+                              <td className="px-4 py-2 text-center">{s.initials}</td>
+                              <td className="px-4 py-2 text-center">{shiftsWorked}</td>
+                              <td className="px-4 py-2 text-center">{daysOff}</td>
+                              <td className="px-4 py-2 text-center font-bold">
+                                  {isMatch ? "MATCH" : "CHECK"}
                               </td>
-                              <td className="px-4 py-2 border border-slate-100 text-center">{statusNode}</td>
+                          </tr>
+                       );
+                   })}
+                </tbody>
+             </table>
+          </div>
+       );
+
+       const renderRosterTable = () => (
+          <div className="mb-10 min-w-[800px]">
+             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">Weekly Personnel Utilization Audit (Roster)</h4>
+             <table className="w-full text-left border-collapse">
+                <thead>
+                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">S/N</th>
+                      <th className="px-4 py-3 border-r border-slate-800">NAME</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">INIT</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK FROM</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK TO</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">POTENTIAL</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">ACTUAL</th>
+                      <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
+                   </tr>
+                </thead>
+                <tbody className="text-xs font-medium divide-y divide-slate-100">
+                   {rosterStaff.map((s, idx) => {
+                       const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
+                       const progStart = new Date(startDate);
+                       const progEnd = new Date(endDate);
+                       const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+                       const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+                       const overlapStart = workFrom > progStart ? workFrom : progStart;
+                       const overlapEnd = workTo < progEnd ? workTo : progEnd;
+                       let potential = 0;
+                       if (overlapStart <= overlapEnd) { 
+                           potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1; 
+                       }
+                       const isMatch = shiftsWorked === potential;
+                       
+                       return (
+                          <tr key={s.id} className={isMatch ? "bg-emerald-50 text-emerald-900 border-b border-white" : "bg-rose-50 text-rose-900 border-b border-white"}>
+                              <td className="px-4 py-2 text-center">{idx + 1}</td>
+                              <td className="px-4 py-2 font-bold">{s.name}</td>
+                              <td className="px-4 py-2 text-center">{s.initials}</td>
+                              <td className="px-4 py-2 text-center">{s.workFromDate || 'N/A'}</td>
+                              <td className="px-4 py-2 text-center">{s.workToDate || 'N/A'}</td>
+                              <td className="px-4 py-2 text-center">{potential}</td>
+                              <td className="px-4 py-2 text-center">{shiftsWorked}</td>
+                              <td className="px-4 py-2 text-center font-bold">
+                                  {isMatch ? "MATCH" : "CHECK"}
+                              </td>
                           </tr>
                        );
                    })}
@@ -828,8 +838,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                 <ShieldCheck className="text-emerald-500 w-6 h-6 md:w-8 md:h-8" />
                 Staff Matrix Checks
              </h3>
-             {renderTable(localStaff, 'Local Matrix Check')}
-             {renderTable(rosterStaff, 'Roster Staff Matrix Check')}
+             {renderLocalTable()}
+             {renderRosterTable()}
           </div>
        );
   };
