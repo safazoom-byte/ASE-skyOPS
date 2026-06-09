@@ -17,7 +17,8 @@ import {
   Save,
   History,
   Trash2,
-  Eye
+  Eye,
+  Lock
 } from 'lucide-react';
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from '../constants';
 import { db, supabase } from '../services/supabaseService';
@@ -57,6 +58,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState<'Daily' | 'Matrix' | 'Roles'>('Daily');
 
   useEffect(() => {
     const loadVersions = async () => {
@@ -135,7 +137,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     let lastEndTime: Date | null = null;
     const staffIncoming = incomingDuties.filter(d => d.staffId === staffId);
     staffIncoming.forEach(d => {
-        const dt = new Date(`${d.date}T${d.shiftEndTime}`);
+        const dateStr = d.date || startDate;
+        const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
         if (dt < currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
             lastEndTime = dt;
         }
@@ -190,13 +193,14 @@ export const ProgramDisplay: React.FC<Props> = ({
           const groupedMap = new Map<string, string[]>(); 
           
           incomingDuties.forEach(d => {
-              const dDate = new Date(d.date);
+              const dateStr = d.date || startDate;
+              const dDate = new Date(dateStr);
               const sDate = new Date(startDate);
               const diffTime = sDate.getTime() - dDate.getTime();
               const diffDays = diffTime / (1000 * 3600 * 24);
               
               if (diffDays >= 0 && diffDays <= 2) {
-                  const key = `${d.date}|${d.shiftEndTime}`;
+                  const key = `${dateStr}|${d.shiftEndTime}`;
                   const st = getStaff(d.staffId);
                   if (st) {
                       const existing = groupedMap.get(key) || [];
@@ -600,6 +604,138 @@ export const ProgramDisplay: React.FC<Props> = ({
       return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20";
   };
 
+  const renderMatrixTab = () => {
+       const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getDate()}/${d.getMonth()+1}`; });
+       return (
+          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">Weekly Operations Matrix View</h3>
+             <table className="w-full text-left border-collapse min-w-[800px]">
+                <thead>
+                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-4 py-3 text-center border-r border-slate-800 rounded-tl-xl">S/N</th>
+                      <th className="px-4 py-3 border-r border-slate-800">Agent</th>
+                      {dateHeaders.map((dh, i) => <th key={i} className="px-4 py-3 text-center border-r border-slate-800">{dh}</th>)}
+                      <th className="px-4 py-3 text-center rounded-tr-xl">Audit</th>
+                   </tr>
+                </thead>
+                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                   {staff.map((s, idx) => {
+                       let workedCount = 0;
+                       return (
+                          <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-4 py-2 text-center border-r border-slate-100">{idx + 1}</td>
+                              <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">{s.initials} ({s.type === 'Local' ? 'L' : 'R'})</td>
+                              {activePrograms.map((p, i) => {
+                                  const assign = p.assignments.find(a => a.staffId === s.id);
+                                  let content: React.ReactNode = <span className="text-slate-300">-</span>;
+                                  let cellClass = "px-4 py-2 text-center border-r border-slate-100";
+                                  if (assign) {
+                                      workedCount++;
+                                      const shift = getShift(assign.shiftId || '');
+                                      if (shift) {
+                                          const pDate = new Date(p.dateString!);
+                                          const [ph, pm] = shift.pickupTime.split(':').map(Number);
+                                          const shiftStart = new Date(pDate);
+                                          shiftStart.setHours(ph, pm, 0, 0);
+                                          const rest = calculateRestHours(s.id, shiftStart);
+                                          const restWarning = rest !== null && rest < minRestHours;
+                                          if (restWarning) {
+                                              cellClass += " bg-rose-50";
+                                          }
+                                          content = (
+                                              <div className="flex flex-col items-center gap-1">
+                                                <span className={`font-bold ${restWarning ? 'text-rose-600' : 'text-slate-900'}`}>{shift.pickupTime}</span>
+                                                {rest !== null && <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${restWarning ? 'bg-rose-500 text-white' : 'text-slate-500 bg-slate-100'}`}>{rest.toFixed(1)}H</span>}
+                                              </div>
+                                          );
+                                      } else {
+                                          content = <span className="text-rose-500 font-bold">ERR</span>;
+                                      }
+                                  }
+                                  return <td key={i} className={cellClass}>{content}</td>;
+                              })}
+                              <td className="px-4 py-2 text-center font-bold">{workedCount}/{activePrograms.length}</td>
+                          </tr>
+                       );
+                   })}
+                </tbody>
+             </table>
+          </div>
+       );
+  };
+
+  const renderRolesTab = () => {
+       return (
+          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">Specialist Role Fulfillment Matrix</h3>
+             <table className="w-full text-left border-collapse min-w-[800px]">
+                <thead>
+                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-24">Date</th>
+                      <th className="px-4 py-3 border-r border-slate-800 w-32">Shift</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">SL</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">LC</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">RMP</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">OPS</th>
+                      <th className="px-4 py-3 text-center rounded-tr-xl">LF</th>
+                   </tr>
+                </thead>
+                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                   {activePrograms.map((p, pIdx) => {
+                       const d = new Date(p.dateString || startDate);
+                       const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+                       const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
+                       return shiftsToday.map((s, sIdx) => {
+                           const assignments = p.assignments.filter(a => a.shiftId === s.id);
+                           const coversRole = (a: any, targetRole: string) => {
+                               const st = getStaff(a.staffId);
+                               if (!st) return false;
+                               const roleCode = targetRole === 'Shift Leader' ? 'SL' : targetRole === 'Load Control' ? 'LC' : targetRole === 'Ramp' ? 'RMP' : targetRole === 'Operations' ? 'OPS' : targetRole === 'Lost and Found' ? 'LF' : targetRole;
+                               if (a.role === roleCode || a.role === targetRole) return true;
+                               if (targetRole === 'Load Control' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
+                               if (targetRole === 'Shift Leader' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
+                               if (targetRole === 'Ramp' && st.isRamp) return true;
+                               if (targetRole === 'Operations' && st.isOps) return true;
+                               if (targetRole === 'Lost and Found' && st.isLostFound) return true;
+                               return false;
+                           };
+                           const getRoleCell = (role: string, reqFlag: boolean) => {
+                               const agents = assignments.filter(a => coversRole(a, role)).map(a => getStaff(a.staffId)?.initials).filter(Boolean);
+                               if (agents.length > 0) {
+                                   return <td className="px-4 py-2 border-r border-slate-100 text-center"><span className="bg-emerald-500 text-white font-black px-2 py-1 rounded-lg text-[10px] break-words inline-block">{agents.join(', ')}</span></td>;
+                               } else if (reqFlag) {
+                                   return <td className="px-4 py-2 border-r border-slate-100 text-center"><span className="bg-rose-500 text-white font-black px-2 py-1 rounded-lg text-[10px]">MISSING</span></td>;
+                               }
+                               return <td className="px-4 py-2 border-r border-slate-100 text-center text-slate-300">-</td>;
+                           };
+
+                           const meta = { 
+                                slReq: ((s.roleCounts?.['Shift Leader'] || (s.roleCounts as any)?.['SL'] || 0) as number) > 0, 
+                                lcReq: ((s.roleCounts?.['Load Control'] || (s.roleCounts as any)?.['LC'] || 0) as number) > 0, 
+                                rmpReq: ((s.roleCounts?.['Ramp'] || (s.roleCounts as any)?.['RMP'] || 0) as number) > 0, 
+                                opsReq: ((s.roleCounts?.['Operations'] || (s.roleCounts as any)?.['OPS'] || 0) as number) > 0, 
+                                lfReq: ((s.roleCounts?.['Lost and Found'] || (s.roleCounts as any)?.['LF'] || 0) as number) > 0 
+                           };
+
+                           return (
+                               <tr key={`${pIdx}-${sIdx}`} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 py-2 font-bold border-r border-slate-100">{dateLabel}</td>
+                                  <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">{s.pickupTime}-{s.endTime}</td>
+                                  {getRoleCell('Shift Leader', meta.slReq)}
+                                  {getRoleCell('Load Control', meta.lcReq)}
+                                  {getRoleCell('Ramp', meta.rmpReq)}
+                                  {getRoleCell('Operations', meta.opsReq)}
+                                  {getRoleCell('Lost and Found', meta.lfReq)}
+                               </tr>
+                           );
+                       });
+                   })}
+                </tbody>
+             </table>
+          </div>
+       );
+  };
+
   return (
     <div className="space-y-8 pb-24 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-6 md:p-10 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
@@ -635,6 +771,18 @@ export const ProgramDisplay: React.FC<Props> = ({
              <span>Export PDF Report</span>
           </button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 md:gap-4 md:justify-center px-2">
+        {['Daily', 'Matrix', 'Roles'].map(tab => (
+           <button
+             key={tab}
+             onClick={() => setActiveTab(tab as any)}
+             className={`px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex-1 md:flex-none ${activeTab === tab ? 'bg-slate-950 text-white shadow-xl scale-105' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'}`}
+           >
+             {tab} View
+           </button>
+        ))}
       </div>
 
       {showHistory && (
@@ -715,13 +863,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                  <span className="text-xl font-black uppercase italic">No Program Data for Selected Period</span>
               </div>
            ) : (
-              activePrograms.map((prog, i) => {
-                 const d = new Date(prog.dateString || startDate);
-                 const dateLabel = `${DAYS_OF_WEEK_FULL[d.getDay()].toUpperCase()} - ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+              <>
+                 {activeTab === 'Matrix' && renderMatrixTab()}
+                 {activeTab === 'Roles' && renderRolesTab()}
+                 {activeTab === 'Daily' && activePrograms.map((prog, i) => {
+                    const d = new Date(prog.dateString || startDate);
+                    const dateLabel = `${DAYS_OF_WEEK_FULL[d.getDay()].toUpperCase()} - ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
                  
                  const workingIds = new Set(prog.assignments.map(a => a.staffId));
                  const offStaff = staff.filter(s => !workingIds.has(s.id));
-                 const categories: Record<string, { staff: Staff, count: number }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
+                 const categories: Record<string, { staff: Staff, count: number, isLeave?: boolean, isRequestedDayOff?: boolean }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
 
                  offStaff.forEach(s => {
                      const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
@@ -747,7 +898,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                          isRosterOutOfContract = prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate;
                        }
                      }
-                     const item = { staff: s, count };
+                     const item = { staff: s, count, isLeave: !!leave, isRequestedDayOff: leave?.type === 'Day off' };
 
                      if (leave) {
                         if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(item);
@@ -869,10 +1020,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                        return (
                                                           <div 
                                                              key={a.id}
-                                                             draggable
-                                                             onDragStart={(e) => handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)}
-                                                             className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-all flex items-center gap-1 group ${colorClass}`}>
+                                                             draggable={!(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id))}
+                                                             onDragStart={(e) => {
+                                                                 if (manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) { e.preventDefault(); return; }
+                                                                 handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)
+                                                             }}
+                                                             className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) ? 'opacity-80 cursor-not-allowed border-indigo-200' : 'cursor-move hover:scale-105'}`}>
                                                              <span>{st.initials}</span>
+                                                             {(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) ? <Lock size={8} className="text-slate-500 opacity-70 -ml-0.5" /> : null}
                                                              {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">{rest}H</span>}
                                                              {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
                                                              {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
@@ -943,10 +1098,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                       <td className="px-4 py-3 font-bold align-top">{cat}</td>
                                       <td className="px-4 py-3">
                                          <div className="flex flex-wrap gap-2">
-                                            {items.map(({ staff: s, count }) => {
+                                            {items.map((item) => {
+                                                const { staff: s, count, isRequestedDayOff } = item as any;
                                                 const daysWorked = getStaffWorkload(s.id);
                                                 const colorClass = getStaffColor(s, daysWorked, null);
-                                                const isLocked = cat === 'ROSTER LEAVE' || cat === 'ANNUAL LEAVE';
+                                                const isLocked = cat === 'ROSTER LEAVE' || cat === 'ANNUAL LEAVE' || isRequestedDayOff;
                                                 return (
                                                    <div 
                                                       key={s.id}
@@ -960,6 +1116,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                       }}
                                                       className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-move hover:scale-105'}`}>
                                                       <span>{s.initials}</span>
+                                                      {isLocked ? <Lock size={8} className="text-slate-500 opacity-70 -ml-0.5" /> : null}
                                                       <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{count}</span>
                                                    </div>
                                                 );
@@ -974,7 +1131,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                        </div>
                     </div>
                  );
-              })
+              })}
+              </>
            )}
         </div>
       )}
