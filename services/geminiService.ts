@@ -355,12 +355,22 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
           });
       };
 
+      // Helper to calculate exact shift end date handle cross day
+      const getExactShiftEnd = (shift: any) => {
+          let [ph, pm] = shift.pickupTime.split(':').map(Number);
+          let [sh, sm] = shift.endTime.split(':').map(Number);
+          const endDt = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+          endDt.setHours(sh, sm, 0, 0);
+          if (sh < ph) endDt.setDate(endDt.getDate() + 1);
+          return endDt;
+      };
+
       // PASS 0: Process Manual Assignments
       if (data.manualAssignments && data.manualAssignments.length > 0) {
           data.manualAssignments.forEach(ma => {
               const shift = dailyShifts.find(s => s.id === ma.shiftId);
               if (shift) {
-                  const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
+                  const shiftEnd = getExactShiftEnd(shift);
                   const st = data.staff.find(s => s.id === ma.staffId);
                   if (st) {
                       // Only add if not already added to this shift
@@ -384,7 +394,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
 
       // PASS 1: Fulfill specific role requirements for all shifts today
       dailyShifts.forEach(shift => {
-          const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
+          const shiftEnd = getExactShiftEnd(shift);
           if (shift.roleCounts) {
               Object.entries(shift.roleCounts).forEach(([role, count]) => {
                   if (!count) return;
@@ -439,7 +449,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       while (addedInPass2) {
           addedInPass2 = false;
           dailyShifts.forEach(shift => {
-              const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
+              const shiftEnd = getExactShiftEnd(shift);
               const currentAssigned = program.assignments.filter(a => a.shiftId === shift.id).length;
               if (currentAssigned < shift.minStaff) {
                   const available = getAvailableStaff(shift);
@@ -466,7 +476,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       while (addedInPass3) {
           addedInPass3 = false;
           dailyShifts.forEach(shift => {
-              const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
+              const shiftEnd = getExactShiftEnd(shift);
               const currentAssigned = program.assignments.filter(a => a.shiftId === shift.id).length;
               const targetStaff = shift.maxStaff || shift.minStaff;
               if (currentAssigned < targetStaff) {

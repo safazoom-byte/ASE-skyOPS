@@ -160,7 +160,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     staffIncoming.forEach(d => {
         const dateStr = d.date || startDate;
         const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
-        if (dt < currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
+        if (dt <= currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
             lastEndTime = dt;
         }
     });
@@ -174,7 +174,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                const endDt = new Date(pDate);
                endDt.setHours(sh, sm, 0, 0);
                if (sh < ph) endDt.setDate(endDt.getDate() + 1);
-               if (endDt < currentShiftStart && (!lastEndTime || endDt > lastEndTime)) {
+               if (endDt <= currentShiftStart && (!lastEndTime || endDt > lastEndTime)) {
                    lastEndTime = endDt;
                }
             }
