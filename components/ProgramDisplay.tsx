@@ -61,6 +61,29 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<'Daily' | 'Matrix' | 'Roles' | 'Staff Checks'>('Daily');
 
+  const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(() => {
+     try {
+         const stored = localStorage.getItem('skyops_reference_programs');
+         if (stored) {
+             const parsed = JSON.parse(stored);
+             if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+         }
+     } catch {}
+     return programs;
+  });
+
+  useEffect(() => {
+      if (referencePrograms.length === 0 && programs.length > 0) {
+          setReferencePrograms(programs);
+          localStorage.setItem('skyops_reference_programs', JSON.stringify(programs));
+      }
+  }, [programs, referencePrograms]);
+
+  const handleMarkAllCopied = () => {
+      setReferencePrograms(programs);
+      localStorage.setItem('skyops_reference_programs', JSON.stringify(programs));
+  };
+
   useEffect(() => {
     const loadVersions = async () => {
       if (supabase) {
@@ -715,8 +738,17 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
                                   if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
                                   const assign = p.assignments.find(a => a.staffId === s.id);
+                                  
+                                  const refProg = referencePrograms.find(rp => rp.dateString === p.dateString);
+                                  const refAssign = refProg?.assignments.find(a => a.staffId === s.id);
+                                  
+                                  const isCellModified = 
+                                      (assign?.shiftId !== refAssign?.shiftId) || 
+                                      (assign?.role !== refAssign?.role) ||
+                                      (!!assign !== !!refAssign);
+
                                   let content: React.ReactNode = <span className="text-slate-300">-</span>;
-                                  let cellClass = "px-4 py-2 text-center border-r border-slate-100";
+                                  let cellClass = `px-4 py-2 text-center border-r border-slate-100 ${isCellModified ? 'bg-indigo-100/50 shadow-inner' : ''}`;
                                   if (assign) {
                                       workedCount++;
                                       const shift = getShift(assign.shiftId || '');
@@ -1001,6 +1033,17 @@ export const ProgramDisplay: React.FC<Props> = ({
         ))}
       </div>
 
+      {(activeTab === 'Daily' || activeTab === 'Matrix') && (
+          <div className="flex justify-center px-2 mt-4">
+            <button
+               onClick={handleMarkAllCopied}
+               className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center gap-2">
+               <CheckCircle2 size={16} />
+               All Modifications Copied
+            </button>
+          </div>
+      )}
+
       {showHistory && (
         <div className="bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 shadow-xl animate-in slide-in-from-top-4">
            <div className="flex justify-between items-center mb-6">
@@ -1133,6 +1176,33 @@ export const ProgramDisplay: React.FC<Props> = ({
                      }
                  });
 
+                 const refProg = referencePrograms.find(p => p.dateString === prog.dateString) || { assignments: [] as typeof prog.assignments, dateString: prog.dateString };
+                 const refWorkingIds = new Set(refProg.assignments.map(a => a.staffId));
+                 const refOffStaff = staff.filter(s => !refWorkingIds.has(s.id));
+                 const refCategories: Record<string, string[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
+                 refOffStaff.forEach(s => {
+                     const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= refProg.dateString! && l.endDate >= refProg.dateString!);
+                     let isRosterOutOfContract = false;
+                     if (s.type === 'Roster') {
+                       if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                         isRosterOutOfContract = !s.rosterPeriods.some(p => refProg.dateString! >= p.start && refProg.dateString! <= p.end);
+                       } else if (s.workFromDate && s.workToDate) {
+                         isRosterOutOfContract = refProg.dateString! < s.workFromDate || refProg.dateString! > s.workToDate;
+                       }
+                     }
+                     if (leave) {
+                        if (leave.type === 'Annual leave') refCategories['ANNUAL LEAVE'].push(s.id);
+                        else if (leave.type === 'Roster leave') refCategories['ROSTER LEAVE'].push(s.id);
+                        else if (leave.type === 'Sick leave') refCategories['SICK LEAVE'].push(s.id);
+                        else refCategories['DAYS OFF'].push(s.id);
+                     } else if (isRosterOutOfContract) {
+                        refCategories['ROSTER LEAVE'].push(s.id);
+                     } else {
+                        if (s.type === 'Local') refCategories['DAYS OFF'].push(s.id);
+                        else refCategories['STANDBY (RESERVE)'].push(s.id);
+                     }
+                 });
+
                  const shiftsTodaySorted = shifts
                     .filter(s => s.pickupDate === prog.dateString)
                     .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
@@ -1174,11 +1244,15 @@ export const ProgramDisplay: React.FC<Props> = ({
                                    const hasLC = assignments.some(a => a.role === 'LC' || a.role === 'Load Control' || getStaff(a.staffId)?.isLoadControl || getStaff(a.staffId)?.initials.toUpperCase() === 'SK-ATZ');
                                    const isCriticalMissing = (!hasSL && (shift.roleCounts?.['Shift Leader'] || 0) > 0) || (!hasLC && (shift.roleCounts?.['Load Control'] || 0) > 0);
 
+                                   const curShiftAssig = assignments.map(a => a.staffId).sort().join(',');
+                                   const refShiftAssig = refProg.assignments.filter(a => a.shiftId === shift.id).map(a => a.staffId).sort().join(',');
+                                   const isShiftModified = curShiftAssig !== refShiftAssig;
+
                                    return (
                                       <tr key={shift.id} 
                                           onDragOver={handleDragOver}
                                           onDrop={(e) => handleDrop(e, shift.id, prog.dateString!)}
-                                          className={`hover:bg-slate-50 transition-colors ${isCriticalMissing ? 'bg-rose-50/50' : ''}`}>
+                                          className={`hover:bg-slate-50 transition-colors ${isShiftModified ? 'bg-indigo-50/70 border-l-4 border-indigo-400' : isCriticalMissing ? 'bg-rose-50/50' : ''}`}>
                                          <td className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? 'text-rose-500' : 'text-slate-400'}`}>{idx + 1}</td>
                                          <td className="px-4 py-3 font-mono">{shift.pickupTime}</td>
                                          <td className="px-4 py-3 font-mono">{shift.endTime}</td>
@@ -1310,8 +1384,13 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 </tr>
                              </thead>
                              <tbody className="text-[10px] font-medium text-slate-600 divide-y divide-slate-100">
-                                {Object.entries(categories).map(([cat, items]) => (
-                                   <tr key={cat}>
+                                {Object.entries(categories).map(([cat, items]) => {
+                                   const curCatIds = items.map((i: any) => i.staff.id).sort().join(',');
+                                   const refCatIds = (refCategories[cat] || []).sort().join(',');
+                                   const isCatModified = curCatIds !== refCatIds;
+
+                                   return (
+                                   <tr key={cat} className={isCatModified ? 'bg-indigo-50/70 border-l-4 border-indigo-400' : ''}>
                                       <td className="px-4 py-3 font-bold align-top">{cat}</td>
                                       <td className="px-4 py-3">
                                          <div className="flex flex-wrap gap-2">
@@ -1342,7 +1421,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                          </div>
                                       </td>
                                    </tr>
-                                ))}
+                                )})}
                              </tbody>
                           </table>
                        </div>
