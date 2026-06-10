@@ -471,7 +471,40 @@ export const ProgramDisplay: React.FC<Props> = ({
         row.push(`${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]`);
         return row;
     });
-    autoTable(doc, { startY: 20, head: matrixHead, body: matrixBody, theme: 'grid', headStyles: { fillColor: [220, 100, 0] }, styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 }, columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } }, didParseCell: (data) => { if (data.section === 'body' && data.column.index > 1 && data.column.index < dateHeaders.length + 2) { const text = data.cell.raw as string; if (text && text.includes('[')) { const match = text.match(/\[([\d.]+)H\]/); if (match) { const rest = parseFloat(match[1]); if (rest < minRestHours) { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; data.cell.styles.fontStyle = 'bold'; } } } } } });
+    autoTable(doc, { 
+        startY: 20, 
+        head: matrixHead, 
+        body: matrixBody, 
+        theme: 'grid', 
+        headStyles: { fillColor: [220, 100, 0] }, 
+        styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 }, 
+        columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } }, 
+        didParseCell: (data) => { 
+            if (data.section === 'head' && data.column.index === dateHeaders.length + 2) {
+                data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
+            }
+            if (data.section === 'body') {
+                if (data.column.index === dateHeaders.length + 2) {
+                    data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
+                    data.cell.styles.textColor = [49, 46, 129];   // indigo-900
+                    data.cell.styles.fontStyle = 'bold';
+                } else if (data.column.index > 1 && data.column.index < dateHeaders.length + 2) { 
+                    const text = data.cell.raw as string; 
+                    if (text && text.includes('[')) { 
+                        const match = text.match(/\[([\d.]+)H\]/); 
+                        if (match) { 
+                            const rest = parseFloat(match[1]); 
+                            if (rest < minRestHours) { 
+                                data.cell.styles.fillColor = [220, 38, 38]; 
+                                data.cell.styles.textColor = [255, 255, 255]; 
+                                data.cell.styles.fontStyle = 'bold'; 
+                            } 
+                        } 
+                    } 
+                } 
+            } 
+        } 
+    });
 
     doc.addPage();
     doc.setFontSize(16);
@@ -647,7 +680,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <th className="px-4 py-3 text-center border-r border-slate-800 rounded-tl-xl">S/N</th>
                       <th className="px-4 py-3 border-r border-slate-800">Agent</th>
                       {dateHeaders.map((dh, i) => <th key={i} className="px-4 py-3 text-center border-r border-slate-800">{dh}</th>)}
-                      <th className="px-4 py-3 text-center rounded-tr-xl">Audit</th>
+                      <th className="px-4 py-3 text-center bg-indigo-600 border-l border-indigo-700 rounded-tr-xl">Audit</th>
                    </tr>
                 </thead>
                 <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
@@ -686,9 +719,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   }
                                   return <td key={i} className={cellClass}>{content}</td>;
                               })}
-                              <td className="px-4 py-2 text-center">
-                                  <div className="font-bold">{workedCount}/{activePrograms.length}</div>
-                                  <div className="text-[10px] text-slate-500 mt-0.5">[{s.totalHours.toFixed(1)}H]</div>
+                              <td className="px-4 py-2 text-center border-l-2 border-indigo-100 bg-indigo-50/50">
+                                  <div className="font-bold text-indigo-900">{workedCount}/{activePrograms.length}</div>
+                                  <div className="text-[10px] text-indigo-600 font-bold mt-0.5">[{s.totalHours.toFixed(1)}H]</div>
                               </td>
                           </tr>
                        );
