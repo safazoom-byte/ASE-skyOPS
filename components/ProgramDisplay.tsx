@@ -417,9 +417,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         const targetShifts = 5 - excusedLeaves; 
         const targetOff = 2;
         const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
-        return [(idx + 1).toString(), s.name, s.initials, shiftsWorked.toString(), daysOff.toString(), isMatch ? 'MATCH' : 'CHECK'];
+        const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : '-';
+        return [(idx + 1).toString(), s.name, s.initials, shiftsWorked.toString(), daysOff.toString(), leavesText, isMatch ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'STATUS']], body: localAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[5]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'LEAVES', 'STATUS']], body: localAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[6]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
 
     doc.addPage();
     doc.setFontSize(16);
@@ -447,9 +448,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         });
 
         const isMatch = shiftsWorked === (potential - excusedLeaves);
-        return [(idx + 1).toString(), s.name, s.initials, s.workFromDate || 'N/A', s.workToDate || 'N/A', potential.toString(), shiftsWorked.toString(), isMatch ? 'MATCH' : 'CHECK'];
+        const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : '-';
+        return [(idx + 1).toString(), s.name, s.initials, s.workFromDate || 'N/A', s.workToDate || 'N/A', potential.toString(), shiftsWorked.toString(), leavesText, isMatch ? 'MATCH' : 'CHECK'];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[7]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'LEAVES', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[8]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
 
     // --- 3. MATRIX & ROLE FULFILLMENT ---
     doc.addPage();
@@ -467,7 +469,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     const matrixBody = sortedMatrixStaffPdf.map((s, idx) => {
         const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
         let workedCount = 0;
+        let excusedLeaves = 0;
         activePrograms.forEach(p => {
+            const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+            if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
             const assign = p.assignments.find(a => a.staffId === s.id);
             if (assign) {
                 workedCount++;
@@ -483,7 +488,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 } else { row.push('ERR'); }
             } else { row.push('-'); }
         });
-        row.push(`${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]`);
+        row.push(`${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]${excusedLeaves > 0 ? ` (+${excusedLeaves} AL)` : ''}`);
         return row;
     });
     autoTable(doc, { 
@@ -701,11 +706,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                 <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
                    {sortedMatrixStaff.map((s, idx) => {
                        let workedCount = 0;
+                       let excusedLeaves = 0;
                        return (
                           <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                               <td className="px-4 py-2 text-center border-r border-slate-100">{idx + 1}</td>
                               <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">{s.initials} ({s.type === 'Local' ? 'L' : 'R'})</td>
                               {activePrograms.map((p, i) => {
+                                  const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+                                  if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
                                   const assign = p.assignments.find(a => a.staffId === s.id);
                                   let content: React.ReactNode = <span className="text-slate-300">-</span>;
                                   let cellClass = "px-4 py-2 text-center border-r border-slate-100";
@@ -737,6 +745,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                               <td className="px-4 py-2 text-center border-l-2 border-indigo-100 bg-indigo-50/50">
                                   <div className="font-bold text-indigo-900">{workedCount}/{activePrograms.length}</div>
                                   <div className="text-[10px] text-indigo-600 font-bold mt-0.5">[{s.totalHours.toFixed(1)}H]</div>
+                                  {excusedLeaves > 0 && <div className="text-[9px] text-rose-500 font-bold mt-0.5">(+{excusedLeaves} AL)</div>}
                               </td>
                           </tr>
                        );
@@ -834,6 +843,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <th className="px-4 py-3 border-r border-slate-800 text-center">INIT</th>
                       <th className="px-4 py-3 border-r border-slate-800 text-center">WORK SHIFTS</th>
                       <th className="px-4 py-3 border-r border-slate-800 text-center">OFF DAYS</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">LEAVES</th>
                       <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
                    </tr>
                 </thead>
@@ -859,9 +869,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                               <td className="px-4 py-2 text-center">{s.initials}</td>
                               <td className="px-4 py-2 text-center">{shiftsWorked}</td>
                               <td className="px-4 py-2 text-center">{daysOff}</td>
-                              <td className="px-4 py-2 text-center font-bold">
-                                  {isMatch ? "MATCH" : "CHECK"}
-                              </td>
+                              <td className="px-4 py-2 text-center font-bold text-slate-700">{excusedLeaves > 0 ? excusedLeaves : '-'}</td>
+                              <td className="px-4 py-2 text-center font-bold">{isMatch ? "MATCH" : "CHECK"}</td>
                           </tr>
                        );
                    })}
@@ -883,6 +892,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <th className="px-4 py-3 border-r border-slate-800 text-center">WORK TO</th>
                       <th className="px-4 py-3 border-r border-slate-800 text-center">POTENTIAL</th>
                       <th className="px-4 py-3 border-r border-slate-800 text-center">ACTUAL</th>
+                      <th className="px-4 py-3 border-r border-slate-800 text-center">LEAVES</th>
                       <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
                    </tr>
                 </thead>
@@ -920,9 +930,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                               <td className="px-4 py-2 text-center">{s.workToDate || 'N/A'}</td>
                               <td className="px-4 py-2 text-center">{potential}</td>
                               <td className="px-4 py-2 text-center">{shiftsWorked}</td>
-                              <td className="px-4 py-2 text-center font-bold">
-                                  {isMatch ? "MATCH" : "CHECK"}
-                              </td>
+                              <td className="px-4 py-2 text-center font-bold text-slate-700">{excusedLeaves > 0 ? excusedLeaves : '-'}</td>
+                              <td className="px-4 py-2 text-center font-bold">{isMatch ? "MATCH" : "CHECK"}</td>
                           </tr>
                        );
                    })}
