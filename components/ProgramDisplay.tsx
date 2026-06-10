@@ -408,8 +408,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     const localStaff = staff.filter(s => s.type === 'Local');
     const localAuditData = localStaff.map((s, idx) => {
         const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        const daysOff = activePrograms.length - shiftsWorked;
-        const targetShifts = 5; 
+        let excusedLeaves = 0;
+        activePrograms.forEach(p => {
+             const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+             if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
+        });
+        const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
+        const targetShifts = 5 - excusedLeaves; 
         const targetOff = 2;
         const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
         return [(idx + 1).toString(), s.name, s.initials, shiftsWorked.toString(), daysOff.toString(), isMatch ? 'MATCH' : 'CHECK'];
@@ -431,7 +436,17 @@ export const ProgramDisplay: React.FC<Props> = ({
         const overlapEnd = workTo < progEnd ? workTo : progEnd;
         let potential = 0;
         if (overlapStart <= overlapEnd) { potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1; }
-        const isMatch = shiftsWorked === potential;
+        
+        let excusedLeaves = 0;
+        activePrograms.forEach(p => {
+             const d = new Date(p.dateString!);
+             if (d >= overlapStart && d <= overlapEnd) {
+                 const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+                 if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
+             }
+        });
+
+        const isMatch = shiftsWorked === (potential - excusedLeaves);
         return [(idx + 1).toString(), s.name, s.initials, s.workFromDate || 'N/A', s.workToDate || 'N/A', potential.toString(), shiftsWorked.toString(), isMatch ? 'MATCH' : 'CHECK'];
     });
     autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[7]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
@@ -825,8 +840,15 @@ export const ProgramDisplay: React.FC<Props> = ({
                 <tbody className="text-xs font-medium divide-y divide-slate-100">
                    {localStaff.map((s, idx) => {
                        const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-                       const daysOff = activePrograms.length - shiftsWorked;
-                       const targetShifts = 5; 
+                       
+                       let excusedLeaves = 0;
+                       activePrograms.forEach(p => {
+                            const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+                            if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
+                       });
+
+                       const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
+                       const targetShifts = 5 - excusedLeaves; 
                        const targetOff = 2;
                        const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
                        
@@ -877,7 +899,17 @@ export const ProgramDisplay: React.FC<Props> = ({
                        if (overlapStart <= overlapEnd) { 
                            potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1; 
                        }
-                       const isMatch = shiftsWorked === potential;
+
+                       let excusedLeaves = 0;
+                       activePrograms.forEach(p => {
+                            const d = new Date(p.dateString!);
+                            if (d >= overlapStart && d <= overlapEnd) {
+                                const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
+                                if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
+                            }
+                       });
+
+                       const isMatch = shiftsWorked === (potential - excusedLeaves);
                        
                        return (
                           <tr key={s.id} className={isMatch ? "bg-emerald-50 text-emerald-900 border-b border-white" : "bg-rose-50 text-rose-900 border-b border-white"}>
