@@ -194,9 +194,10 @@ const App: React.FC = () => {
         if (mounted) {
           setSession(s);
           if (s) {
-            const profile = await db.getUserProfile();
-            setUserProfile(profile);
-            await syncCloudData();
+            db.getUserProfile().then(profile => {
+              if (mounted) setUserProfile(profile);
+            });
+            syncCloudData(); // Run in background without blocking initialization
           }
           else setCloudStatus('offline');
           setIsInitializing(false);
@@ -211,9 +212,10 @@ const App: React.FC = () => {
         if (mounted) {
           setSession(s);
           if (s) {
-            const profile = await db.getUserProfile();
-            setUserProfile(profile);
-            await syncCloudData();
+            db.getUserProfile().then(profile => {
+              if (mounted) setUserProfile(profile);
+            });
+            syncCloudData();
           } else {
             setUserProfile(null);
             setCloudStatus('offline');
