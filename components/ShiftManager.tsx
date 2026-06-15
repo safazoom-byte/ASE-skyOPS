@@ -77,8 +77,9 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
   // Weekly State
   const [bulkStartDate, setBulkStartDate] = useState(startDate || new Date().toISOString().split('T')[0]);
   const [bulkEndDate, setBulkEndDate] = useState(() => {
-    const d = new Date(startDate || new Date());
-    d.setDate(d.getDate() + 6);
+    const dStr = startDate || new Date().toISOString().split('T')[0];
+    const d = new Date(dStr);
+    d.setUTCDate(d.getUTCDate() + 6);
     return d.toISOString().split('T')[0];
   });
   interface DailyPlan {
@@ -109,7 +110,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
           }
         ];
         
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
           const dStr = d.toISOString().split('T')[0];
           const existing = prev.find(p => p.dateStr === dStr);
           if (existing) {
@@ -137,7 +138,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
         let endDateStr = dayPlan.dateStr;
         if (template.endTime < template.pickupTime) {
           const nextDay = new Date(dayPlan.dateStr);
-          nextDay.setDate(nextDay.getDate() + 1);
+          nextDay.setUTCDate(nextDay.getUTCDate() + 1);
           endDateStr = nextDay.toISOString().split('T')[0];
         }
 
@@ -406,29 +407,36 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
 
   const duplicateLastWeek = () => {
       if (!startDate) return;
-      const start = new Date(startDate);
-      const lastWeekStart = new Date(start);
-      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-      const lastWeekEnd = new Date(start);
-      lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+      
+      const sourceStartStr = window.prompt("Enter origin start date (YYYY-MM-DD):", new Date(new Date(startDate).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+      if (!sourceStartStr) return;
+      const sourceEndStr = window.prompt("Enter origin end date (YYYY-MM-DD):", new Date(new Date(sourceStartStr).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+      if (!sourceEndStr) return;
+      const targetStartStr = window.prompt("Enter target start date to paste (YYYY-MM-DD):", startDate);
+      if (!targetStartStr) return;
+
+      const sourceStart = new Date(sourceStartStr);
+      const sourceEnd = new Date(sourceEndStr);
+      const targetStart = new Date(targetStartStr);
+      const diffDays = Math.round((targetStart.getTime() - sourceStart.getTime()) / (1000 * 60 * 60 * 24));
       
       const toDuplicate = shifts.filter(s => {
           const d = new Date(s.pickupDate);
-          return d >= lastWeekStart && d <= lastWeekEnd;
+          return d >= sourceStart && d <= sourceEnd;
       });
 
       if (toDuplicate.length === 0) {
-          alert("No shifts found in the preceding 7 days to duplicate.");
+          alert("No shifts found in the origin period to duplicate.");
           return;
       }
 
-      if (!window.confirm(`Found ${toDuplicate.length} shifts from previous week. Duplicate them to this week?`)) return;
+      if (!window.confirm(`Found ${toDuplicate.length} shifts to duplicate. Proceed?`)) return;
 
       toDuplicate.forEach(s => {
           const pd = new Date(s.pickupDate);
-          pd.setDate(pd.getDate() + 7);
+          pd.setUTCDate(pd.getUTCDate() + diffDays);
           const ed = s.endDate ? new Date(s.endDate) : new Date(s.pickupDate);
-          ed.setDate(ed.getDate() + 7);
+          ed.setUTCDate(ed.getUTCDate() + diffDays);
 
           onAdd({
               ...s,
@@ -681,8 +689,48 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                  </div>
                </div>
                
-               <button onClick={duplicateLastWeek} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black uppercase text-xs hover:bg-indigo-100 transition-all flex items-center gap-2">
-                  <Calendar size={14} /> Duplicate Previous Week
+               <button onClick={() => {
+                  if (!startDate) return;
+                  const sourceStartStr = window.prompt("Enter SOURCE start date (YYYY-MM-DD):", new Date(new Date(startDate).getTime() - 7*24*60*60*1000).toISOString().split('T')[0]);
+                  if (!sourceStartStr) return;
+                  const sourceEndStr = window.prompt("Enter SOURCE end date (YYYY-MM-DD):", new Date(new Date(sourceStartStr).getTime() + 6*24*60*60*1000).toISOString().split('T')[0]);
+                  if (!sourceEndStr) return;
+                  const targetStartStr = window.prompt("Enter TARGET start date (YYYY-MM-DD):", startDate);
+                  if (!targetStartStr) return;
+
+                  const sourceStart = new Date(sourceStartStr);
+                  const sourceEnd = new Date(sourceEndStr);
+                  const targetStart = new Date(targetStartStr);
+                  const diffDays = Math.round((targetStart.getTime() - sourceStart.getTime()) / (1000 * 60 * 60 * 24));
+
+                  const toDuplicate = shifts.filter(s => {
+                      const d = new Date(s.pickupDate);
+                      return d >= sourceStart && d <= sourceEnd;
+                  });
+
+                  if (toDuplicate.length === 0) {
+                      alert("No shifts found in the selected source period.");
+                      return;
+                  }
+
+                  if (!window.confirm(`Found ${toDuplicate.length} shifts. Duplicate them?`)) return;
+
+                  toDuplicate.forEach(s => {
+                      const pd = new Date(s.pickupDate);
+                      pd.setUTCDate(pd.getUTCDate() + diffDays);
+                      const ed = s.endDate ? new Date(s.endDate) : new Date(s.pickupDate);
+                      ed.setUTCDate(ed.getUTCDate() + diffDays);
+
+                      onAdd({
+                          ...s,
+                          id: Math.random().toString(36).substr(2, 9),
+                          pickupDate: pd.toISOString().split('T')[0],
+                          endDate: ed.toISOString().split('T')[0],
+                          day: getDayOffset(pd.toISOString().split('T')[0])
+                      });
+                  });
+               }} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black uppercase text-xs hover:bg-indigo-100 transition-all flex items-center gap-2">
+                  <Calendar size={14} /> Duplicate Period
                </button>
              </h4>
 
@@ -696,92 +744,125 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                   Object.keys(groupedShifts).sort().map(dateStr => {
                     const dateShifts = groupedShifts[dateStr];
                     const dateObj = new Date(dateStr);
-                    const label = `${DAYS_OF_WEEK_FULL[dateObj.getDay()]} - ${dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
+                    const label = `${DAYS_OF_WEEK_FULL[dateObj.getDay()]} - ${dateObj.toLocaleDateString('en-GB')}`;
                     
                     return (
-                        <div key={dateStr} className="space-y-4">
-                           <h5 className="font-black uppercase text-indigo-900 tracking-widest flex items-center gap-2 border-b-2 border-indigo-50 pb-2 ml-2">
-                             <Calendar size={16} className="text-indigo-500" /> {label}
-                           </h5>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {dateShifts.map((s, index) => (
-                                <div key={s.id} className="bg-slate-50 rounded-2xl p-4 md:p-6 border border-slate-200 space-y-4 relative">
-                                  <div className="flex items-center justify-between">
-                                    <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">Shift {index + 1}</h5>
-                                    <button onClick={() => { if(confirm('Purge slot?')) onDelete(s.id); }} className="p-2 text-slate-400 hover:text-rose-500 bg-white rounded-xl shadow-sm border border-slate-100 transition-all">
-                                      <Trash2 size={16}/>
-                                    </button>
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-2 gap-3">
-                                      <div className="space-y-1">
-                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Start Time</label>
-                                        <input type="time" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.pickupTime} onChange={e => {
-                                            const updated = {...s, pickupTime: e.target.value};
-                                            onUpdate(updated);
-                                        }} />
-                                      </div>
-                                      <div className="space-y-1">
-                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">End Time</label>
-                                        <input type="time" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.endTime} onChange={e => {
-                                            const updated = {...s, endTime: e.target.value};
-                                            onUpdate(updated);
-                                        }} />
-                                      </div>
-                                      <div className="space-y-1">
-                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Min Staff</label>
-                                        <input type="number" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.minStaff} onChange={e => {
-                                            const updated = {...s, minStaff: Number(e.target.value)};
-                                            onUpdate(updated);
-                                        }} />
-                                      </div>
-                                      <div className="space-y-1">
-                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Max Staff</label>
-                                        <input type="number" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.maxStaff} onChange={e => {
-                                            const updated = {...s, maxStaff: Number(e.target.value)};
-                                            onUpdate(updated);
-                                        }} />
-                                      </div>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                     <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Required Roles</label>
-                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                        {AVAILABLE_SKILLS.map(skill => (
-                                          <div key={skill} className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
-                                            <span className="text-[9px] font-bold text-slate-600 uppercase" title={skill}>{getSkillCode(skill)}</span>
-                                            <div className="flex items-center gap-1">
-                                              <button onClick={() => {
-                                                  const newCount = Math.max(0, (s.roleCounts?.[skill]||0)-1);
-                                                  const updated = {...s, roleCounts: {...s.roleCounts, [skill]: newCount}};
-                                                  onUpdate(updated);
-                                              }} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200"><Minus size={10}/></button>
-                                              <span className="text-[10px] font-black w-3 text-center">{s.roleCounts?.[skill] || 0}</span>
-                                              <button onClick={() => {
-                                                  const newCount = (s.roleCounts?.[skill]||0)+1;
-                                                  const updated = {...s, roleCounts: {...s.roleCounts, [skill]: newCount}};
-                                                  onUpdate(updated);
-                                              }} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200"><Plus size={10}/></button>
-                                            </div>
-                                          </div>
-                                        ))}
-                                     </div>
-                                  </div>
-                                  
-                                  {s.flightIds && s.flightIds.length > 0 && (
-                                     <div className="pt-3 border-t border-slate-200 flex flex-wrap gap-1">
-                                        {s.flightIds.map(fid => {
-                                          const flight = getFlightById(fid);
-                                          return flight ? (
-                                            <div key={fid} className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[8px] font-black uppercase text-slate-500 flex items-center gap-1">
-                                              <Plane size={8} className="text-blue-500" /> {flight.flightNumber}
-                                            </div>
-                                          ) : null;
-                                        })}
-                                     </div>
-                                  )}
-                                </div>
-                              ))}
+                        <div key={dateStr} className="bg-white rounded-[2rem] border-2 border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                           <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex items-center justify-between">
+                             <h4 className="font-black uppercase italic text-slate-800 flex items-center gap-3">
+                               <Calendar size={18} className="text-blue-500" /> {label}
+                             </h4>
+                             <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{dateShifts.length} Shifts</span>
+                           </div>
+                           
+                           <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                 <thead>
+                                    <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                                       <th className="px-4 py-3 w-12 text-center">S/N</th>
+                                       <th className="px-4 py-3 w-32">Start Date</th>
+                                       <th className="px-4 py-3 w-24">Pickup</th>
+                                        <th className="px-4 py-3 w-32">End Date</th>
+                                       <th className="px-4 py-3 w-24">Release</th>
+                                       <th className="px-4 py-3 w-24 text-center">HC / Max</th>
+                                       <th className="px-4 py-3">Required Roles</th>
+                                       <th className="px-4 py-3 whitespace-nowrap">Opt Flights</th>
+                                       <th className="px-4 py-3 w-16 text-center">Act</th>
+                                    </tr>
+                                 </thead>
+                                 <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                                    {dateShifts.map((s, idx) => (
+                                       <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-4 py-3 text-center font-bold text-slate-400">{idx + 1}</td>
+                                          <td className="px-2 py-2">
+                                             <input type="date" className="w-full bg-transparent font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1" value={s.pickupDate} onChange={e => {
+                                                const pd = e.target.value;
+                                                const updated = {...s, pickupDate: pd, day: getDayOffset(pd)};
+                                                if (s.pickupTime > s.endTime) {
+                                                   const ed = new Date(pd);
+                                                   ed.setUTCDate(ed.getUTCDate() + 1);
+                                                   updated.endDate = ed.toISOString().split('T')[0];
+                                                } else {
+                                                   updated.endDate = pd;
+                                                }
+                                                onUpdate(updated);
+                                             }} />
+                                          </td>
+                                          <td className="px-2 py-2">
+                                             <input type="time" className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1" value={s.pickupTime} onChange={e => {
+                                                const pt = e.target.value;
+                                                const updated = {...s, pickupTime: pt};
+                                                if (pt > s.endTime) {
+                                                   const ed = new Date(s.pickupDate);
+                                                   ed.setUTCDate(ed.getUTCDate() + 1);
+                                                   updated.endDate = ed.toISOString().split('T')[0];
+                                                } else {
+                                                   updated.endDate = s.pickupDate;
+                                                }
+                                                onUpdate(updated);
+                                             }} />
+                                          </td>
+                                          <td className="px-2 py-2">
+                                             <input type="date" className="w-full bg-transparent font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1" value={s.endDate || s.pickupDate} onChange={e => {
+                                                onUpdate({...s, endDate: e.target.value});
+                                             }} />
+                                          </td>
+                                          <td className="px-2 py-2">
+                                             <input type="time" className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1" value={s.endTime} onChange={e => {
+                                                const et = e.target.value;
+                                                const updated = {...s, endTime: et};
+                                                if (s.pickupTime > et) {
+                                                   const ed = new Date(s.pickupDate);
+                                                   ed.setUTCDate(ed.getUTCDate() + 1);
+                                                   updated.endDate = ed.toISOString().split('T')[0];
+                                                } else {
+                                                   updated.endDate = s.pickupDate;
+                                                }
+                                                onUpdate(updated);
+                                             }} />
+                                          </td>
+                                          <td className="px-2 py-2 text-center whitespace-nowrap">
+                                             <input type="number" className="w-10 text-center font-bold bg-transparent outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded py-1" value={s.minStaff} onChange={e => onUpdate({...s, minStaff: Number(e.target.value)})} />
+                                             <span className="mx-1 text-slate-300">/</span>
+                                             <input type="number" className="w-10 text-center font-bold bg-transparent outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded py-1" value={s.maxStaff} onChange={e => onUpdate({...s, maxStaff: Number(e.target.value)})} />
+                                          </td>
+                                          <td className="px-4 py-2">
+                                             <div className="flex flex-wrap gap-1">
+                                                {AVAILABLE_SKILLS.map(skill => (
+                                                  <div key={skill} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-1.5 py-0.5">
+                                                    <span className="text-[9px] font-bold text-slate-500" title={skill}>{getSkillCode(skill)}</span>
+                                                    <button onClick={() => {
+                                                        const newCount = Math.max(0, (s.roleCounts?.[skill]||0)-1);
+                                                        onUpdate({...s, roleCounts: {...s.roleCounts, [skill]: newCount}});
+                                                    }} className="text-slate-300 hover:text-slate-600"><Minus size={10}/></button>
+                                                    <span className="text-[10px] font-black w-3 text-center">{s.roleCounts?.[skill] || 0}</span>
+                                                    <button onClick={() => {
+                                                        const newCount = (s.roleCounts?.[skill]||0)+1;
+                                                        onUpdate({...s, roleCounts: {...s.roleCounts, [skill]: newCount}});
+                                                    }} className="text-slate-300 hover:text-slate-600"><Plus size={10}/></button>
+                                                  </div>
+                                                ))}
+                                             </div>
+                                          </td>
+                                          <td className="px-4 py-2">
+                                             <div className="flex flex-wrap gap-0.5 max-w-[120px]">
+                                                {s.flightIds && s.flightIds.length > 0 ? s.flightIds.map(fid => {
+                                                  const flight = getFlightById(fid);
+                                                  return flight ? (
+                                                    <span key={fid} className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1 rounded">{flight.flightNumber}</span>
+                                                  ) : null;
+                                                }) : <span className="text-[10px] text-slate-300">-</span>}
+                                             </div>
+                                          </td>
+                                          <td className="px-4 py-2 text-center">
+                                            <button onClick={() => { if(confirm('Purge slot?')) onDelete(s.id); }} className="text-slate-400 hover:text-rose-500 transition-colors p-1">
+                                              <Trash2 size={14}/>
+                                            </button>
+                                          </td>
+                                       </tr>
+                                    ))}
+                                 </tbody>
+                              </table>
                            </div>
                         </div>
                     );

@@ -217,7 +217,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (index > 0) doc.addPage();
       
       const currentDate = new Date(prog.dateString || startDate);
-      const dateStr = `${DAYS_OF_WEEK_FULL[currentDate.getDay()].toUpperCase()} - ${currentDate.getDate()}/${currentDate.getMonth()+1}/${currentDate.getFullYear()}`;
+      const dateStr = `${DAYS_OF_WEEK_FULL[currentDate.getUTCDay()].toUpperCase()} - ${currentDate.getUTCDate()}/${currentDate.getUTCMonth()+1}/${currentDate.getUTCFullYear()}`;
 
       // Header
       doc.setFillColor(255, 255, 255);
@@ -481,7 +481,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.setFontSize(16);
     doc.setTextColor(0,0,0);
     doc.text("Weekly Operations Matrix View", 14, 15);
-    const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getDate()}/${d.getMonth()+1}`; });
+    const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getUTCDate()}/${d.getUTCMonth()+1}`; });
     const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
     
     const sortedMatrixStaffPdf = [...staff].map(s => ({
@@ -558,7 +558,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     
     activePrograms.forEach(p => {
         const d = new Date(p.dateString || startDate);
-        const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+        const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth()+1}`;
         const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
         shiftsToday.forEach(s => {
             const assignments = p.assignments.filter(a => a.shiftId === s.id);
@@ -708,7 +708,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const renderMatrixTab = () => {
-       const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getDate()}/${d.getMonth()+1}`; });
+       const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getUTCDate()}/${d.getUTCMonth()+1}`; });
        const sortedMatrixStaff = [...staff].map(s => ({
            ...s,
            totalHours: getStaffTotalHours(s.id)
@@ -807,7 +807,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
                    {activePrograms.map((p, pIdx) => {
                        const d = new Date(p.dateString || startDate);
-                       const dateLabel = `${d.getDate()}/${d.getMonth()+1}`;
+                       const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth()+1}`;
                        const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
                        return shiftsToday.map((s, sIdx) => {
                            const assignments = p.assignments.filter(a => a.shiftId === s.id);
@@ -1128,7 +1128,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                  {activeTab === 'Staff Checks' && renderStaffCheckTab()}
                  {activeTab === 'Daily' && activePrograms.map((prog, i) => {
                     const d = new Date(prog.dateString || startDate);
-                    const dateLabel = `${DAYS_OF_WEEK_FULL[d.getDay()].toUpperCase()} - ${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+                    const dateLabel = `${DAYS_OF_WEEK_FULL[d.getUTCDay()].toUpperCase()} - ${d.getUTCDate()}/${d.getUTCMonth()+1}/${d.getUTCFullYear()}`;
                  
                  const workingIds = new Set(prog.assignments.map(a => a.staffId));
                  const offStaff = staff.filter(s => !workingIds.has(s.id));

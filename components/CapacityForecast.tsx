@@ -25,7 +25,7 @@ export const CapacityForecast: React.FC<Props> = ({ staff, shifts, leaveRequests
 
     const start = new Date(startDate);
     const end = new Date(start);
-    end.setDate(start.getDate() + duration - 1);
+    end.setUTCDate(start.getUTCDate() + duration - 1);
     const endDateStr = end.toISOString().split('T')[0];
 
     // 1. Calculate Supply (Available Shifts)

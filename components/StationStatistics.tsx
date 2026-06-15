@@ -91,7 +91,7 @@ export const StationStatistics: React.FC<Props> = ({ staff, shifts, leaveRequest
     // 3. Daily Data & Daily Specialist Supply
     const dailyData = Array.from({ length: duration }).map((_, i) => {
       const d = new Date(start);
-      d.setDate(start.getDate() + i);
+      d.setUTCDate(start.getUTCDate() + i);
       const dStr = d.toISOString().split('T')[0];
       
       let staffNeeded = 0;

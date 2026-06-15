@@ -205,7 +205,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
            const [h2, m2] = eTime.split(':').map(Number);
            if (h2 < h1 || (h2 === h1 && m2 < m1)) {
               const d = new Date(pDate);
-              d.setDate(d.getDate() + 1);
+              d.setUTCDate(d.getUTCDate() + 1);
               eDate = d.toISOString().split('T')[0];
            }
         }
