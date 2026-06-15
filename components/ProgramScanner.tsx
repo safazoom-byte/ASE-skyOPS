@@ -240,6 +240,23 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     if (!file) return;
     setIsScanning(true);
     setScanError(null);
+
+    if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        try {
+          const dataUrl = evt.target?.result as string;
+          const base64 = dataUrl.split(',')[1];
+          await processAIImport(undefined, [{ data: base64, mimeType: file.type }], pasteTarget);
+        } catch (err: any) {
+          setScanError({ title: "AI Vision Import Failed", message: err.message });
+          setIsScanning(false);
+        }
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
@@ -293,9 +310,9 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
     try {
       const data = await extractDataFromContent({ textData, media: mediaParts, startDate, targetType: target });
       if (data) setExtractedData({
-        flights: data.flights || [],
-        staff: data.staff || [],
-        shifts: data.shifts || [],
+        flights: (data.flights || []).map((f: any) => ({ ...f, id: f.id || Math.random().toString(36).substr(2, 9) })),
+        staff: (data.staff || []).map((s: any) => ({ ...s, id: s.id || Math.random().toString(36).substr(2, 9) })),
+        shifts: (data.shifts || []).map((sh: any) => ({ ...sh, id: sh.id || Math.random().toString(36).substr(2, 9) })),
         programs: [],
         leaveRequests: data.leaveRequests || [],
         incomingDuties: data.incomingDuties || []
@@ -348,8 +365,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
               <div onClick={() => fileInputRef.current?.click()} className="group relative h-[400px] border-4 border-dashed border-slate-200 rounded-[4rem] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/30 transition-all overflow-hidden bg-white shadow-inner">
                  <div className="w-24 h-24 bg-slate-50 rounded-[2rem] shadow-xl flex items-center justify-center text-slate-300 group-hover:text-blue-600 transition-all group-hover:scale-110"><FileUp size={40} /></div>
                  <p className="text-xl font-black italic text-slate-900 uppercase tracking-tighter mt-8">Engage Registry Sync</p>
-                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic">Instant XLSX / CSV / XLS Processing</p>
-                 <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileChange} />
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic">Instant Image / Document / CSV Sync</p>
+                 <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx,.xls,.csv,image/*,.pdf" onChange={handleFileChange} />
               </div>
             ) : (
               <div className="space-y-6">

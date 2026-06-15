@@ -69,38 +69,41 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 3, baseDelay 
 const safeParseJson = (text: string | undefined): any => {
   if (!text) return null;
   
-  // 1. Try cleaning Markdown wrappers
-  let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  let clean = text.replace(/```json\s*/ig, '').replace(/```\s*/g, '').trim();
   
-  // 2. Locate the main array [...]
-  const firstOpen = clean.indexOf('[');
-  const lastClose = clean.lastIndexOf(']');
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    console.error("Direct JSON Parse Error, attempting recovery:", e);
+  }
+
+  // Fallback: Locate outermost brackets
+  const firstOpenArray = clean.indexOf('[');
+  const firstOpenObject = clean.indexOf('{');
   
-  if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
-      clean = clean.substring(firstOpen, lastClose + 1);
-  } else {
-      // Fallback: Try locating an object {...} if array not found
-      const firstBrace = clean.indexOf('{');
-      const lastBrace = clean.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1) {
-          clean = clean.substring(firstBrace, lastBrace + 1);
-      }
+  let startIdx = -1;
+  let endIdx = -1;
+
+  if (firstOpenArray !== -1 && (firstOpenObject === -1 || firstOpenArray < firstOpenObject)) {
+      startIdx = firstOpenArray;
+      endIdx = clean.lastIndexOf(']');
+  } else if (firstOpenObject !== -1) {
+      startIdx = firstOpenObject;
+      endIdx = clean.lastIndexOf('}');
+  }
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      clean = clean.substring(startIdx, endIdx + 1);
   }
 
   try {
-    const parsed = JSON.parse(clean);
-    // Unwrapping logic if the AI returned { "result": [...] } or similar
-    if (!Array.isArray(parsed) && typeof parsed === 'object') {
-        const values = Object.values(parsed);
-        const arrayVal = values.find(v => Array.isArray(v));
-        if (arrayVal) return arrayVal;
-    }
-    return parsed;
+    return JSON.parse(clean);
   } catch (e) {
-    console.error("JSON Parse Error:", e);
+    console.error("JSON Parse Error after slicing:", e);
     // Last ditch: try to append brackets if missing
     try {
       if (clean.trim().startsWith('[') && !clean.trim().endsWith(']')) return JSON.parse(clean + ']');
+      if (clean.trim().startsWith('{') && !clean.trim().endsWith('}')) return JSON.parse(clean + '}');
     } catch (err2) {}
     return null;
   }
