@@ -392,6 +392,54 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     });
   }, [shifts]);
 
+  const groupedShifts = useMemo(() => {
+    const groups: Record<string, ShiftConfig[]> = {};
+    [...shifts]
+      .sort((a,b) => (a.pickupDate || '').localeCompare(b.pickupDate || '') || (a.pickupTime || '').localeCompare(b.pickupTime || ''))
+      .forEach(s => {
+        const dateStr = s.pickupDate || 'Unknown Date';
+        if (!groups[dateStr]) groups[dateStr] = [];
+        groups[dateStr].push(s);
+      });
+    return groups;
+  }, [shifts]);
+
+  const duplicateLastWeek = () => {
+      if (!startDate) return;
+      const start = new Date(startDate);
+      const lastWeekStart = new Date(start);
+      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+      const lastWeekEnd = new Date(start);
+      lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+      
+      const toDuplicate = shifts.filter(s => {
+          const d = new Date(s.pickupDate);
+          return d >= lastWeekStart && d <= lastWeekEnd;
+      });
+
+      if (toDuplicate.length === 0) {
+          alert("No shifts found in the preceding 7 days to duplicate.");
+          return;
+      }
+
+      if (!window.confirm(`Found ${toDuplicate.length} shifts from previous week. Duplicate them to this week?`)) return;
+
+      toDuplicate.forEach(s => {
+          const pd = new Date(s.pickupDate);
+          pd.setDate(pd.getDate() + 7);
+          const ed = s.endDate ? new Date(s.endDate) : new Date(s.pickupDate);
+          ed.setDate(ed.getDate() + 7);
+
+          onAdd({
+              ...s,
+              id: Math.random().toString(36).substr(2, 9),
+              pickupDate: pd.toISOString().split('T')[0],
+              endDate: ed.toISOString().split('T')[0],
+              day: getDayOffset(pd.toISOString().split('T')[0])
+          });
+      });
+  };
+
   const durationText = calculateDuration();
 
   return (
@@ -622,107 +670,120 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
                 <Activity size={120} className="text-blue-500" />
              </div>
 
-             <h4 className="text-xl font-black italic uppercase text-slate-900 tracking-tighter mb-8 px-2 flex items-center gap-4 relative z-10">
-               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm border border-blue-100">
-                 <Activity size={24} />
+             <h4 className="text-xl font-black italic uppercase text-slate-900 tracking-tighter mb-8 px-2 flex items-center justify-between gap-4 relative z-10">
+               <div className="flex items-center gap-4">
+                 <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm border border-blue-100">
+                   <Activity size={24} />
+                 </div>
+                 <div>
+                   <span className="block leading-none">Duty Log</span>
+                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Pre-weekly Program</span>
+                 </div>
                </div>
-               <div>
-                 <span className="block leading-none">Duty Log</span>
-                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Pre-weekly Program</span>
-               </div>
+               
+               <button onClick={duplicateLastWeek} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black uppercase text-xs hover:bg-indigo-100 transition-all flex items-center gap-2">
+                  <Calendar size={14} /> Duplicate Previous Week
+               </button>
              </h4>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
-                {shifts.length === 0 ? (
-                  <div className="col-span-full py-32 text-center flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-[3rem]">
+             <div className="space-y-12 relative z-10">
+                {Object.keys(groupedShifts).length === 0 ? (
+                  <div className="py-32 text-center flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-[3rem]">
                     <AlertTriangle size={32} className="text-slate-200" />
                     <span className="text-slate-300 font-black uppercase italic text-xl">Registry Empty</span>
                   </div>
                 ) : (
-                  [...shifts].sort((a,b) => (a.pickupDate || '').localeCompare(b.pickupDate || '') || (a.pickupTime || '').localeCompare(b.pickupTime || '')).map((s) => {
-                    const health = getShiftHealth(s);
-                    const phase = getPhaseStyle(s.pickupTime);
-                    const engagedFlights = (s.flightIds || []).map(fid => getFlightById(fid)).filter(Boolean);
+                  Object.keys(groupedShifts).sort().map(dateStr => {
+                    const dateShifts = groupedShifts[dateStr];
+                    const dateObj = new Date(dateStr);
+                    const label = `${DAYS_OF_WEEK_FULL[dateObj.getDay()]} - ${dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
                     
                     return (
-                      <div 
-                        key={s.id} 
-                        className={`group bg-white rounded-3xl md:rounded-[2.5rem] border-2 p-6 md:p-8 transition-all hover:shadow-2xl relative overflow-hidden flex flex-col justify-between ${
-                          health === 'critical' ? 'border-rose-100 bg-rose-50/20' : 
-                          health === 'warning' ? 'border-amber-100 bg-amber-50/20' : 
-                          'border-slate-100 hover:border-blue-100'
-                        }`}
-                      >
-                         <div className={`absolute top-0 left-0 bottom-0 w-2 ${
-                            health === 'critical' ? 'bg-rose-500' : 
-                            health === 'warning' ? 'bg-amber-500' : 
-                            'bg-emerald-500'
-                         }`} />
-
-                         <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-all flex gap-2 z-20">
-                           <button onClick={() => startEdit(s)} className="p-3 bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-blue-600 shadow-sm"><Edit2 size={16}/></button>
-                           <button onClick={() => { if(confirm('Purge slot?')) onDelete(s.id); }} className="p-3 bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-rose-500 shadow-sm"><Trash2 size={16}/></button>
-                         </div>
-
-                         <div className="space-y-8 pl-2 relative z-10">
-                            <div className="flex justify-between items-start">
-                               <div>
-                                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">D{s.day + 1} | {s.pickupDate}</p>
-                                  <div className="flex items-center gap-3">
-                                     <h5 className="text-2xl md:text-3xl font-black italic text-slate-900 leading-none">{s.pickupTime}</h5>
-                                     <ArrowRight size={16} className="text-slate-300" />
-                                     <h5 className="text-2xl md:text-3xl font-black italic text-slate-900 leading-none">{s.endTime}</h5>
+                        <div key={dateStr} className="space-y-4">
+                           <h5 className="font-black uppercase text-indigo-900 tracking-widest flex items-center gap-2 border-b-2 border-indigo-50 pb-2 ml-2">
+                             <Calendar size={16} className="text-indigo-500" /> {label}
+                           </h5>
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {dateShifts.map((s, index) => (
+                                <div key={s.id} className="bg-slate-50 rounded-2xl p-4 md:p-6 border border-slate-200 space-y-4 relative">
+                                  <div className="flex items-center justify-between">
+                                    <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">Shift {index + 1}</h5>
+                                    <button onClick={() => { if(confirm('Purge slot?')) onDelete(s.id); }} className="p-2 text-slate-400 hover:text-rose-500 bg-white rounded-xl shadow-sm border border-slate-100 transition-all">
+                                      <Trash2 size={16}/>
+                                    </button>
                                   </div>
-                               </div>
-                               <div className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase italic ${phase.bg} ${phase.color}`}>
-                                 {phase.label}
-                               </div>
-                            </div>
-
-                            <div className="space-y-3">
-                               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Specialist Matrix</p>
-                               <div className="flex flex-wrap gap-2">
-                                  {AVAILABLE_SKILLS.map(skill => {
-                                    const count = s.roleCounts?.[skill] || 0;
-                                    const isNeeded = count > 0;
-                                    const shortCode = getSkillCode(skill);
-                                    
-                                    return (
-                                      <div 
-                                        key={skill} 
-                                        title={`${skill}: ${count}`} 
-                                        className={`px-3 py-2 rounded-xl flex items-center gap-2 transition-all ${
-                                          isNeeded 
-                                            ? 'bg-slate-900 text-white shadow-lg scale-105' 
-                                            : 'bg-slate-50 text-slate-300'
-                                        }`}
-                                      >
-                                        {getSkillIcon(skill)}
-                                        {isNeeded && (
-                                          <div className="flex items-center gap-1">
-                                            <span className="text-[9px] font-black">{shortCode}</span>
-                                            {count > 1 && (
-                                              <span className="px-1.5 py-0.5 bg-blue-600 rounded-full text-[8px] font-black flex items-center justify-center border border-blue-500">
-                                                {count}
-                                              </span>
-                                            )}
-                                          </div>
-                                        )}
+                                  
+                                  <div className="grid grid-cols-2 gap-3">
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Start Time</label>
+                                        <input type="time" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.pickupTime} onChange={e => {
+                                            const updated = {...s, pickupTime: e.target.value};
+                                            onUpdate(updated);
+                                        }} />
                                       </div>
-                                    );
-                                  })}
-                               </div>
-                            </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">End Time</label>
+                                        <input type="time" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.endTime} onChange={e => {
+                                            const updated = {...s, endTime: e.target.value};
+                                            onUpdate(updated);
+                                        }} />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Min Staff</label>
+                                        <input type="number" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.minStaff} onChange={e => {
+                                            const updated = {...s, minStaff: Number(e.target.value)};
+                                            onUpdate(updated);
+                                        }} />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Max Staff</label>
+                                        <input type="number" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={s.maxStaff} onChange={e => {
+                                            const updated = {...s, maxStaff: Number(e.target.value)};
+                                            onUpdate(updated);
+                                        }} />
+                                      </div>
+                                  </div>
 
-                            <div className="pt-6 border-t border-slate-50 flex flex-wrap gap-2">
-                               {engagedFlights.map(f => (
-                                 <div key={f!.id} className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase italic text-slate-600 flex items-center gap-2">
-                                    <Plane size={12} className="text-blue-500" /> {f!.flightNumber}
-                                 </div>
-                               ))}
-                            </div>
-                         </div>
-                      </div>
+                                  <div className="space-y-2">
+                                     <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Required Roles</label>
+                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                        {AVAILABLE_SKILLS.map(skill => (
+                                          <div key={skill} className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+                                            <span className="text-[9px] font-bold text-slate-600 uppercase" title={skill}>{getSkillCode(skill)}</span>
+                                            <div className="flex items-center gap-1">
+                                              <button onClick={() => {
+                                                  const newCount = Math.max(0, (s.roleCounts?.[skill]||0)-1);
+                                                  const updated = {...s, roleCounts: {...s.roleCounts, [skill]: newCount}};
+                                                  onUpdate(updated);
+                                              }} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200"><Minus size={10}/></button>
+                                              <span className="text-[10px] font-black w-3 text-center">{s.roleCounts?.[skill] || 0}</span>
+                                              <button onClick={() => {
+                                                  const newCount = (s.roleCounts?.[skill]||0)+1;
+                                                  const updated = {...s, roleCounts: {...s.roleCounts, [skill]: newCount}};
+                                                  onUpdate(updated);
+                                              }} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200"><Plus size={10}/></button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                     </div>
+                                  </div>
+                                  
+                                  {s.flightIds && s.flightIds.length > 0 && (
+                                     <div className="pt-3 border-t border-slate-200 flex flex-wrap gap-1">
+                                        {s.flightIds.map(fid => {
+                                          const flight = getFlightById(fid);
+                                          return flight ? (
+                                            <div key={fid} className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-[8px] font-black uppercase text-slate-500 flex items-center gap-1">
+                                              <Plane size={8} className="text-blue-500" /> {flight.flightNumber}
+                                            </div>
+                                          ) : null;
+                                        })}
+                                     </div>
+                                  )}
+                                </div>
+                              ))}
+                           </div>
+                        </div>
                     );
                   })
                 )}
