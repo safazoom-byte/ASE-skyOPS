@@ -61,6 +61,7 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
     isOps: false,
     isLoadControl: false,
     isLostFound: false,
+    isLabour: false,
     workFromDate: '',
     workToDate: ''
   });
@@ -130,13 +131,14 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       isOps: !!newStaff.isOps,
       isLoadControl: !!newStaff.isLoadControl,
       isLostFound: !!newStaff.isLostFound,
+      isLabour: !!newStaff.isLabour,
       maxShiftsPerWeek: defaultMaxShifts,
       workFromDate: isRoster ? newStaff.workFromDate : undefined,
       workToDate: isRoster ? newStaff.workToDate : undefined,
       rosterPeriods: isRoster ? [{ start: newStaff.workFromDate || '', end: newStaff.workToDate || '' }] : undefined
     };
     onUpdate(staffData);
-    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, isRamp: false, isShiftLeader: false, isOps: false, isLoadControl: false, isLostFound: false, workFromDate: '', workToDate: '' });
+    setNewStaff({ name: '', initials: '', type: 'Local', powerRate: 75, isRamp: false, isShiftLeader: false, isOps: false, isLoadControl: false, isLostFound: false, isLabour: false, workFromDate: '', workToDate: '' });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>, isEdit: boolean) => {
@@ -177,7 +179,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Load Control': 'isLoadControl',
       'Lost and Found': 'isLostFound',
       'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps'
+      'Operations': 'isOps',
+      'Labour': 'isLabour'
     };
     const field = skillMap[skill];
     if (!field) return;
@@ -196,7 +199,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Load Control': 'isLoadControl',
       'Lost and Found': 'isLostFound',
       'Shift Leader': 'isShiftLeader',
-      'Operations': 'isOps'
+      'Operations': 'isOps',
+      'Labour': 'isLabour'
     };
     const field = skillMap[skill];
     return !!member[field];
@@ -216,7 +220,8 @@ export const StaffManager: React.FC<Props> = ({ staff = [], onUpdate, onDelete, 
       'Load Control': s.isLoadControl ? 'Yes' : 'No',
       'Lost and Found': s.isLostFound ? 'Yes' : 'No',
       'Shift Leader': s.isShiftLeader ? 'Yes' : 'No',
-      'Operations': s.isOps ? 'Yes' : 'No'
+      'Operations': s.isOps ? 'Yes' : 'No',
+      'Labour': s.isLabour ? 'Yes' : 'No'
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();

@@ -231,7 +231,8 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
       SL: new Array(config.numDays).fill(0),
       RMP: new Array(config.numDays).fill(0),
       OPS: new Array(config.numDays).fill(0),
-      LF: new Array(config.numDays).fill(0)
+      LF: new Array(config.numDays).fill(0),
+      LBR: new Array(config.numDays).fill(0)
   };
   
   // Sort staff: specialists first, so they get distributed evenly
@@ -273,6 +274,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
               if (s.isRamp) skillOffCountsPerDay.RMP[bestDay]++;
               if (s.isOps) skillOffCountsPerDay.OPS[bestDay]++;
               if (s.isLostFound) skillOffCountsPerDay.LF[bestDay]++;
+              if (s.isLabour) skillOffCountsPerDay.LBR[bestDay]++;
           }
       }
   });
@@ -343,6 +345,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                   if (roleKey === 'RMP' && !s.isRamp) return false;
                   if (roleKey === 'OPS' && !s.isOps) return false;
                   if (roleKey === 'LF' && !s.isLostFound) return false;
+                  if (roleKey === 'LBR' && !s.isLabour) return false;
               }
 
               return true;
@@ -407,6 +410,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                   if (role === 'Ramp') roleKey = 'RMP';
                   if (role === 'Operations') roleKey = 'OPS';
                   if (role === 'Lost and Found') roleKey = 'LF';
+                  if (role === 'Labour') roleKey = 'LBR';
 
                   for (let i = 0; i < count; i++) {
                       // Check if someone ALREADY on this shift can fulfill this role
@@ -420,6 +424,7 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                           if (roleKey === 'RMP' && st.isRamp) return true;
                           if (roleKey === 'OPS' && st.isOps) return true;
                           if (roleKey === 'LF' && st.isLostFound) return true;
+                          if (roleKey === 'LBR' && st.isLabour) return true;
                           return false;
                       }).length;
 
@@ -531,12 +536,15 @@ export const extractDataFromContent = async (params: { textData?: string, media?
   const parts: any[] = [];
   if (params.textData) parts.push({ text: `DATA:\n${params.textData}` });
   if (params.media) params.media.forEach(m => parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }));
-  const prompt = `Extract ${params.targetType} from provided content. Target Start: ${params.startDate || 'Current'}. Return valid JSON: { "flights": [], "staff": [], "shifts": [] }.`;
+  const prompt = `Extract ${params.targetType} from the provided document or text. 
+Target Start Date: ${params.startDate || 'Current'}. 
+If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. For 'date', return a string like YYYY-MM-DD. For 'type', guess based on from/to (e.g. 'Arrival', 'Departure').
+Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shifts": [...] }. Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
   
   // Wrap extraction call with retry
   const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-      model: 'gemini-3-flash-preview', 
+      model: 'gemini-3.1-pro-preview', 
       contents: { parts }, 
       config: { responseMimeType: "application/json" } 
   }));
@@ -551,7 +559,7 @@ export const modifyProgramWithAI = async (instruction: string, data: ProgramData
   
   // Wrap modification call with retry
   const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-      model: 'gemini-3-flash-preview', 
+      model: 'gemini-3.1-pro-preview', 
       contents: { parts }, 
       config: { responseMimeType: "application/json" } 
   }));

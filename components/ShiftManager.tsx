@@ -33,7 +33,8 @@ import {
   CalendarX,
   Coffee,
   AlertTriangle,
-  X
+  X,
+  Users
 } from 'lucide-react';
 
 interface Props {
@@ -295,6 +296,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
       case 'Ramp': return <Truck size={16} />;
       case 'Operations': return <Terminal size={16} />;
       case 'Lost and Found': return <Search size={16} />;
+      case 'Labour': return <Users size={16} />;
       default: return <Clock size={16} />;
     }
   };
@@ -306,6 +308,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
       case 'Ramp': return 'RMP';
       case 'Operations': return 'OPS';
       case 'Lost and Found': return 'LF';
+      case 'Labour': return 'LBR';
       default: return '';
     }
   };

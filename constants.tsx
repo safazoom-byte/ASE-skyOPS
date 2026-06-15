@@ -16,5 +16,5 @@ export const DAYS_OF_WEEK_FULL = [
  * in the Staff Discipline Matrix and Shift Role Matrix.
  */
 export const AVAILABLE_SKILLS: Skill[] = [
-  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found'
+  'Shift Leader', 'Operations', 'Ramp', 'Load Control', 'Lost and Found', 'Labour'
 ];

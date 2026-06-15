@@ -43,15 +43,18 @@ const HEADER_ALIASES: Record<string, string[]> = {
   isOps: ['ops', 'operations', 'operation', 'ground ops', 'ops skill'],
   isShiftLeader: ['shift leader', 'sl', 'shiftleader', 'lead', 'team lead', 'sl skill'],
   isLostFound: ['lost and found', 'lost & found', 'l&f', 'lf', 'lost/found', 'lf skill'],
+  isLabour: ['labour', 'lbr', 'labor'],
   role_shiftLeader: ['sl count', 'shift leader count', 'lead needed', 'sl required'],
   role_loadControl: ['lc count', 'load control count', 'lc needed', 'lc required'],
   role_ramp: ['ramp count', 'ramp needed', 'ramp required'],
   role_ops: ['ops count', 'operations count', 'ops required'],
-  role_lostFound: ['lf count', 'lost and found count', 'lf required']
+  role_lostFound: ['lf count', 'lost and found count', 'lf required'],
+  role_labour: ['labour count', 'lbr count', 'labor count', 'labour required']
 };
 
 export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, initialTarget }) => {
   const [isScanning, setIsScanning] = useState(false);
+  const [isAIExtracting, setIsAIExtracting] = useState(false);
   const [scanPhase, setScanPhase] = useState(0);
   const [extractedData, setExtractedData] = useState<{ flights: Flight[], staff: Staff[], shifts: ShiftConfig[], programs: DailyProgram[], leaveRequests: LeaveRequest[], incomingDuties: IncomingDuty[] } | null>(null);
   const [scanError, setScanError] = useState<ScanError | null>(null);
@@ -192,7 +195,8 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
           isLoadControl: map.isLoadControl !== -1 ? parseBoolean(row[map.isLoadControl]) : false,
           isOps: map.isOps !== -1 ? parseBoolean(row[map.isOps]) : false,
           isShiftLeader: map.isShiftLeader !== -1 ? parseBoolean(row[map.isShiftLeader]) : false,
-          isLostFound: map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false
+          isLostFound: map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false,
+          isLabour: map.isLabour !== -1 ? parseBoolean(row[map.isLabour]) : false
         });
       }
 
@@ -215,6 +219,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
         if (map.role_ramp !== -1) roleCounts['Ramp'] = parseInt(row[map.role_ramp]) || 0;
         if (map.role_ops !== -1) roleCounts['Operations'] = parseInt(row[map.role_ops]) || 0;
         if (map.role_lostFound !== -1) roleCounts['Lost and Found'] = parseInt(row[map.role_lostFound]) || 0;
+        if (map.role_labour !== -1) roleCounts['Labour'] = parseInt(row[map.role_labour]) || 0;
 
         shifts.push({
           id: `sh-${idx}-${Math.random().toString(36).substr(2, 4)}`,
@@ -307,6 +312,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
 
   const processAIImport = async (textData?: string, mediaParts: ExtractionMedia[] = [], target: PasteTarget = 'all') => {
     setIsScanning(true);
+    setIsAIExtracting(true);
     try {
       const data = await extractDataFromContent({ textData, media: mediaParts, startDate, targetType: target });
       if (data) setExtractedData({
@@ -321,6 +327,7 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
       setScanError({ title: "AI Sync Error", message: error.message });
     } finally {
       setIsScanning(false);
+      setIsAIExtracting(false);
     }
   };
 
@@ -387,8 +394,12 @@ export const ProgramScanner: React.FC<Props> = ({ onDataExtracted, startDate, in
               <div className="absolute inset-0 flex items-center justify-center"><Activity className="text-blue-600 animate-pulse" /></div>
             </div>
             <div>
-              <h4 className="text-2xl font-black italic uppercase text-slate-900 tracking-tighter">{phases[scanPhase]}</h4>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 animate-pulse">Running Local Heuristics</p>
+              <h4 className="text-2xl font-black italic uppercase text-slate-900 tracking-tighter">
+                {isAIExtracting ? "Engaging Vision AI Model" : phases[scanPhase]}
+              </h4>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 animate-pulse">
+                {isAIExtracting ? "This operation may take 15-30 seconds to parse complex unformatted documents." : "Running Local Heuristics"}
+              </p>
             </div>
           </div>
         )}

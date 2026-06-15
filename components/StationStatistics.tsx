@@ -115,7 +115,7 @@ export const StationStatistics: React.FC<Props> = ({ staff, shifts, leaveRequest
 
       // Calculate Daily Active Staff PER ROLE
       const dailyRoles: Record<Skill, number> = {
-          'Shift Leader': 0, 'Load Control': 0, 'Ramp': 0, 'Operations': 0, 'Lost and Found': 0
+          'Shift Leader': 0, 'Load Control': 0, 'Ramp': 0, 'Operations': 0, 'Lost and Found': 0, 'Labour': 0
       };
 
       AVAILABLE_SKILLS.forEach(skill => {

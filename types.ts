@@ -1,5 +1,5 @@
 
-export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations';
+export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Labour';
 export type ProficiencyLevel = 'Yes' | 'No';
 export type StaffCategory = 'Local' | 'Roster';
 export type WorkPattern = string;
@@ -31,6 +31,7 @@ export interface Staff {
   isOps: boolean;
   isLoadControl: boolean;
   isLostFound: boolean;
+  isLabour: boolean;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;
   workFromDate?: string;
