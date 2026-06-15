@@ -268,7 +268,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
                       : ""; 
 
-                  const initials = groupedMap.get(key)?.join(' - ') || '';
+                  const initials = groupedMap.get(key)?.join('-') || '';
                   const hc = groupedMap.get(key)?.length || 0;
 
                   return [
@@ -358,7 +358,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
         const flightStrs = (shift.flightIds || []).map(fid => { const f = getFlight(fid); return f ? f.flightNumber : ''; }).filter(Boolean).join(' / ') || 'NIL';
         
-        const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return st.initials; }).join(' | ');
+        const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return st.initials; }).join('-');
         
         const roleChecks = Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
             let roleKey = role;
