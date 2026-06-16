@@ -346,6 +346,12 @@ export const generateAIProgram = async (data: ProgramData, constraintsLog: strin
                   if (roleKey === 'OPS' && !s.isOps) return false;
                   if (roleKey === 'LF' && !s.isLostFound) return false;
                   if (roleKey === 'LBR' && !s.isLabour) return false;
+                  
+                  // Labour shouldn't fulfill anything else
+                  if (roleKey !== 'LBR' && s.isLabour) return false;
+              } else {
+                  // Labour shouldn't be assigned to general staff slots
+                  if (s.isLabour) return false;
               }
 
               return true;
