@@ -464,6 +464,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         const assignments = prog.assignments.filter(
           (a) => a.shiftId === shift.id,
         );
+        const nonLabourCount = assignments.filter(
+          (a) => !getStaff(a.staffId)?.isLabour,
+        ).length;
         const flightStrs =
           (shift.flightIds || [])
             .map((fid) => {
@@ -508,6 +511,8 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "RMP" && st.isRamp) return true;
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
+              if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
+                return true;
               return false;
             }).length;
             const isFulfilled = fulfilledCount >= count;
@@ -522,7 +527,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           shift.pickupTime,
           shift.endTime,
           flightStrs,
-          `${assignments.length} / ${shift.maxStaff}`,
+          `${nonLabourCount} / ${shift.maxStaff}`,
           personnelStrs + reqStr,
         ];
       });
@@ -882,6 +887,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (targetRole === "Ramp" && st.isRamp) return true;
           if (targetRole === "Operations" && st.isOps) return true;
           if (targetRole === "Lost and Found" && st.isLostFound) return true;
+          if ((targetRole === "Labour" || targetRole === "LBR") && st.isLabour)
+            return true;
 
           return false;
         };
@@ -1352,6 +1359,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                   if (targetRole === "Ramp" && st.isRamp) return true;
                   if (targetRole === "Operations" && st.isOps) return true;
                   if (targetRole === "Lost and Found" && st.isLostFound)
+                    return true;
+                  if (
+                    (targetRole === "Labour" || targetRole === "LBR") &&
+                    st.isLabour
+                  )
                     return true;
                   return false;
                 };
@@ -2039,10 +2051,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     .map((fid) => getFlight(fid)?.flightNumber)
                                     .filter(Boolean)
                                     .join(" / ") || "NIL";
-                                const isFull =
-                                  assignments.length >= shift.maxStaff;
-                                const isOver =
-                                  assignments.length > shift.maxStaff;
+                                const nonLabourCount = assignments.filter(
+                                  (a) => !getStaff(a.staffId)?.isLabour,
+                                ).length;
+                                const isFull = nonLabourCount >= shift.maxStaff;
+                                const isOver = nonLabourCount > shift.maxStaff;
 
                                 const hasSL = assignments.some(
                                   (a) =>
@@ -2108,7 +2121,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     <td
                                       className={`px-4 py-3 text-center font-bold ${isOver ? "text-rose-500" : isFull ? "text-emerald-500" : "text-amber-500"}`}
                                     >
-                                      {assignments.length} / {shift.maxStaff}
+                                      {nonLabourCount} / {shift.maxStaff}
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex flex-col gap-2">
@@ -2311,6 +2324,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   roleKey = "OPS";
                                                 if (role === "Lost and Found")
                                                   roleKey = "LF";
+                                                if (role === "Labour")
+                                                  roleKey = "LBR";
 
                                                 const fulfilledCount =
                                                   assignments.filter((a) => {
@@ -2350,6 +2365,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     if (
                                                       roleKey === "LF" &&
                                                       st.isLostFound
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      (roleKey === "LBR" ||
+                                                        roleKey === "Labour") &&
+                                                      st.isLabour
                                                     )
                                                       return true;
                                                     return false;
@@ -2472,7 +2493,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                       ? "RMP"
                                                       : s.isLostFound
                                                         ? "LF"
-                                                        : "OPS",
+                                                        : s.isLabour
+                                                          ? "LBR"
+                                                          : "OPS",
                                               );
                                             }}
                                             className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-50 cursor-not-allowed" : "cursor-move hover:scale-105"}`}
