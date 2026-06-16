@@ -43,13 +43,14 @@ interface Props {
   staff: Staff[];
   leaveRequests: LeaveRequest[];
   startDate?: string;
+  endDate?: string;
   onAdd: (s: ShiftConfig) => void;
   onUpdate: (s: ShiftConfig) => void;
   onDelete: (id: string) => void;
   onOpenScanner?: () => void;
 }
 
-export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff = [], leaveRequests = [], startDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
+export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff = [], leaveRequests = [], startDate, endDate, onAdd, onUpdate, onDelete, onOpenScanner }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
     pickupDate: startDate || new Date().toISOString().split('T')[0],
@@ -62,6 +63,16 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     flightIds: [],
     roleCounts: {}
   });
+
+  useEffect(() => {
+    if (startDate && !editingId) {
+      setFormData(prev => ({
+        ...prev,
+        pickupDate: startDate,
+        endDate: startDate
+      }));
+    }
+  }, [startDate, editingId]);
 
   // --- BULK SHIFT CREATOR STATE ---
   interface BulkShiftTemplate {
@@ -77,12 +88,17 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
   
   // Weekly State
   const [bulkStartDate, setBulkStartDate] = useState(startDate || new Date().toISOString().split('T')[0]);
-  const [bulkEndDate, setBulkEndDate] = useState(() => {
+  const [bulkEndDate, setBulkEndDate] = useState(endDate || (() => {
     const dStr = startDate || new Date().toISOString().split('T')[0];
     const d = new Date(dStr);
     d.setUTCDate(d.getUTCDate() + 6);
     return d.toISOString().split('T')[0];
-  });
+  })());
+
+  useEffect(() => {
+    if (startDate) setBulkStartDate(startDate);
+    if (endDate) setBulkEndDate(endDate);
+  }, [startDate, endDate]);
   interface DailyPlan {
     dateStr: string;
     templates: BulkShiftTemplate[];
@@ -323,9 +339,9 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
   }, [onUpdate]);
 
   useEffect(() => {
-    if (!isAutoLinkEnabled || !flights.length || !shifts.length) return;
+    if (!isAutoLinkEnabled || !flights.length || !filteredShifts.length) return;
 
-    shifts.forEach(shift => {
+    filteredShifts.forEach(shift => {
       const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
       let shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}`);
       
@@ -384,9 +400,17 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
     return 'healthy';
   };
 
+  const filteredShifts = useMemo(() => {
+    if (!startDate || !endDate) return shifts;
+    return shifts.filter(s => {
+      const d = s.pickupDate || '9999-12-31';
+      return d >= startDate && d <= endDate;
+    });
+  }, [shifts, startDate, endDate]);
+
   const timelineShifts = useMemo(() => {
-    if (!shifts.length) return [];
-    return [...shifts].sort((a, b) => a.pickupTime.localeCompare(b.pickupTime)).map(s => {
+    if (!filteredShifts.length) return [];
+    return [...filteredShifts].sort((a, b) => a.pickupTime.localeCompare(b.pickupTime)).map(s => {
       const [h, m] = s.pickupTime.split(':').map(Number);
       const startPercent = ((h * 60 + m) / 1440) * 100;
       const [eh, em] = s.endTime.split(':').map(Number);
@@ -394,11 +418,11 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
       if (endPercent < startPercent) endPercent = 100;
       return { ...s, startPercent, width: Math.max(2, endPercent - startPercent) };
     });
-  }, [shifts]);
+  }, [filteredShifts]);
 
   const groupedShifts = useMemo(() => {
     const groups: Record<string, ShiftConfig[]> = {};
-    [...shifts]
+    [...filteredShifts]
       .sort((a,b) => (a.pickupDate || '').localeCompare(b.pickupDate || '') || (a.pickupTime || '').localeCompare(b.pickupTime || ''))
       .forEach(s => {
         const dateStr = s.pickupDate || 'Unknown Date';
@@ -406,7 +430,7 @@ export const ShiftManager: React.FC<Props> = ({ shifts = [], flights = [], staff
         groups[dateStr].push(s);
       });
     return groups;
-  }, [shifts]);
+  }, [filteredShifts]);
 
   const duplicateLastWeek = () => {
       if (!startDate) return;

@@ -544,7 +544,7 @@ Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shif
   
   // Wrap extraction call with retry
   const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-      model: 'gemini-3.1-pro-preview', 
+      model: 'gemini-2.5-flash', 
       contents: { parts }, 
       config: { responseMimeType: "application/json" } 
   }));

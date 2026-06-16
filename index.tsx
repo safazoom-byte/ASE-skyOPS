@@ -804,7 +804,7 @@ const App: React.FC = () => {
                 return updated;
             });
         }} onOpenScanner={() => { setScannerTarget('staff'); setShowScanner(true); }} defaultMaxShifts={5} />}
-        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} onAdd={s => {
+        {activeTab === 'shifts' && <ShiftManager shifts={shifts} flights={flights} staff={staff} leaveRequests={leaveRequests} startDate={startDate} endDate={endDate} onAdd={s => {
             if (userProfile && !userProfile.isActive) { alert("Your account is frozen."); return; }
             if (userProfile && shifts.length >= userProfile.maxShifts) {
               alert(`Quota Reached: You have hit your limit of ${userProfile.maxShifts} shifts.`);
