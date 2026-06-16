@@ -1,14 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { DailyProgram, Flight, Staff, ShiftConfig, LeaveRequest, IncomingDuty, Skill, ProgramVersion, ManualAssignment } from '../types';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { 
-  FileDown, 
-  CalendarDays, 
-  Users, 
-  Plane, 
-  ShieldAlert, 
-  CheckCircle2, 
+import React, { useState, useEffect } from "react";
+import {
+  DailyProgram,
+  Flight,
+  Staff,
+  ShiftConfig,
+  LeaveRequest,
+  IncomingDuty,
+  Skill,
+  ProgramVersion,
+  ManualAssignment,
+} from "../types";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import {
+  FileDown,
+  CalendarDays,
+  Users,
+  Plane,
+  ShieldAlert,
+  CheckCircle2,
   AlertTriangle,
   MapPin,
   Printer,
@@ -19,10 +29,10 @@ import {
   Trash2,
   Eye,
   Lock,
-  ShieldCheck
-} from 'lucide-react';
-import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from '../constants';
-import { db, supabase } from '../services/supabaseService';
+  ShieldCheck,
+} from "lucide-react";
+import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
+import { db, supabase } from "../services/supabaseService";
 
 interface Props {
   programs: DailyProgram[];
@@ -35,53 +45,60 @@ interface Props {
   startDate: string;
   endDate: string;
   stationHealth: number;
-  alerts: { type: 'danger' | 'warning', message: string }[];
+  alerts: { type: "danger" | "warning"; message: string }[];
   minRestHours: number;
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
 }
 
-export const ProgramDisplay: React.FC<Props> = ({ 
-  programs, 
-  flights, 
-  staff, 
-  shifts, 
-  leaveRequests, 
+export const ProgramDisplay: React.FC<Props> = ({
+  programs,
+  flights,
+  staff,
+  shifts,
+  leaveRequests,
   incomingDuties,
   manualAssignments = [],
-  startDate, 
+  startDate,
   endDate,
   stationHealth,
   minRestHours,
   onUpdatePrograms,
-  onRestoreVersion
+  onRestoreVersion,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Daily' | 'Matrix' | 'Roles' | 'Staff Checks'>('Daily');
+  const [activeTab, setActiveTab] = useState<
+    "Daily" | "Matrix" | "Roles" | "Staff Checks"
+  >("Daily");
 
-  const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(() => {
-     try {
-         const stored = localStorage.getItem('skyops_reference_programs');
-         if (stored) {
-             const parsed = JSON.parse(stored);
-             if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-         }
-     } catch {}
-     return programs;
-  });
+  const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
+    () => {
+      try {
+        const stored = localStorage.getItem("skyops_reference_programs");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+      return programs;
+    },
+  );
 
   useEffect(() => {
-      if (referencePrograms.length === 0 && programs.length > 0) {
-          setReferencePrograms(programs);
-          localStorage.setItem('skyops_reference_programs', JSON.stringify(programs));
-      }
+    if (referencePrograms.length === 0 && programs.length > 0) {
+      setReferencePrograms(programs);
+      localStorage.setItem(
+        "skyops_reference_programs",
+        JSON.stringify(programs),
+      );
+    }
   }, [programs, referencePrograms]);
 
   const handleMarkAllCopied = () => {
-      setReferencePrograms(programs);
-      localStorage.setItem('skyops_reference_programs', JSON.stringify(programs));
+    setReferencePrograms(programs);
+    localStorage.setItem("skyops_reference_programs", JSON.stringify(programs));
   };
 
   useEffect(() => {
@@ -93,7 +110,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           return;
         }
       }
-      const saved = localStorage.getItem('skyops_program_versions');
+      const saved = localStorage.getItem("skyops_program_versions");
       if (saved) {
         try {
           setVersions(JSON.parse(saved));
@@ -106,7 +123,10 @@ export const ProgramDisplay: React.FC<Props> = ({
   }, []);
 
   const saveVersion = async () => {
-    const name = prompt("Enter a name for this version (e.g., 'Draft 1', 'Final Approval'):", `Version ${versions.length + 1}`);
+    const name = prompt(
+      "Enter a name for this version (e.g., 'Draft 1', 'Final Approval'):",
+      `Version ${versions.length + 1}`,
+    );
     if (!name) return;
 
     const newVersion: ProgramVersion = {
@@ -118,12 +138,15 @@ export const ProgramDisplay: React.FC<Props> = ({
       periodEnd: endDate,
       programs: JSON.parse(JSON.stringify(programs)),
       stationHealth,
-      isAutoSave: false
+      isAutoSave: false,
     };
 
     const updatedVersions = [newVersion, ...versions];
     setVersions(updatedVersions);
-    localStorage.setItem('skyops_program_versions', JSON.stringify(updatedVersions));
+    localStorage.setItem(
+      "skyops_program_versions",
+      JSON.stringify(updatedVersions),
+    );
     if (supabase) {
       await db.saveProgramVersion(newVersion);
     }
@@ -131,296 +154,435 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const deleteVersion = async (id: string) => {
     if (!confirm("Are you sure you want to delete this version?")) return;
-    const updated = versions.filter(v => v.id !== id);
+    const updated = versions.filter((v) => v.id !== id);
     setVersions(updated);
-    localStorage.setItem('skyops_program_versions', JSON.stringify(updated));
+    localStorage.setItem("skyops_program_versions", JSON.stringify(updated));
     if (supabase) {
       await db.deleteProgramVersion(id);
     }
   };
 
   const restoreVersion = (v: ProgramVersion) => {
-    if (!confirm(`Restore version "${v.name}"? Current unsaved changes will be lost.`)) return;
+    if (
+      !confirm(
+        `Restore version "${v.name}"? Current unsaved changes will be lost.`,
+      )
+    )
+      return;
     onRestoreVersion(v);
     setShowHistory(false);
   };
 
-  const getStaff = (id: string) => staff.find(s => s.id === id);
-  const getFlight = (id: string) => flights.find(f => f.id === id);
-  const getShift = (id: string) => shifts.find(s => s.id === id);
+  const getStaff = (id: string) => staff.find((s) => s.id === id);
+  const getFlight = (id: string) => flights.find((f) => f.id === id);
+  const getShift = (id: string) => shifts.find((s) => s.id === id);
 
   const getShiftHours = (shiftId: string) => {
-      const shift = getShift(shiftId);
-      if (!shift) return 0;
-      const [ph, pm] = shift.pickupTime.split(':').map(Number);
-      const [sh, sm] = shift.endTime.split(':').map(Number);
-      let hours = sh - ph + (sm - pm) / 60;
-      if (sh < ph) hours += 24;
-      return hours;
+    const shift = getShift(shiftId);
+    if (!shift) return 0;
+    const [ph, pm] = shift.pickupTime.split(":").map(Number);
+    const [sh, sm] = shift.endTime.split(":").map(Number);
+    let hours = sh - ph + (sm - pm) / 60;
+    if (sh < ph) hours += 24;
+    return hours;
   };
 
   const getStaffTotalHours = (staffId: string) => {
-      return activePrograms.reduce((acc, p) => {
-          const assign = p.assignments.find(a => a.staffId === staffId);
-          if (assign) {
-              return acc + getShiftHours(assign.shiftId || '');
-          }
-          return acc;
-      }, 0);
+    return activePrograms.reduce((acc, p) => {
+      const assign = p.assignments.find((a) => a.staffId === staffId);
+      if (assign) {
+        return acc + getShiftHours(assign.shiftId || "");
+      }
+      return acc;
+    }, 0);
   };
 
-  const activePrograms = programs.filter(p => {
-        if (!p.dateString) return false;
-        return p.dateString >= startDate && p.dateString <= endDate;
-  }).sort((a,b) => (a.dateString || '').localeCompare(b.dateString || ''));
+  const activePrograms = programs
+    .filter((p) => {
+      if (!p.dateString) return false;
+      return p.dateString >= startDate && p.dateString <= endDate;
+    })
+    .sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
 
-  const totalAssignments = activePrograms.reduce((acc, p) => acc + p.assignments.length, 0);
-  const isFailedGeneration = activePrograms.length > 0 && totalAssignments === 0;
+  const totalAssignments = activePrograms.reduce(
+    (acc, p) => acc + p.assignments.length,
+    0,
+  );
+  const isFailedGeneration =
+    activePrograms.length > 0 && totalAssignments === 0;
 
-  const calculateRestHours = (staffId: string, currentShiftStart: Date): number | null => {
+  const calculateRestHours = (
+    staffId: string,
+    currentShiftStart: Date,
+  ): number | null => {
     let lastEndTime: Date | null = null;
-    const staffIncoming = incomingDuties.filter(d => d.staffId === staffId);
-    staffIncoming.forEach(d => {
-        const dateStr = d.date || startDate;
-        const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
-        if (dt <= currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
-            lastEndTime = dt;
-        }
+    const staffIncoming = incomingDuties.filter((d) => d.staffId === staffId);
+    staffIncoming.forEach((d) => {
+      const dateStr = d.date || startDate;
+      const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
+      if (dt <= currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
+        lastEndTime = dt;
+      }
     });
-    programs.forEach(p => {
-        p.assignments.filter(a => a.staffId === staffId).forEach(a => {
-            const s = getShift(a.shiftId || '');
-            if (s) {
-               const pDate = new Date(p.dateString || startDate);
-               const [sh, sm] = s.endTime.split(':').map(Number);
-               const [ph, pm] = s.pickupTime.split(':').map(Number);
-               const endDt = new Date(pDate);
-               endDt.setHours(sh, sm, 0, 0);
-               if (sh < ph) endDt.setDate(endDt.getDate() + 1);
-               if (endDt <= currentShiftStart && (!lastEndTime || endDt > lastEndTime)) {
-                   lastEndTime = endDt;
-               }
+    programs.forEach((p) => {
+      p.assignments
+        .filter((a) => a.staffId === staffId)
+        .forEach((a) => {
+          const s = getShift(a.shiftId || "");
+          if (s) {
+            const pDate = new Date(p.dateString || startDate);
+            const [sh, sm] = s.endTime.split(":").map(Number);
+            const [ph, pm] = s.pickupTime.split(":").map(Number);
+            const endDt = new Date(pDate);
+            endDt.setHours(sh, sm, 0, 0);
+            if (sh < ph) endDt.setDate(endDt.getDate() + 1);
+            if (
+              endDt <= currentShiftStart &&
+              (!lastEndTime || endDt > lastEndTime)
+            ) {
+              lastEndTime = endDt;
             }
+          }
         });
     });
     if (!lastEndTime) return null;
-    const diffMs = currentShiftStart.getTime() - (lastEndTime as Date).getTime();
+    const diffMs =
+      currentShiftStart.getTime() - (lastEndTime as Date).getTime();
     return parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
   };
 
   const generateFullReport = () => {
     setIsGeneratingPdf(true);
-    const doc = new jsPDF('l', 'mm', 'a4');
-    
+    const doc = new jsPDF("l", "mm", "a4");
+
     // --- 1. DAILY PROGRAM PAGES ---
     activePrograms.forEach((prog, index) => {
       if (index > 0) doc.addPage();
-      
+
       const currentDate = new Date(prog.dateString || startDate);
-      const dateStr = `${DAYS_OF_WEEK_FULL[currentDate.getUTCDay()].toUpperCase()} - ${currentDate.getUTCDate()}/${currentDate.getUTCMonth()+1}/${currentDate.getUTCFullYear()}`;
+      const dateStr = `${DAYS_OF_WEEK_FULL[currentDate.getUTCDay()].toUpperCase()} - ${currentDate.getUTCDate()}/${currentDate.getUTCMonth() + 1}/${currentDate.getUTCFullYear()}`;
 
       // Header
       doc.setFillColor(255, 255, 255);
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(22);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont("helvetica", "bold");
       doc.text("SkyOPS Station Handling Program", 14, 15);
-      
+
       doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont("helvetica", "normal");
       doc.text(`Target Period: ${startDate} to ${endDate}`, 14, 22);
 
       let contentStartY = 35;
 
       // --- REST LOG TABLE ---
       if (index === 0) {
-          const groupedMap = new Map<string, string[]>(); 
-          
-          incomingDuties.forEach(d => {
-              const dateStr = d.date || startDate;
-              const dDate = new Date(dateStr);
-              const sDate = new Date(startDate);
-              const diffTime = sDate.getTime() - dDate.getTime();
-              const diffDays = diffTime / (1000 * 3600 * 24);
-              
-              if (diffDays >= 0 && diffDays <= 2) {
-                  const key = `${dateStr}|${d.shiftEndTime}`;
-                  const st = getStaff(d.staffId);
-                  if (st) {
-                      const existing = groupedMap.get(key) || [];
-                      existing.push(st.initials);
-                      groupedMap.set(key, existing);
-                  }
-              }
+        const groupedMap = new Map<string, string[]>();
+
+        incomingDuties.forEach((d) => {
+          const dateStr = d.date || startDate;
+          const dDate = new Date(dateStr);
+          const sDate = new Date(startDate);
+          const diffTime = sDate.getTime() - dDate.getTime();
+          const diffDays = diffTime / (1000 * 3600 * 24);
+
+          if (diffDays >= 0 && diffDays <= 2) {
+            const key = `${dateStr}|${d.shiftEndTime}`;
+            const st = getStaff(d.staffId);
+            if (st) {
+              const existing = groupedMap.get(key) || [];
+              existing.push(st.initials);
+              groupedMap.set(key, existing);
+            }
+          }
+        });
+
+        const sortedKeys = Array.from(groupedMap.keys()).sort();
+
+        if (sortedKeys.length > 0) {
+          const restRows = sortedKeys.map((key, i) => {
+            const [dDate, dTime] = key.split("|");
+            const endDt = new Date(`${dDate}T${dTime}`);
+            const releaseDt = new Date(
+              endDt.getTime() + minRestHours * 60 * 60 * 1000,
+            );
+
+            const isPrevDay = new Date(dDate) < new Date(startDate);
+            const dateLabel = isPrevDay
+              ? "Prev Day"
+              : `${endDt.getDate()}/${endDt.getMonth() + 1}`;
+            const releaseDateLabel =
+              releaseDt.getDate() !== endDt.getDate()
+                ? releaseDt.getDate() === new Date(startDate).getDate()
+                  ? ""
+                  : `${releaseDt.getDate()}/${releaseDt.getMonth() + 1}`
+                : "";
+
+            const initials = groupedMap.get(key)?.join("-") || "";
+            const hc = groupedMap.get(key)?.length || 0;
+
+            return [
+              (i + 1).toString(),
+              `${dTime} (${dateLabel})`,
+              `${releaseDt.getHours().toString().padStart(2, "0")}:${releaseDt.getMinutes().toString().padStart(2, "0")} ${releaseDateLabel}`,
+              hc.toString(),
+              initials,
+            ];
           });
 
-          const sortedKeys = Array.from(groupedMap.keys()).sort();
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "bold");
+          doc.text(
+            "PREVIOUS DAY SHIFTS (INCOMING HANDOVER)",
+            14,
+            contentStartY - 2,
+          );
 
-          if (sortedKeys.length > 0) {
-              const restRows = sortedKeys.map((key, i) => {
-                  const [dDate, dTime] = key.split('|');
-                  const endDt = new Date(`${dDate}T${dTime}`);
-                  const releaseDt = new Date(endDt.getTime() + minRestHours * 60 * 60 * 1000);
-                  
-                  const isPrevDay = new Date(dDate) < new Date(startDate);
-                  const dateLabel = isPrevDay ? "Prev Day" : `${endDt.getDate()}/${endDt.getMonth()+1}`;
-                  const releaseDateLabel = releaseDt.getDate() !== endDt.getDate() 
-                      ? (releaseDt.getDate() === new Date(startDate).getDate() ? "" : `${releaseDt.getDate()}/${releaseDt.getMonth()+1}`)
-                      : ""; 
-
-                  const initials = groupedMap.get(key)?.join('-') || '';
-                  const hc = groupedMap.get(key)?.length || 0;
-
-                  return [
-                      (i + 1).toString(),
-                      `${dTime} (${dateLabel})`,
-                      `${releaseDt.getHours().toString().padStart(2,'0')}:${releaseDt.getMinutes().toString().padStart(2,'0')} ${releaseDateLabel}`,
-                      hc.toString(),
-                      initials
-                  ];
-              });
-
-              doc.setFontSize(9);
-              doc.setFont('helvetica', 'bold');
-              doc.text("PREVIOUS DAY SHIFTS (INCOMING HANDOVER)", 14, contentStartY - 2);
-
-              autoTable(doc, {
-                  startY: contentStartY,
-                  head: [['S/N', 'SHIFT END', 'RELEASE', 'HC', 'PERSONNEL (REST LOG)']],
-                  body: restRows,
-                  theme: 'grid',
-                  headStyles: { fillColor: [255, 204, 0], textColor: [0, 0, 0], fontStyle: 'bold', fontSize: 8, lineWidth: 0.1, lineColor: [0, 0, 0] },
-                  styles: { fontSize: 8, cellPadding: 1.5, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.1, fillColor: [255, 255, 235], valign: 'middle' },
-                  columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 35 }, 2: { cellWidth: 35 }, 3: { cellWidth: 15, halign: 'center', fontStyle: 'bold' }, 4: { cellWidth: 'auto' } },
-                  margin: { left: 14, right: 14 }
-              });
-              contentStartY = (doc as any).lastAutoTable.finalY + 10;
-          }
+          autoTable(doc, {
+            startY: contentStartY,
+            head: [
+              ["S/N", "SHIFT END", "RELEASE", "HC", "PERSONNEL (REST LOG)"],
+            ],
+            body: restRows,
+            theme: "grid",
+            headStyles: {
+              fillColor: [255, 204, 0],
+              textColor: [0, 0, 0],
+              fontStyle: "bold",
+              fontSize: 8,
+              lineWidth: 0.1,
+              lineColor: [0, 0, 0],
+            },
+            styles: {
+              fontSize: 8,
+              cellPadding: 1.5,
+              textColor: [0, 0, 0],
+              lineColor: [0, 0, 0],
+              lineWidth: 0.1,
+              fillColor: [255, 255, 235],
+              valign: "middle",
+            },
+            columnStyles: {
+              0: { cellWidth: 10, halign: "center" },
+              1: { cellWidth: 35 },
+              2: { cellWidth: 35 },
+              3: { cellWidth: 15, halign: "center", fontStyle: "bold" },
+              4: { cellWidth: "auto" },
+            },
+            margin: { left: 14, right: 14 },
+          });
+          contentStartY = (doc as any).lastAutoTable.finalY + 10;
+        }
       }
 
-      const workingIds = new Set(prog.assignments.map(a => a.staffId));
-      const offStaff = staff.filter(s => !workingIds.has(s.id));
-      const pdfCategories: Record<string, string[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
+      const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+      const offStaff = staff.filter((s) => !workingIds.has(s.id));
+      const pdfCategories: Record<string, string[]> = {
+        "DAYS OFF": [],
+        "ROSTER LEAVE": [],
+        "ANNUAL LEAVE": [],
+        "SICK LEAVE": [],
+        "STANDBY (RESERVE)": [],
+      };
 
-      offStaff.forEach(s => {
-         const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
-         let count = 1; 
-         if (leave) {
-             const start = new Date(leave.startDate);
-             const current = new Date(prog.dateString!);
-             count = Math.floor((current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-         } else {
-             for (let i = index - 1; i >= 0; i--) {
-                 const prevProg = activePrograms[i];
-                 const worked = prevProg.assignments.some(a => a.staffId === s.id);
-                 const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
-                 if (!worked && !prevLeave) count++; else break;
-             }
-         }
-         const label = `${s.initials} (${count})`;
-         let isRosterOutOfContract = false;
-         if (s.type === 'Roster') {
-           if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-             isRosterOutOfContract = !s.rosterPeriods.some(p => prog.dateString! >= p.start && prog.dateString! <= p.end);
-           } else if (s.workFromDate && s.workToDate) {
-             isRosterOutOfContract = prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate;
-           }
-         }
+      offStaff.forEach((s) => {
+        const leave = leaveRequests.find(
+          (l) =>
+            l.staffId === s.id &&
+            l.startDate <= prog.dateString! &&
+            l.endDate >= prog.dateString!,
+        );
+        let count = 1;
+        if (leave) {
+          const start = new Date(leave.startDate);
+          const current = new Date(prog.dateString!);
+          count =
+            Math.floor(
+              (current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+            ) + 1;
+        } else {
+          for (let i = index - 1; i >= 0; i--) {
+            const prevProg = activePrograms[i];
+            const worked = prevProg.assignments.some((a) => a.staffId === s.id);
+            const prevLeave = leaveRequests.find(
+              (l) =>
+                l.staffId === s.id &&
+                l.startDate <= prevProg.dateString! &&
+                l.endDate >= prevProg.dateString!,
+            );
+            if (!worked && !prevLeave) count++;
+            else break;
+          }
+        }
+        const label = `${s.initials} (${count})`;
+        let isRosterOutOfContract = false;
+        if (s.type === "Roster") {
+          if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+            isRosterOutOfContract = !s.rosterPeriods.some(
+              (p) => prog.dateString! >= p.start && prog.dateString! <= p.end,
+            );
+          } else if (s.workFromDate && s.workToDate) {
+            isRosterOutOfContract =
+              prog.dateString! < s.workFromDate ||
+              prog.dateString! > s.workToDate;
+          }
+        }
 
-         if (leave) {
-            if (leave.type === 'Annual leave') pdfCategories['ANNUAL LEAVE'].push(label);
-            else if (leave.type === 'Roster leave') pdfCategories['ROSTER LEAVE'].push(label);
-            else if (leave.type === 'Sick leave') pdfCategories['SICK LEAVE'].push(label);
-            else pdfCategories['DAYS OFF'].push(label);
-         } else if (isRosterOutOfContract) {
-            pdfCategories['ROSTER LEAVE'].push(label);
-         } else {
-            if (s.type === 'Local') pdfCategories['DAYS OFF'].push(label);
-            else pdfCategories['STANDBY (RESERVE)'].push(label);
-         }
+        if (leave) {
+          if (leave.type === "Annual leave")
+            pdfCategories["ANNUAL LEAVE"].push(label);
+          else if (leave.type === "Roster leave")
+            pdfCategories["ROSTER LEAVE"].push(label);
+          else if (leave.type === "Sick leave")
+            pdfCategories["SICK LEAVE"].push(label);
+          else pdfCategories["DAYS OFF"].push(label);
+        } else if (isRosterOutOfContract) {
+          pdfCategories["ROSTER LEAVE"].push(label);
+        } else {
+          if (s.type === "Local") pdfCategories["DAYS OFF"].push(label);
+          else pdfCategories["STANDBY (RESERVE)"].push(label);
+        }
       });
 
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont("helvetica", "bold");
       doc.text(dateStr, 14, contentStartY);
-      
+
       doc.setFontSize(8);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont("helvetica", "bold");
       doc.setTextColor(70, 70, 70);
-      const statsText = `HEADCOUNT RECONCILIATION: Total Registered: ${staff.length} | Working: ${workingIds.size} | Days Off: ${pdfCategories['DAYS OFF'].length} | Annual Leave: ${pdfCategories['ANNUAL LEAVE'].length} | Sick Leave: ${pdfCategories['SICK LEAVE'].length} | Standby: ${pdfCategories['STANDBY (RESERVE)'].length} | Roster Leave: ${pdfCategories['ROSTER LEAVE'].length}`;
+      const statsText = `HEADCOUNT RECONCILIATION: Total Registered: ${staff.length} | Working: ${workingIds.size} | Days Off: ${pdfCategories["DAYS OFF"].length} | Annual Leave: ${pdfCategories["ANNUAL LEAVE"].length} | Sick Leave: ${pdfCategories["SICK LEAVE"].length} | Standby: ${pdfCategories["STANDBY (RESERVE)"].length} | Roster Leave: ${pdfCategories["ROSTER LEAVE"].length}`;
       doc.text(statsText, 14, contentStartY + 5);
-      
+
       contentStartY += 10;
 
-      const shiftsToday = shifts.filter(s => s.pickupDate === prog.dateString);
+      const shiftsToday = shifts.filter(
+        (s) => s.pickupDate === prog.dateString,
+      );
       const tableData = shiftsToday.map((shift, idx) => {
-        const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
-        const flightStrs = (shift.flightIds || []).map(fid => { const f = getFlight(fid); return f ? f.flightNumber : ''; }).filter(Boolean).join(' / ') || 'NIL';
-        
-        const personnelStrs = assignments.map(a => { const st = getStaff(a.staffId); if (!st) return ''; return st.initials; }).join('-');
-        
-        const roleChecks = Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
-            let roleKey = role;
-            if (role === 'Load Control') roleKey = 'LC';
-            if (role === 'Shift Leader') roleKey = 'SL';
-            if (role === 'Ramp') roleKey = 'RMP';
-            if (role === 'Operations') roleKey = 'OPS';
-            if (role === 'Lost and Found') roleKey = 'LF';
+        const assignments = prog.assignments.filter(
+          (a) => a.shiftId === shift.id,
+        );
+        const flightStrs =
+          (shift.flightIds || [])
+            .map((fid) => {
+              const f = getFlight(fid);
+              return f ? f.flightNumber : "";
+            })
+            .filter(Boolean)
+            .join(" / ") || "NIL";
 
-            const fulfilledCount = assignments.filter(a => {
-                const st = getStaff(a.staffId);
-                if (!st) return false;
-                if (a.role === roleKey || a.role === role) return true;
-                if (roleKey === 'LC' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                if (roleKey === 'SL' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                if (roleKey === 'RMP' && st.isRamp) return true;
-                if (roleKey === 'OPS' && st.isOps) return true;
-                if (roleKey === 'LF' && st.isLostFound) return true;
-                return false;
+        const personnelStrs = assignments
+          .map((a) => {
+            const st = getStaff(a.staffId);
+            if (!st) return "";
+            return st.initials;
+          })
+          .join("-");
+
+        const roleChecks = Object.entries(shift.roleCounts || {})
+          .filter(([_, count]) => count > 0)
+          .map(([role, count]) => {
+            let roleKey = role;
+            if (role === "Load Control") roleKey = "LC";
+            if (role === "Shift Leader") roleKey = "SL";
+            if (role === "Ramp") roleKey = "RMP";
+            if (role === "Operations") roleKey = "OPS";
+            if (role === "Lost and Found") roleKey = "LF";
+
+            const fulfilledCount = assignments.filter((a) => {
+              const st = getStaff(a.staffId);
+              if (!st) return false;
+              if (a.role === roleKey || a.role === role) return true;
+              if (
+                roleKey === "LC" &&
+                (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
+              )
+                return true;
+              if (
+                roleKey === "SL" &&
+                (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
+              )
+                return true;
+              if (roleKey === "RMP" && st.isRamp) return true;
+              if (roleKey === "OPS" && st.isOps) return true;
+              if (roleKey === "LF" && st.isLostFound) return true;
+              return false;
             }).length;
             const isFulfilled = fulfilledCount >= count;
-            return `${roleKey} ${isFulfilled ? '(OK)' : '(X)'}`;
-        });
-        
-        const reqStr = roleChecks.length > 0 ? `\nReq: ${roleChecks.join(' | ')}` : '';
-        
-        return [(idx + 1).toString(), shift.pickupTime, shift.endTime, flightStrs, `${assignments.length} / ${shift.maxStaff}`, personnelStrs + reqStr];
+            return `${roleKey} ${isFulfilled ? "(OK)" : "(X)"}`;
+          });
+
+        const reqStr =
+          roleChecks.length > 0 ? `\nReq: ${roleChecks.join(" | ")}` : "";
+
+        return [
+          (idx + 1).toString(),
+          shift.pickupTime,
+          shift.endTime,
+          flightStrs,
+          `${assignments.length} / ${shift.maxStaff}`,
+          personnelStrs + reqStr,
+        ];
       });
 
       autoTable(doc, {
         startY: contentStartY,
-        head: [['S/N', 'PICKUP', 'RELEASE', 'FLIGHTS', 'HC / MAX', 'PERSONNEL & ASSIGNED ROLES']],
+        head: [
+          [
+            "S/N",
+            "PICKUP",
+            "RELEASE",
+            "FLIGHTS",
+            "HC / MAX",
+            "PERSONNEL & ASSIGNED ROLES",
+          ],
+        ],
         body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
-        styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
-        columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 25 }, 4: { cellWidth: 20, halign: 'center' }, 5: { cellWidth: 'auto' } }
+        theme: "grid",
+        headStyles: {
+          fillColor: [0, 0, 0],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+        },
+        styles: { fontSize: 8, cellPadding: 2, valign: "middle" },
+        columnStyles: {
+          0: { cellWidth: 10, halign: "center" },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 25 },
+          4: { cellWidth: 20, halign: "center" },
+          5: { cellWidth: "auto" },
+        },
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 10;
       if (finalY > 180) doc.addPage();
 
       doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont("helvetica", "bold");
       doc.text("ABSENCE AND REST REGISTRY", 14, finalY);
 
       const registryData = [
-         ['DAYS OFF', pdfCategories['DAYS OFF'].join(', ') || 'NIL'],
-         ['ROSTER LEAVE', pdfCategories['ROSTER LEAVE'].join(', ') || 'NIL'],
-         ['ANNUAL LEAVE', pdfCategories['ANNUAL LEAVE'].join(', ') || 'NIL'],
-         ['SICK LEAVE', pdfCategories['SICK LEAVE'].join(', ') || 'NIL'],
-         ['STANDBY (RESERVE)', pdfCategories['STANDBY (RESERVE)'].join(', ') || 'NIL']
+        ["DAYS OFF", pdfCategories["DAYS OFF"].join(", ") || "NIL"],
+        ["ROSTER LEAVE", pdfCategories["ROSTER LEAVE"].join(", ") || "NIL"],
+        ["ANNUAL LEAVE", pdfCategories["ANNUAL LEAVE"].join(", ") || "NIL"],
+        ["SICK LEAVE", pdfCategories["SICK LEAVE"].join(", ") || "NIL"],
+        [
+          "STANDBY (RESERVE)",
+          pdfCategories["STANDBY (RESERVE)"].join(", ") || "NIL",
+        ],
       ];
 
       autoTable(doc, {
         startY: finalY + 2,
-        head: [['STATUS CATEGORY', 'PERSONNEL INITIALS']],
+        head: [["STATUS CATEGORY", "PERSONNEL INITIALS"]],
         body: registryData,
-        theme: 'grid',
+        theme: "grid",
         headStyles: { fillColor: [50, 50, 60], textColor: [255, 255, 255] },
-        styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
-        columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' } }
+        styles: { fontSize: 8, cellPadding: 2, valign: "middle" },
+        columnStyles: { 0: { cellWidth: 50, fontStyle: "bold" } },
       });
     });
 
@@ -428,172 +590,381 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.addPage();
     doc.setFontSize(16);
     doc.text("Weekly Personnel Utilization Audit (Local)", 14, 15);
-    const localStaff = staff.filter(s => s.type === 'Local');
+    const localStaff = staff.filter((s) => s.type === "Local");
     const localAuditData = localStaff.map((s, idx) => {
-        const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        let excusedLeaves = 0;
-        activePrograms.forEach(p => {
-             const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-             if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-        });
-        const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
-        const targetShifts = 5 - excusedLeaves; 
-        const targetOff = 2;
-        const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
-        const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : '-';
-        return [(idx + 1).toString(), s.name, s.initials, shiftsWorked.toString(), daysOff.toString(), leavesText, isMatch ? 'MATCH' : 'CHECK'];
+      const shiftsWorked = activePrograms.reduce(
+        (acc, p) =>
+          acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+        0,
+      );
+      let excusedLeaves = 0;
+      activePrograms.forEach((p) => {
+        const hasLeave = leaveRequests.some(
+          (l) =>
+            l.staffId === s.id &&
+            l.type !== "Day off" &&
+            l.startDate <= p.dateString! &&
+            l.endDate >= p.dateString!,
+        );
+        if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+          excusedLeaves++;
+      });
+      const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
+      const targetShifts = 5 - excusedLeaves;
+      const targetOff = 2;
+      const isMatch = shiftsWorked === targetShifts && daysOff === targetOff;
+      const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : "-";
+      return [
+        (idx + 1).toString(),
+        s.name,
+        s.initials,
+        shiftsWorked.toString(),
+        daysOff.toString(),
+        leavesText,
+        isMatch ? "MATCH" : "CHECK",
+      ];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK SHIFTS', 'OFF DAYS', 'LEAVES', 'STATUS']], body: localAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[6]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, {
+      startY: 20,
+      head: [
+        ["S/N", "NAME", "INIT", "WORK SHIFTS", "OFF DAYS", "LEAVES", "STATUS"],
+      ],
+      body: localAuditData,
+      theme: "striped",
+      headStyles: { fillColor: [0, 0, 0] },
+      styles: { fontSize: 9, halign: "center" },
+      columnStyles: { 1: { halign: "left" } },
+      didParseCell: (data) => {
+        if (data.section === "body") {
+          const status = (data.row.raw as string[])[6];
+          if (status === "MATCH") {
+            data.cell.styles.fillColor = [22, 163, 74];
+            data.cell.styles.textColor = [255, 255, 255];
+          } else if (status === "CHECK") {
+            data.cell.styles.fillColor = [220, 38, 38];
+            data.cell.styles.textColor = [255, 255, 255];
+          }
+        }
+      },
+    });
 
     doc.addPage();
     doc.setFontSize(16);
-    doc.setTextColor(0,0,0);
+    doc.setTextColor(0, 0, 0);
     doc.text("Weekly Personnel Utilization Audit (Roster)", 14, 15);
-    const rosterStaff = staff.filter(s => s.type === 'Roster');
+    const rosterStaff = staff.filter((s) => s.type === "Roster");
     const rosterAuditData = rosterStaff.map((s, idx) => {
-        const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-        const progStart = new Date(startDate);
-        const progEnd = new Date(endDate);
-        const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
-        const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
-        const overlapStart = workFrom > progStart ? workFrom : progStart;
-        const overlapEnd = workTo < progEnd ? workTo : progEnd;
-        let potential = 0;
-        if (overlapStart <= overlapEnd) { potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1; }
-        
-        let excusedLeaves = 0;
-        activePrograms.forEach(p => {
-             const d = new Date(p.dateString!);
-             if (d >= overlapStart && d <= overlapEnd) {
-                 const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-                 if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-             }
-        });
+      const shiftsWorked = activePrograms.reduce(
+        (acc, p) =>
+          acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+        0,
+      );
+      const progStart = new Date(startDate);
+      const progEnd = new Date(endDate);
+      const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+      const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+      const overlapStart = workFrom > progStart ? workFrom : progStart;
+      const overlapEnd = workTo < progEnd ? workTo : progEnd;
+      let potential = 0;
+      if (overlapStart <= overlapEnd) {
+        potential =
+          Math.floor(
+            (overlapEnd.getTime() - overlapStart.getTime()) /
+              (1000 * 60 * 60 * 24),
+          ) + 1;
+      }
 
-        const isMatch = shiftsWorked === (potential - excusedLeaves);
-        const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : '-';
-        return [(idx + 1).toString(), s.name, s.initials, s.workFromDate || 'N/A', s.workToDate || 'N/A', potential.toString(), shiftsWorked.toString(), leavesText, isMatch ? 'MATCH' : 'CHECK'];
+      let excusedLeaves = 0;
+      activePrograms.forEach((p) => {
+        const d = new Date(p.dateString!);
+        if (d >= overlapStart && d <= overlapEnd) {
+          const hasLeave = leaveRequests.some(
+            (l) =>
+              l.staffId === s.id &&
+              l.type !== "Day off" &&
+              l.startDate <= p.dateString! &&
+              l.endDate >= p.dateString!,
+          );
+          if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+            excusedLeaves++;
+        }
+      });
+
+      const isMatch = shiftsWorked === potential - excusedLeaves;
+      const leavesText = excusedLeaves > 0 ? excusedLeaves.toString() : "-";
+      return [
+        (idx + 1).toString(),
+        s.name,
+        s.initials,
+        s.workFromDate || "N/A",
+        s.workToDate || "N/A",
+        potential.toString(),
+        shiftsWorked.toString(),
+        leavesText,
+        isMatch ? "MATCH" : "CHECK",
+      ];
     });
-    autoTable(doc, { startY: 20, head: [['S/N', 'NAME', 'INIT', 'WORK FROM', 'WORK TO', 'POTENTIAL', 'ACTUAL', 'LEAVES', 'STATUS']], body: rosterAuditData, theme: 'striped', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 9, halign: 'center' }, columnStyles: { 1: { halign: 'left' } }, didParseCell: (data) => { if (data.section === 'body') { const status = (data.row.raw as string[])[8]; if (status === 'MATCH') { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (status === 'CHECK') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; } } } });
+    autoTable(doc, {
+      startY: 20,
+      head: [
+        [
+          "S/N",
+          "NAME",
+          "INIT",
+          "WORK FROM",
+          "WORK TO",
+          "POTENTIAL",
+          "ACTUAL",
+          "LEAVES",
+          "STATUS",
+        ],
+      ],
+      body: rosterAuditData,
+      theme: "striped",
+      headStyles: { fillColor: [0, 0, 0] },
+      styles: { fontSize: 9, halign: "center" },
+      columnStyles: { 1: { halign: "left" } },
+      didParseCell: (data) => {
+        if (data.section === "body") {
+          const status = (data.row.raw as string[])[8];
+          if (status === "MATCH") {
+            data.cell.styles.fillColor = [22, 163, 74];
+            data.cell.styles.textColor = [255, 255, 255];
+          } else if (status === "CHECK") {
+            data.cell.styles.fillColor = [220, 38, 38];
+            data.cell.styles.textColor = [255, 255, 255];
+          }
+        }
+      },
+    });
 
     // --- 3. MATRIX & ROLE FULFILLMENT ---
     doc.addPage();
     doc.setFontSize(16);
-    doc.setTextColor(0,0,0);
+    doc.setTextColor(0, 0, 0);
     doc.text("Weekly Operations Matrix View", 14, 15);
-    const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getUTCDate()}/${d.getUTCMonth()+1}`; });
-    const matrixHead = [['S/N', 'AGENT', ...dateHeaders, 'AUDIT']];
-    
-    const sortedMatrixStaffPdf = [...staff].map(s => ({
+    const dateHeaders = activePrograms.map((p) => {
+      const d = new Date(p.dateString || startDate);
+      return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
+    });
+    const matrixHead = [["S/N", "AGENT", ...dateHeaders, "AUDIT"]];
+
+    const sortedMatrixStaffPdf = [...staff]
+      .map((s) => ({
         ...s,
-        totalHours: getStaffTotalHours(s.id)
-    })).sort((a,b) => a.totalHours - b.totalHours);
+        totalHours: getStaffTotalHours(s.id),
+      }))
+      .sort((a, b) => a.totalHours - b.totalHours);
 
     const matrixBody = sortedMatrixStaffPdf.map((s, idx) => {
-        const row = [(idx + 1).toString(), `${s.initials} (${s.type === 'Local' ? 'L' : 'R'})`];
-        let workedCount = 0;
-        let excusedLeaves = 0;
-        activePrograms.forEach(p => {
-            const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-            if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-            const assign = p.assignments.find(a => a.staffId === s.id);
-            if (assign) {
-                workedCount++;
-                const shift = getShift(assign.shiftId || '');
-                if (shift) {
-                    const pDate = new Date(p.dateString!);
-                    const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                    const shiftStart = new Date(pDate);
-                    shiftStart.setHours(ph, pm, 0, 0);
-                    const rest = calculateRestHours(s.id, shiftStart);
-                    const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : '';
-                    row.push(`${shift.pickupTime} ${restLabel}`);
-                } else { row.push('ERR'); }
-            } else { row.push('-'); }
-        });
-        row.push(`${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]${excusedLeaves > 0 ? ` (+${excusedLeaves} AL)` : ''}`);
-        return row;
+      const row = [
+        (idx + 1).toString(),
+        `${s.initials} (${s.type === "Local" ? "L" : "R"})`,
+      ];
+      let workedCount = 0;
+      let excusedLeaves = 0;
+      activePrograms.forEach((p) => {
+        const hasLeave = leaveRequests.some(
+          (l) =>
+            l.staffId === s.id &&
+            l.type !== "Day off" &&
+            l.startDate <= p.dateString! &&
+            l.endDate >= p.dateString!,
+        );
+        if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+          excusedLeaves++;
+        const assign = p.assignments.find((a) => a.staffId === s.id);
+        if (assign) {
+          workedCount++;
+          const shift = getShift(assign.shiftId || "");
+          if (shift) {
+            const pDate = new Date(p.dateString!);
+            const [ph, pm] = shift.pickupTime.split(":").map(Number);
+            const shiftStart = new Date(pDate);
+            shiftStart.setHours(ph, pm, 0, 0);
+            const rest = calculateRestHours(s.id, shiftStart);
+            const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : "";
+            row.push(`${shift.pickupTime} ${restLabel}`);
+          } else {
+            row.push("ERR");
+          }
+        } else {
+          row.push("-");
+        }
+      });
+      row.push(
+        `${workedCount}/${activePrograms.length} [${s.totalHours.toFixed(1)}H]${excusedLeaves > 0 ? ` (+${excusedLeaves} AL)` : ""}`,
+      );
+      return row;
     });
-    autoTable(doc, { 
-        startY: 20, 
-        head: matrixHead, 
-        body: matrixBody, 
-        theme: 'grid', 
-        headStyles: { fillColor: [220, 100, 0] }, 
-        styles: { fontSize: 7, halign: 'center', cellPadding: 1.5 }, 
-        columnStyles: { 1: { halign: 'left', fontStyle: 'bold' } }, 
-        didParseCell: (data) => { 
-            if (data.section === 'head' && data.column.index === dateHeaders.length + 2) {
-                data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
+    autoTable(doc, {
+      startY: 20,
+      head: matrixHead,
+      body: matrixBody,
+      theme: "grid",
+      headStyles: { fillColor: [220, 100, 0] },
+      styles: { fontSize: 7, halign: "center", cellPadding: 1.5 },
+      columnStyles: { 1: { halign: "left", fontStyle: "bold" } },
+      didParseCell: (data) => {
+        if (
+          data.section === "head" &&
+          data.column.index === dateHeaders.length + 2
+        ) {
+          data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
+        }
+        if (data.section === "body") {
+          if (data.column.index === dateHeaders.length + 2) {
+            data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
+            data.cell.styles.textColor = [49, 46, 129]; // indigo-900
+            data.cell.styles.fontStyle = "bold";
+          } else if (
+            data.column.index > 1 &&
+            data.column.index < dateHeaders.length + 2
+          ) {
+            const text = data.cell.raw as string;
+            if (text && text.includes("[")) {
+              const match = text.match(/\[([\d.]+)H\]/);
+              if (match) {
+                const rest = parseFloat(match[1]);
+                if (rest < minRestHours) {
+                  data.cell.styles.fillColor = [220, 38, 38];
+                  data.cell.styles.textColor = [255, 255, 255];
+                  data.cell.styles.fontStyle = "bold";
+                }
+              }
             }
-            if (data.section === 'body') {
-                if (data.column.index === dateHeaders.length + 2) {
-                    data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
-                    data.cell.styles.textColor = [49, 46, 129];   // indigo-900
-                    data.cell.styles.fontStyle = 'bold';
-                } else if (data.column.index > 1 && data.column.index < dateHeaders.length + 2) { 
-                    const text = data.cell.raw as string; 
-                    if (text && text.includes('[')) { 
-                        const match = text.match(/\[([\d.]+)H\]/); 
-                        if (match) { 
-                            const rest = parseFloat(match[1]); 
-                            if (rest < minRestHours) { 
-                                data.cell.styles.fillColor = [220, 38, 38]; 
-                                data.cell.styles.textColor = [255, 255, 255]; 
-                                data.cell.styles.fontStyle = 'bold'; 
-                            } 
-                        } 
-                    } 
-                } 
-            } 
-        } 
+          }
+        }
+      },
     });
 
     doc.addPage();
     doc.setFontSize(16);
-    doc.setTextColor(0,0,0);
+    doc.setTextColor(0, 0, 0);
     doc.text("Specialist Role Fulfillment Matrix", 14, 15);
     const roleMatrixData: any[] = [];
     const roleMatrixMeta: any[] = [];
-    
-    activePrograms.forEach(p => {
-        const d = new Date(p.dateString || startDate);
-        const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth()+1}`;
-        const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
-        shiftsToday.forEach(s => {
-            const assignments = p.assignments.filter(a => a.shiftId === s.id);
-            const coversRole = (a: any, targetRole: string) => {
-                const st = getStaff(a.staffId);
-                if (!st) return false;
-                const roleCode = targetRole === 'Shift Leader' ? 'SL' : targetRole === 'Load Control' ? 'LC' : targetRole === 'Ramp' ? 'RMP' : targetRole === 'Operations' ? 'OPS' : targetRole === 'Lost and Found' ? 'LF' : targetRole;
-                if (a.role === roleCode || a.role === targetRole) return true;
-                
-                // Multi-role checks
-                if (targetRole === 'Load Control' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                if (targetRole === 'Shift Leader' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                if (targetRole === 'Ramp' && st.isRamp) return true;
-                if (targetRole === 'Operations' && st.isOps) return true;
-                if (targetRole === 'Lost and Found' && st.isLostFound) return true;
-                
-                return false;
-            };
-            const getStaffForRole = (role: string) => { return assignments.filter(a => coversRole(a, role)).map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(', '); };
-            const sl = getStaffForRole('Shift Leader');
-            const lc = getStaffForRole('Load Control');
-            const rmp = getStaffForRole('Ramp');
-            const ops = getStaffForRole('Operations');
-            const lf = getStaffForRole('Lost and Found');
-            roleMatrixData.push([dateLabel, `${s.pickupTime}-${s.endTime}`, sl, lc, rmp, ops, lf]);
-            roleMatrixMeta.push({ 
-                slReq: (s.roleCounts?.['Shift Leader'] || (s.roleCounts as any)?.['SL'] || 0) > 0, 
-                lcReq: (s.roleCounts?.['Load Control'] || (s.roleCounts as any)?.['LC'] || 0) > 0, 
-                rmpReq: (s.roleCounts?.['Ramp'] || (s.roleCounts as any)?.['RMP'] || 0) > 0, 
-                opsReq: (s.roleCounts?.['Operations'] || (s.roleCounts as any)?.['OPS'] || 0) > 0, 
-                lfReq: (s.roleCounts?.['Lost and Found'] || (s.roleCounts as any)?.['LF'] || 0) > 0 
-            });
+
+    activePrograms.forEach((p) => {
+      const d = new Date(p.dateString || startDate);
+      const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
+      const shiftsToday = shifts.filter((s) => s.pickupDate === p.dateString);
+      shiftsToday.forEach((s) => {
+        const assignments = p.assignments.filter((a) => a.shiftId === s.id);
+        const coversRole = (a: any, targetRole: string) => {
+          const st = getStaff(a.staffId);
+          if (!st) return false;
+          const roleCode =
+            targetRole === "Shift Leader"
+              ? "SL"
+              : targetRole === "Load Control"
+                ? "LC"
+                : targetRole === "Ramp"
+                  ? "RMP"
+                  : targetRole === "Operations"
+                    ? "OPS"
+                    : targetRole === "Lost and Found"
+                      ? "LF"
+                      : targetRole;
+          if (a.role === roleCode || a.role === targetRole) return true;
+
+          // Multi-role checks
+          if (
+            targetRole === "Load Control" &&
+            (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
+          )
+            return true;
+          if (
+            targetRole === "Shift Leader" &&
+            (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
+          )
+            return true;
+          if (targetRole === "Ramp" && st.isRamp) return true;
+          if (targetRole === "Operations" && st.isOps) return true;
+          if (targetRole === "Lost and Found" && st.isLostFound) return true;
+
+          return false;
+        };
+        const getStaffForRole = (role: string) => {
+          return assignments
+            .filter((a) => coversRole(a, role))
+            .map((a) => getStaff(a.staffId)?.initials)
+            .filter(Boolean)
+            .join(", ");
+        };
+        const sl = getStaffForRole("Shift Leader");
+        const lc = getStaffForRole("Load Control");
+        const rmp = getStaffForRole("Ramp");
+        const ops = getStaffForRole("Operations");
+        const lf = getStaffForRole("Lost and Found");
+        roleMatrixData.push([
+          dateLabel,
+          `${s.pickupTime}-${s.endTime}`,
+          sl,
+          lc,
+          rmp,
+          ops,
+          lf,
+        ]);
+        roleMatrixMeta.push({
+          slReq:
+            (s.roleCounts?.["Shift Leader"] ||
+              (s.roleCounts as any)?.["SL"] ||
+              0) > 0,
+          lcReq:
+            (s.roleCounts?.["Load Control"] ||
+              (s.roleCounts as any)?.["LC"] ||
+              0) > 0,
+          rmpReq:
+            (s.roleCounts?.["Ramp"] || (s.roleCounts as any)?.["RMP"] || 0) > 0,
+          opsReq:
+            (s.roleCounts?.["Operations"] ||
+              (s.roleCounts as any)?.["OPS"] ||
+              0) > 0,
+          lfReq:
+            (s.roleCounts?.["Lost and Found"] ||
+              (s.roleCounts as any)?.["LF"] ||
+              0) > 0,
         });
+      });
     });
-    autoTable(doc, { startY: 20, head: [['DATE', 'SHIFT', 'SL', 'LC', 'RMP', 'OPS', 'LF']], body: roleMatrixData, theme: 'grid', headStyles: { fillColor: [0, 0, 0] }, styles: { fontSize: 7, halign: 'center', valign: 'middle', cellPadding: 1.5 }, didParseCell: (data) => { if (data.section === 'body' && data.column.index > 1) { const rowIndex = data.row.index; const meta = roleMatrixMeta[rowIndex]; if (!meta) return; const colIdx = data.column.index; let isRequired = false; if (colIdx === 2) isRequired = meta.slReq; if (colIdx === 3) isRequired = meta.lcReq; if (colIdx === 4) isRequired = meta.rmpReq; if (colIdx === 5) isRequired = meta.opsReq; if (colIdx === 6) isRequired = meta.lfReq; const content = data.cell.raw as string; const hasContent = content && content.length > 0; if (hasContent) { data.cell.styles.fillColor = [22, 163, 74]; data.cell.styles.textColor = [255, 255, 255]; } else if (isRequired) { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = [255, 255, 255]; data.cell.text = ['MISSING']; } } } });
+    autoTable(doc, {
+      startY: 20,
+      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF"]],
+      body: roleMatrixData,
+      theme: "grid",
+      headStyles: { fillColor: [0, 0, 0] },
+      styles: {
+        fontSize: 7,
+        halign: "center",
+        valign: "middle",
+        cellPadding: 1.5,
+      },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index > 1) {
+          const rowIndex = data.row.index;
+          const meta = roleMatrixMeta[rowIndex];
+          if (!meta) return;
+          const colIdx = data.column.index;
+          let isRequired = false;
+          if (colIdx === 2) isRequired = meta.slReq;
+          if (colIdx === 3) isRequired = meta.lcReq;
+          if (colIdx === 4) isRequired = meta.rmpReq;
+          if (colIdx === 5) isRequired = meta.opsReq;
+          if (colIdx === 6) isRequired = meta.lfReq;
+          const content = data.cell.raw as string;
+          const hasContent = content && content.length > 0;
+          if (hasContent) {
+            data.cell.styles.fillColor = [22, 163, 74];
+            data.cell.styles.textColor = [255, 255, 255];
+          } else if (isRequired) {
+            data.cell.styles.fillColor = [220, 38, 38];
+            data.cell.styles.textColor = [255, 255, 255];
+            data.cell.text = ["MISSING"];
+          }
+        }
+      },
+    });
 
     // --- 4. REQUESTED SHIFTS (MANUAL ASSIGNMENTS) ---
     if (manualAssignments && manualAssignments.length > 0) {
@@ -601,30 +972,37 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
       doc.text("Requested Shifts (Pre-Assigned)", 14, 15);
-      
-      const requestedShiftsData = manualAssignments.map(ma => {
-        const st = staff.find(s => s.id === ma.staffId);
-        const sh = shifts.find(s => s.id === ma.shiftId);
+
+      const requestedShiftsData = manualAssignments.map((ma) => {
+        const st = staff.find((s) => s.id === ma.staffId);
+        const sh = shifts.find((s) => s.id === ma.shiftId);
         const staffName = st ? `${st.initials} - ${st.name}` : ma.staffId;
-        const shiftDetails = sh ? `${sh.pickupDate} ${sh.pickupTime}-${sh.endTime}` : ma.shiftId;
-        return [staffName, shiftDetails, 'Done'];
+        const shiftDetails = sh
+          ? `${sh.pickupDate} ${sh.pickupTime}-${sh.endTime}`
+          : ma.shiftId;
+        return [staffName, shiftDetails, "Done"];
       });
 
       autoTable(doc, {
         startY: 20,
-        head: [['STAFF MEMBER', 'REQUESTED SHIFT', 'STATUS']],
+        head: [["STAFF MEMBER", "REQUESTED SHIFT", "STATUS"]],
         body: requestedShiftsData,
-        theme: 'grid',
+        theme: "grid",
         headStyles: { fillColor: [0, 0, 0] },
-        styles: { fontSize: 9, halign: 'center', valign: 'middle', cellPadding: 2 },
-        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+        styles: {
+          fontSize: 9,
+          halign: "center",
+          valign: "middle",
+          cellPadding: 2,
+        },
+        columnStyles: { 0: { halign: "left", fontStyle: "bold" } },
         didParseCell: (data) => {
-          if (data.section === 'body' && data.column.index === 2) {
+          if (data.section === "body" && data.column.index === 2) {
             data.cell.styles.fillColor = [22, 163, 74]; // Emerald green
             data.cell.styles.textColor = [255, 255, 255];
-            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fontStyle = "bold";
           }
-        }
+        },
       });
     }
 
@@ -632,44 +1010,61 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
-  const handleDragStart = (e: React.DragEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ staffId, currentShiftId, date, role }));
-    e.dataTransfer.effectAllowed = 'move';
+  const handleDragStart = (
+    e: React.DragEvent,
+    staffId: string,
+    currentShiftId: string,
+    date: string,
+    role: string,
+  ) => {
+    e.dataTransfer.setData(
+      "application/json",
+      JSON.stringify({ staffId, currentShiftId, date, role }),
+    );
+    e.dataTransfer.effectAllowed = "move";
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = "move";
   };
 
-  const handleDrop = (e: React.DragEvent, targetShiftId: string, targetDate: string) => {
+  const handleDrop = (
+    e: React.DragEvent,
+    targetShiftId: string,
+    targetDate: string,
+  ) => {
     e.preventDefault();
-    const data = e.dataTransfer.getData('application/json');
+    const data = e.dataTransfer.getData("application/json");
     if (!data) return;
-    
+
     try {
       const { staffId, currentShiftId, date, role } = JSON.parse(data);
       if (date !== targetDate) return;
       const newPrograms = [...programs];
-      const prog = newPrograms.find(p => p.dateString === targetDate);
+      const prog = newPrograms.find((p) => p.dateString === targetDate);
       if (!prog) return;
-      if (currentShiftId !== 'ABSENCE') {
-         const oldIdx = prog.assignments.findIndex(a => a.staffId === staffId && a.shiftId === currentShiftId);
-         if (oldIdx !== -1) {
-           prog.assignments.splice(oldIdx, 1);
-         }
+      if (currentShiftId !== "ABSENCE") {
+        const oldIdx = prog.assignments.findIndex(
+          (a) => a.staffId === staffId && a.shiftId === currentShiftId,
+        );
+        if (oldIdx !== -1) {
+          prog.assignments.splice(oldIdx, 1);
+        }
       }
-      if (targetShiftId !== 'ABSENCE') {
-          const exists = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId);
-          if (!exists) {
-             prog.assignments.push({
-               id: Math.random().toString(36).substr(2, 9),
-               staffId,
-               shiftId: targetShiftId,
-               flightId: '', 
-               role: role || 'OPS'
-             });
-          }
+      if (targetShiftId !== "ABSENCE") {
+        const exists = prog.assignments.some(
+          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+        );
+        if (!exists) {
+          prog.assignments.push({
+            id: Math.random().toString(36).substr(2, 9),
+            staffId,
+            shiftId: targetShiftId,
+            flightId: "",
+            role: role || "OPS",
+          });
+        }
       }
       onUpdatePrograms(newPrograms);
     } catch (err) {
@@ -678,310 +1073,575 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const getStaffWorkload = (staffId: string) => {
-      return activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === staffId) ? 1 : 0), 0);
+    return activePrograms.reduce(
+      (acc, p) =>
+        acc + (p.assignments.some((a) => a.staffId === staffId) ? 1 : 0),
+      0,
+    );
   };
 
-  const getStaffColor = (s: Staff, daysWorked: number, restHours: number | null) => {
-      if (restHours !== null && restHours < minRestHours) {
-        return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
+  const getStaffColor = (
+    s: Staff,
+    daysWorked: number,
+    restHours: number | null,
+  ) => {
+    if (restHours !== null && restHours < minRestHours) {
+      return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
+    }
+    let target = 5;
+
+    let excusedLeaves = 0;
+    activePrograms.forEach((p) => {
+      const hasLeave = leaveRequests.some(
+        (l) =>
+          l.staffId === s.id &&
+          l.type !== "Day off" &&
+          l.startDate <= p.dateString! &&
+          l.endDate >= p.dateString!,
+      );
+      if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+        excusedLeaves++;
+    });
+
+    if (s.type === "Roster") {
+      const progStart = new Date(startDate);
+      const progEnd = new Date(endDate);
+      const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+      const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+      const overlapStart = workFrom > progStart ? workFrom : progStart;
+      const overlapEnd = workTo < progEnd ? workTo : progEnd;
+      if (overlapStart <= overlapEnd) {
+        target =
+          Math.floor(
+            (overlapEnd.getTime() - overlapStart.getTime()) /
+              (1000 * 60 * 60 * 24),
+          ) + 1;
+      } else {
+        target = 0;
       }
-      let target = 5;
-      if (s.type === 'Roster') {
-          const progStart = new Date(startDate);
-          const progEnd = new Date(endDate);
-          const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
-          const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
-          const overlapStart = workFrom > progStart ? workFrom : progStart;
-          const overlapEnd = workTo < progEnd ? workTo : progEnd;
-          if (overlapStart <= overlapEnd) {
-             target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-          } else {
-             target = 0;
-          }
-      }
-      const diff = daysWorked - target;
-      if (diff >= 2) return "bg-gradient-to-br from-red-500 to-rose-700 text-white shadow-red-500/20";
-      if (diff === 1) return "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-orange-500/20";
-      if (diff === 0) return "bg-white border-slate-200 text-slate-900 shadow-sm";
-      if (diff === -1) return "bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-blue-500/20";
-      return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20";
+    }
+
+    target -= excusedLeaves;
+
+    const diff = daysWorked - target;
+    if (diff >= 2)
+      return "bg-gradient-to-br from-red-500 to-rose-700 text-white shadow-red-500/20";
+    if (diff === 1)
+      return "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-orange-500/20";
+    if (diff === 0) return "bg-white border-slate-200 text-slate-900 shadow-sm";
+    if (diff === -1)
+      return "bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-blue-500/20";
+    return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20";
   };
 
   const renderMatrixTab = () => {
-       const dateHeaders = activePrograms.map(p => { const d = new Date(p.dateString || startDate); return `${d.getUTCDate()}/${d.getUTCMonth()+1}`; });
-       const sortedMatrixStaff = [...staff].map(s => ({
-           ...s,
-           totalHours: getStaffTotalHours(s.id)
-       })).sort((a,b) => a.totalHours - b.totalHours);
+    const dateHeaders = activePrograms.map((p) => {
+      const d = new Date(p.dateString || startDate);
+      return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
+    });
+    const sortedMatrixStaff = [...staff]
+      .map((s) => ({
+        ...s,
+        totalHours: getStaffTotalHours(s.id),
+      }))
+      .sort((a, b) => a.totalHours - b.totalHours);
 
-       return (
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
-             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">Weekly Operations Matrix View</h3>
-             <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead>
-                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
-                      <th className="px-4 py-3 text-center border-r border-slate-800 rounded-tl-xl">S/N</th>
-                      <th className="px-4 py-3 border-r border-slate-800">Agent</th>
-                      {dateHeaders.map((dh, i) => <th key={i} className="px-4 py-3 text-center border-r border-slate-800">{dh}</th>)}
-                      <th className="px-4 py-3 text-center bg-indigo-600 border-l border-indigo-700 rounded-tr-xl">Audit</th>
-                   </tr>
-                </thead>
-                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                   {sortedMatrixStaff.map((s, idx) => {
-                       let workedCount = 0;
-                       let excusedLeaves = 0;
-                       return (
-                          <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-4 py-2 text-center border-r border-slate-100">{idx + 1}</td>
-                              <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">{s.initials} ({s.type === 'Local' ? 'L' : 'R'})</td>
-                              {activePrograms.map((p, i) => {
-                                  const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-                                  if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-                                  const assign = p.assignments.find(a => a.staffId === s.id);
-                                  
-                                  const refProg = referencePrograms.find(rp => rp.dateString === p.dateString);
-                                  const refAssign = refProg?.assignments.find(a => a.staffId === s.id);
-                                  
-                                  const isCellModified = 
-                                      (assign?.shiftId !== refAssign?.shiftId) || 
-                                      (assign?.role !== refAssign?.role) ||
-                                      (!!assign !== !!refAssign);
+    return (
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+        <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">
+          Weekly Operations Matrix View
+        </h3>
+        <table className="w-full text-left border-collapse min-w-[800px]">
+          <thead>
+            <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+              <th className="px-4 py-3 text-center border-r border-slate-800 rounded-tl-xl">
+                S/N
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800">Agent</th>
+              {dateHeaders.map((dh, i) => (
+                <th
+                  key={i}
+                  className="px-4 py-3 text-center border-r border-slate-800"
+                >
+                  {dh}
+                </th>
+              ))}
+              <th className="px-4 py-3 text-center bg-indigo-600 border-l border-indigo-700 rounded-tr-xl">
+                Audit
+              </th>
+            </tr>
+          </thead>
+          <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+            {sortedMatrixStaff.map((s, idx) => {
+              let workedCount = 0;
+              let excusedLeaves = 0;
+              return (
+                <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-2 text-center border-r border-slate-100">
+                    {idx + 1}
+                  </td>
+                  <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">
+                    {s.initials} ({s.type === "Local" ? "L" : "R"})
+                  </td>
+                  {activePrograms.map((p, i) => {
+                    const hasLeave = leaveRequests.some(
+                      (l) =>
+                        l.staffId === s.id &&
+                        l.type !== "Day off" &&
+                        l.startDate <= p.dateString! &&
+                        l.endDate >= p.dateString!,
+                    );
+                    if (
+                      hasLeave &&
+                      !p.assignments.some((a) => a.staffId === s.id)
+                    )
+                      excusedLeaves++;
+                    const assign = p.assignments.find(
+                      (a) => a.staffId === s.id,
+                    );
 
-                                  let content: React.ReactNode = <span className="text-slate-300">-</span>;
-                                  let cellClass = `px-4 py-2 text-center border-r border-slate-100 ${isCellModified ? 'bg-indigo-100/50 shadow-inner' : ''}`;
-                                  if (assign) {
-                                      workedCount++;
-                                      const shift = getShift(assign.shiftId || '');
-                                      if (shift) {
-                                          const pDate = new Date(p.dateString!);
-                                          const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                                          const shiftStart = new Date(pDate);
-                                          shiftStart.setHours(ph, pm, 0, 0);
-                                          const rest = calculateRestHours(s.id, shiftStart);
-                                          const restWarning = rest !== null && rest < minRestHours;
-                                          if (restWarning) {
-                                              cellClass += " bg-rose-50";
-                                          }
-                                          content = (
-                                              <div className="flex flex-col items-center gap-1">
-                                                <span className={`font-bold ${restWarning ? 'text-rose-600' : 'text-slate-900'}`}>{shift.pickupTime}</span>
-                                                {rest !== null && <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${restWarning ? 'bg-rose-500 text-white' : 'text-slate-500 bg-slate-100'}`}>{rest.toFixed(1)}H</span>}
-                                              </div>
-                                          );
-                                      } else {
-                                          content = <span className="text-rose-500 font-bold">ERR</span>;
-                                      }
-                                  }
-                                  return <td key={i} className={cellClass}>{content}</td>;
-                              })}
-                              <td className="px-4 py-2 text-center border-l-2 border-indigo-100 bg-indigo-50/50">
-                                  <div className="font-bold text-indigo-900">{workedCount}/{activePrograms.length}</div>
-                                  <div className="text-[10px] text-indigo-600 font-bold mt-0.5">[{s.totalHours.toFixed(1)}H]</div>
-                                  {excusedLeaves > 0 && <div className="text-[9px] text-rose-500 font-bold mt-0.5">(+{excusedLeaves} AL)</div>}
-                              </td>
-                          </tr>
-                       );
-                   })}
-                </tbody>
-             </table>
-          </div>
-       );
+                    const refProg = referencePrograms.find(
+                      (rp) => rp.dateString === p.dateString,
+                    );
+                    const refAssign = refProg?.assignments.find(
+                      (a) => a.staffId === s.id,
+                    );
+
+                    const isCellModified =
+                      assign?.shiftId !== refAssign?.shiftId ||
+                      assign?.role !== refAssign?.role ||
+                      !!assign !== !!refAssign;
+
+                    let content: React.ReactNode = (
+                      <span className="text-slate-300">-</span>
+                    );
+                    let cellClass = `px-4 py-2 text-center border-r border-slate-100 ${isCellModified ? "bg-indigo-100/50 shadow-inner" : ""}`;
+                    if (assign) {
+                      workedCount++;
+                      const shift = getShift(assign.shiftId || "");
+                      if (shift) {
+                        const pDate = new Date(p.dateString!);
+                        const [ph, pm] = shift.pickupTime
+                          .split(":")
+                          .map(Number);
+                        const shiftStart = new Date(pDate);
+                        shiftStart.setHours(ph, pm, 0, 0);
+                        const rest = calculateRestHours(s.id, shiftStart);
+                        const restWarning =
+                          rest !== null && rest < minRestHours;
+                        if (restWarning) {
+                          cellClass += " bg-rose-50";
+                        }
+                        content = (
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`font-bold ${restWarning ? "text-rose-600" : "text-slate-900"}`}
+                            >
+                              {shift.pickupTime}
+                            </span>
+                            {rest !== null && (
+                              <span
+                                className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${restWarning ? "bg-rose-500 text-white" : "text-slate-500 bg-slate-100"}`}
+                              >
+                                {rest.toFixed(1)}H
+                              </span>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        content = (
+                          <span className="text-rose-500 font-bold">ERR</span>
+                        );
+                      }
+                    }
+                    return (
+                      <td key={i} className={cellClass}>
+                        {content}
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-2 text-center border-l-2 border-indigo-100 bg-indigo-50/50">
+                    <div className="font-bold text-indigo-900">
+                      {workedCount}/{activePrograms.length}
+                    </div>
+                    <div className="text-[10px] text-indigo-600 font-bold mt-0.5">
+                      [{s.totalHours.toFixed(1)}H]
+                    </div>
+                    {excusedLeaves > 0 && (
+                      <div className="text-[9px] text-rose-500 font-bold mt-0.5">
+                        (+{excusedLeaves} AL)
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   const renderRolesTab = () => {
-       return (
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
-             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">Specialist Role Fulfillment Matrix</h3>
-             <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead>
-                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
-                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-24">Date</th>
-                      <th className="px-4 py-3 border-r border-slate-800 w-32">Shift</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">SL</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">LC</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">RMP</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">OPS</th>
-                      <th className="px-4 py-3 text-center rounded-tr-xl">LF</th>
-                   </tr>
-                </thead>
-                <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                   {activePrograms.map((p, pIdx) => {
-                       const d = new Date(p.dateString || startDate);
-                       const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth()+1}`;
-                       const shiftsToday = shifts.filter(s => s.pickupDate === p.dateString);
-                       return shiftsToday.map((s, sIdx) => {
-                           const assignments = p.assignments.filter(a => a.shiftId === s.id);
-                           const coversRole = (a: any, targetRole: string) => {
-                               const st = getStaff(a.staffId);
-                               if (!st) return false;
-                               const roleCode = targetRole === 'Shift Leader' ? 'SL' : targetRole === 'Load Control' ? 'LC' : targetRole === 'Ramp' ? 'RMP' : targetRole === 'Operations' ? 'OPS' : targetRole === 'Lost and Found' ? 'LF' : targetRole;
-                               if (a.role === roleCode || a.role === targetRole) return true;
-                               if (targetRole === 'Load Control' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                               if (targetRole === 'Shift Leader' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                               if (targetRole === 'Ramp' && st.isRamp) return true;
-                               if (targetRole === 'Operations' && st.isOps) return true;
-                               if (targetRole === 'Lost and Found' && st.isLostFound) return true;
-                               return false;
-                           };
-                           const getRoleCell = (role: string, reqFlag: boolean) => {
-                               const agents = assignments.filter(a => coversRole(a, role)).map(a => getStaff(a.staffId)?.initials).filter(Boolean);
-                               if (agents.length > 0) {
-                                   return <td className="px-4 py-2 border-r border-slate-100 text-center"><span className="bg-emerald-500 text-white font-black px-2 py-1 rounded-lg text-[10px] break-words inline-block">{agents.join(', ')}</span></td>;
-                               } else if (reqFlag) {
-                                   return <td className="px-4 py-2 border-r border-slate-100 text-center"><span className="bg-rose-500 text-white font-black px-2 py-1 rounded-lg text-[10px]">MISSING</span></td>;
-                               }
-                               return <td className="px-4 py-2 border-r border-slate-100 text-center text-slate-300">-</td>;
-                           };
+    return (
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+        <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6">
+          Specialist Role Fulfillment Matrix
+        </h3>
+        <table className="w-full text-left border-collapse min-w-[800px]">
+          <thead>
+            <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+              <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-24">
+                Date
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 w-32">
+                Shift
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                SL
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                LC
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                RMP
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                OPS
+              </th>
+              <th className="px-4 py-3 text-center rounded-tr-xl">LF</th>
+            </tr>
+          </thead>
+          <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+            {activePrograms.map((p, pIdx) => {
+              const d = new Date(p.dateString || startDate);
+              const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
+              const shiftsToday = shifts.filter(
+                (s) => s.pickupDate === p.dateString,
+              );
+              return shiftsToday.map((s, sIdx) => {
+                const assignments = p.assignments.filter(
+                  (a) => a.shiftId === s.id,
+                );
+                const coversRole = (a: any, targetRole: string) => {
+                  const st = getStaff(a.staffId);
+                  if (!st) return false;
+                  const roleCode =
+                    targetRole === "Shift Leader"
+                      ? "SL"
+                      : targetRole === "Load Control"
+                        ? "LC"
+                        : targetRole === "Ramp"
+                          ? "RMP"
+                          : targetRole === "Operations"
+                            ? "OPS"
+                            : targetRole === "Lost and Found"
+                              ? "LF"
+                              : targetRole;
+                  if (a.role === roleCode || a.role === targetRole) return true;
+                  if (
+                    targetRole === "Load Control" &&
+                    (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
+                  )
+                    return true;
+                  if (
+                    targetRole === "Shift Leader" &&
+                    (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
+                  )
+                    return true;
+                  if (targetRole === "Ramp" && st.isRamp) return true;
+                  if (targetRole === "Operations" && st.isOps) return true;
+                  if (targetRole === "Lost and Found" && st.isLostFound)
+                    return true;
+                  return false;
+                };
+                const getRoleCell = (role: string, reqFlag: boolean) => {
+                  const agents = assignments
+                    .filter((a) => coversRole(a, role))
+                    .map((a) => getStaff(a.staffId)?.initials)
+                    .filter(Boolean);
+                  if (agents.length > 0) {
+                    return (
+                      <td className="px-4 py-2 border-r border-slate-100 text-center">
+                        <span className="bg-emerald-500 text-white font-black px-2 py-1 rounded-lg text-[10px] break-words inline-block">
+                          {agents.join(", ")}
+                        </span>
+                      </td>
+                    );
+                  } else if (reqFlag) {
+                    return (
+                      <td className="px-4 py-2 border-r border-slate-100 text-center">
+                        <span className="bg-rose-500 text-white font-black px-2 py-1 rounded-lg text-[10px]">
+                          MISSING
+                        </span>
+                      </td>
+                    );
+                  }
+                  return (
+                    <td className="px-4 py-2 border-r border-slate-100 text-center text-slate-300">
+                      -
+                    </td>
+                  );
+                };
 
-                           const meta = { 
-                                slReq: ((s.roleCounts?.['Shift Leader'] || (s.roleCounts as any)?.['SL'] || 0) as number) > 0, 
-                                lcReq: ((s.roleCounts?.['Load Control'] || (s.roleCounts as any)?.['LC'] || 0) as number) > 0, 
-                                rmpReq: ((s.roleCounts?.['Ramp'] || (s.roleCounts as any)?.['RMP'] || 0) as number) > 0, 
-                                opsReq: ((s.roleCounts?.['Operations'] || (s.roleCounts as any)?.['OPS'] || 0) as number) > 0, 
-                                lfReq: ((s.roleCounts?.['Lost and Found'] || (s.roleCounts as any)?.['LF'] || 0) as number) > 0 
-                           };
+                const meta = {
+                  slReq:
+                    ((s.roleCounts?.["Shift Leader"] ||
+                      (s.roleCounts as any)?.["SL"] ||
+                      0) as number) > 0,
+                  lcReq:
+                    ((s.roleCounts?.["Load Control"] ||
+                      (s.roleCounts as any)?.["LC"] ||
+                      0) as number) > 0,
+                  rmpReq:
+                    ((s.roleCounts?.["Ramp"] ||
+                      (s.roleCounts as any)?.["RMP"] ||
+                      0) as number) > 0,
+                  opsReq:
+                    ((s.roleCounts?.["Operations"] ||
+                      (s.roleCounts as any)?.["OPS"] ||
+                      0) as number) > 0,
+                  lfReq:
+                    ((s.roleCounts?.["Lost and Found"] ||
+                      (s.roleCounts as any)?.["LF"] ||
+                      0) as number) > 0,
+                };
 
-                           return (
-                               <tr key={`${pIdx}-${sIdx}`} className="hover:bg-slate-50 transition-colors">
-                                  <td className="px-4 py-2 font-bold border-r border-slate-100">{dateLabel}</td>
-                                  <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">{s.pickupTime}-{s.endTime}</td>
-                                  {getRoleCell('Shift Leader', meta.slReq)}
-                                  {getRoleCell('Load Control', meta.lcReq)}
-                                  {getRoleCell('Ramp', meta.rmpReq)}
-                                  {getRoleCell('Operations', meta.opsReq)}
-                                  {getRoleCell('Lost and Found', meta.lfReq)}
-                               </tr>
-                           );
-                       });
-                   })}
-                </tbody>
-             </table>
-          </div>
-       );
+                return (
+                  <tr
+                    key={`${pIdx}-${sIdx}`}
+                    className="hover:bg-slate-50 transition-colors"
+                  >
+                    <td className="px-4 py-2 font-bold border-r border-slate-100">
+                      {dateLabel}
+                    </td>
+                    <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">
+                      {s.pickupTime}-{s.endTime}
+                    </td>
+                    {getRoleCell("Shift Leader", meta.slReq)}
+                    {getRoleCell("Load Control", meta.lcReq)}
+                    {getRoleCell("Ramp", meta.rmpReq)}
+                    {getRoleCell("Operations", meta.opsReq)}
+                    {getRoleCell("Lost and Found", meta.lfReq)}
+                  </tr>
+                );
+              });
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   const renderStaffCheckTab = () => {
-       const localStaff = staff.filter(s => s.type === 'Local');
-       const rosterStaff = staff.filter(s => s.type === 'Roster');
+    const localStaff = staff.filter((s) => s.type === "Local");
+    const rosterStaff = staff.filter((s) => s.type === "Roster");
 
-       const renderLocalTable = () => (
-          <div className="mb-10 min-w-[800px]">
-             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">Weekly Personnel Utilization Audit (Local)</h4>
-             <table className="w-full text-left border-collapse">
-                <thead>
-                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
-                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">S/N</th>
-                      <th className="px-4 py-3 border-r border-slate-800">NAME</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">INIT</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK SHIFTS</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">OFF DAYS</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">LEAVES</th>
-                      <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
-                   </tr>
-                </thead>
-                <tbody className="text-xs font-medium divide-y divide-slate-100">
-                   {localStaff.map((s, idx) => {
-                       const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-                       
-                       let excusedLeaves = 0;
-                       activePrograms.forEach(p => {
-                            const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-                            if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-                       });
+    const renderLocalTable = () => (
+      <div className="mb-10 min-w-[800px]">
+        <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">
+          Weekly Personnel Utilization Audit (Local)
+        </h4>
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+              <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">
+                S/N
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800">NAME</th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                INIT
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                WORK SHIFTS
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                OFF DAYS
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                LEAVES
+              </th>
+              <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
+            </tr>
+          </thead>
+          <tbody className="text-xs font-medium divide-y divide-slate-100">
+            {localStaff.map((s, idx) => {
+              const shiftsWorked = activePrograms.reduce(
+                (acc, p) =>
+                  acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+                0,
+              );
 
-                       const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
-                       const targetShifts = 5 - excusedLeaves; 
-                       const targetOff = 2;
-                       const isMatch = shiftsWorked === targetShifts && daysOff === targetOff; 
-                       
-                       return (
-                          <tr key={s.id} className={isMatch ? "bg-emerald-50 text-emerald-900 border-b border-white" : "bg-rose-50 text-rose-900 border-b border-white"}>
-                              <td className="px-4 py-2 text-center">{idx + 1}</td>
-                              <td className="px-4 py-2 font-bold">{s.name}</td>
-                              <td className="px-4 py-2 text-center">{s.initials}</td>
-                              <td className="px-4 py-2 text-center">{shiftsWorked}</td>
-                              <td className="px-4 py-2 text-center">{daysOff}</td>
-                              <td className="px-4 py-2 text-center font-bold text-slate-700">{excusedLeaves > 0 ? excusedLeaves : '-'}</td>
-                              <td className="px-4 py-2 text-center font-bold">{isMatch ? "MATCH" : "CHECK"}</td>
-                          </tr>
-                       );
-                   })}
-                </tbody>
-             </table>
-          </div>
-       );
+              let excusedLeaves = 0;
+              activePrograms.forEach((p) => {
+                const hasLeave = leaveRequests.some(
+                  (l) =>
+                    l.staffId === s.id &&
+                    l.type !== "Day off" &&
+                    l.startDate <= p.dateString! &&
+                    l.endDate >= p.dateString!,
+                );
+                if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+                  excusedLeaves++;
+              });
 
-       const renderRosterTable = () => (
-          <div className="mb-10 min-w-[800px]">
-             <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">Weekly Personnel Utilization Audit (Roster)</h4>
-             <table className="w-full text-left border-collapse">
-                <thead>
-                   <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
-                      <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">S/N</th>
-                      <th className="px-4 py-3 border-r border-slate-800">NAME</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">INIT</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK FROM</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">WORK TO</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">POTENTIAL</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">ACTUAL</th>
-                      <th className="px-4 py-3 border-r border-slate-800 text-center">LEAVES</th>
-                      <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
-                   </tr>
-                </thead>
-                <tbody className="text-xs font-medium divide-y divide-slate-100">
-                   {rosterStaff.map((s, idx) => {
-                       const shiftsWorked = activePrograms.reduce((acc, p) => acc + (p.assignments.some(a => a.staffId === s.id) ? 1 : 0), 0);
-                       const progStart = new Date(startDate);
-                       const progEnd = new Date(endDate);
-                       const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
-                       const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
-                       const overlapStart = workFrom > progStart ? workFrom : progStart;
-                       const overlapEnd = workTo < progEnd ? workTo : progEnd;
-                       let potential = 0;
-                       if (overlapStart <= overlapEnd) { 
-                           potential = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1; 
-                       }
+              const daysOff =
+                activePrograms.length - shiftsWorked - excusedLeaves;
+              const targetShifts = 5 - excusedLeaves;
+              const targetOff = 2;
+              const isMatch =
+                shiftsWorked === targetShifts && daysOff === targetOff;
 
-                       let excusedLeaves = 0;
-                       activePrograms.forEach(p => {
-                            const d = new Date(p.dateString!);
-                            if (d >= overlapStart && d <= overlapEnd) {
-                                const hasLeave = leaveRequests.some(l => l.staffId === s.id && l.type !== 'Day off' && l.startDate <= p.dateString! && l.endDate >= p.dateString!);
-                                if (hasLeave && !p.assignments.some(a => a.staffId === s.id)) excusedLeaves++;
-                            }
-                       });
+              return (
+                <tr
+                  key={s.id}
+                  className={
+                    isMatch
+                      ? "bg-emerald-50 text-emerald-900 border-b border-white"
+                      : "bg-rose-50 text-rose-900 border-b border-white"
+                  }
+                >
+                  <td className="px-4 py-2 text-center">{idx + 1}</td>
+                  <td className="px-4 py-2 font-bold">{s.name}</td>
+                  <td className="px-4 py-2 text-center">{s.initials}</td>
+                  <td className="px-4 py-2 text-center">{shiftsWorked}</td>
+                  <td className="px-4 py-2 text-center">{daysOff}</td>
+                  <td className="px-4 py-2 text-center font-bold text-slate-700">
+                    {excusedLeaves > 0 ? excusedLeaves : "-"}
+                  </td>
+                  <td className="px-4 py-2 text-center font-bold">
+                    {isMatch ? "MATCH" : "CHECK"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
 
-                       const isMatch = shiftsWorked === (potential - excusedLeaves);
-                       
-                       return (
-                          <tr key={s.id} className={isMatch ? "bg-emerald-50 text-emerald-900 border-b border-white" : "bg-rose-50 text-rose-900 border-b border-white"}>
-                              <td className="px-4 py-2 text-center">{idx + 1}</td>
-                              <td className="px-4 py-2 font-bold">{s.name}</td>
-                              <td className="px-4 py-2 text-center">{s.initials}</td>
-                              <td className="px-4 py-2 text-center">{s.workFromDate || 'N/A'}</td>
-                              <td className="px-4 py-2 text-center">{s.workToDate || 'N/A'}</td>
-                              <td className="px-4 py-2 text-center">{potential}</td>
-                              <td className="px-4 py-2 text-center">{shiftsWorked}</td>
-                              <td className="px-4 py-2 text-center font-bold text-slate-700">{excusedLeaves > 0 ? excusedLeaves : '-'}</td>
-                              <td className="px-4 py-2 text-center font-bold">{isMatch ? "MATCH" : "CHECK"}</td>
-                          </tr>
-                       );
-                   })}
-                </tbody>
-             </table>
-          </div>
-       );
+    const renderRosterTable = () => (
+      <div className="mb-10 min-w-[800px]">
+        <h4 className="text-lg font-black uppercase italic text-slate-800 mb-4">
+          Weekly Personnel Utilization Audit (Roster)
+        </h4>
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+              <th className="px-4 py-3 border-r border-slate-800 rounded-tl-xl w-16 text-center">
+                S/N
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800">NAME</th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                INIT
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                WORK FROM
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                WORK TO
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                POTENTIAL
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                ACTUAL
+              </th>
+              <th className="px-4 py-3 border-r border-slate-800 text-center">
+                LEAVES
+              </th>
+              <th className="px-4 py-3 text-center rounded-tr-xl">STATUS</th>
+            </tr>
+          </thead>
+          <tbody className="text-xs font-medium divide-y divide-slate-100">
+            {rosterStaff.map((s, idx) => {
+              const shiftsWorked = activePrograms.reduce(
+                (acc, p) =>
+                  acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+                0,
+              );
+              const progStart = new Date(startDate);
+              const progEnd = new Date(endDate);
+              const workFrom = s.workFromDate
+                ? new Date(s.workFromDate)
+                : progStart;
+              const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+              const overlapStart = workFrom > progStart ? workFrom : progStart;
+              const overlapEnd = workTo < progEnd ? workTo : progEnd;
+              let potential = 0;
+              if (overlapStart <= overlapEnd) {
+                potential =
+                  Math.floor(
+                    (overlapEnd.getTime() - overlapStart.getTime()) /
+                      (1000 * 60 * 60 * 24),
+                  ) + 1;
+              }
 
-       return (
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
-             <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
-                <ShieldCheck className="text-emerald-500 w-6 h-6 md:w-8 md:h-8" />
-                Staff Matrix Checks
-             </h3>
-             {renderLocalTable()}
-             {renderRosterTable()}
-          </div>
-       );
+              let excusedLeaves = 0;
+              activePrograms.forEach((p) => {
+                const d = new Date(p.dateString!);
+                if (d >= overlapStart && d <= overlapEnd) {
+                  const hasLeave = leaveRequests.some(
+                    (l) =>
+                      l.staffId === s.id &&
+                      l.type !== "Day off" &&
+                      l.startDate <= p.dateString! &&
+                      l.endDate >= p.dateString!,
+                  );
+                  if (
+                    hasLeave &&
+                    !p.assignments.some((a) => a.staffId === s.id)
+                  )
+                    excusedLeaves++;
+                }
+              });
+
+              const isMatch = shiftsWorked === potential - excusedLeaves;
+
+              return (
+                <tr
+                  key={s.id}
+                  className={
+                    isMatch
+                      ? "bg-emerald-50 text-emerald-900 border-b border-white"
+                      : "bg-rose-50 text-rose-900 border-b border-white"
+                  }
+                >
+                  <td className="px-4 py-2 text-center">{idx + 1}</td>
+                  <td className="px-4 py-2 font-bold">{s.name}</td>
+                  <td className="px-4 py-2 text-center">{s.initials}</td>
+                  <td className="px-4 py-2 text-center">
+                    {s.workFromDate || "N/A"}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    {s.workToDate || "N/A"}
+                  </td>
+                  <td className="px-4 py-2 text-center">{potential}</td>
+                  <td className="px-4 py-2 text-center">{shiftsWorked}</td>
+                  <td className="px-4 py-2 text-center font-bold text-slate-700">
+                    {excusedLeaves > 0 ? excusedLeaves : "-"}
+                  </td>
+                  <td className="px-4 py-2 text-center font-bold">
+                    {isMatch ? "MATCH" : "CHECK"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+
+    return (
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
+        <h3 className="text-xl md:text-2xl font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
+          <ShieldCheck className="text-emerald-500 w-6 h-6 md:w-8 md:h-8" />
+          Staff Matrix Checks
+        </h3>
+        {renderLocalTable()}
+        {renderRosterTable()}
+      </div>
+    );
   };
 
   return (
@@ -992,444 +1652,862 @@ export const ProgramDisplay: React.FC<Props> = ({
             <CalendarDays size={24} className="md:w-8 md:h-8" />
           </div>
           <div>
-            <h3 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter text-white leading-none">Master Roster</h3>
+            <h3 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter text-white leading-none">
+              Master Roster
+            </h3>
             <p className="text-slate-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] mt-2">
               Program View & Export
             </p>
           </div>
         </div>
         <div className="flex gap-4 relative z-10">
-          <button 
-             onClick={() => setShowHistory(!showHistory)}
-             className={`px-6 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? 'bg-emerald-500 text-white' : 'bg-white text-slate-950 hover:bg-slate-100'}`}>
-             <History size={18} />
-             <span className="hidden md:inline">Time Machine</span>
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className={`px-6 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? "bg-emerald-500 text-white" : "bg-white text-slate-950 hover:bg-slate-100"}`}
+          >
+            <History size={18} />
+            <span className="hidden md:inline">Time Machine</span>
           </button>
-          <button 
-             onClick={saveVersion}
-             className="px-6 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95">
-             <Save size={18} />
-             <span className="hidden md:inline">Save Ver</span>
+          <button
+            onClick={saveVersion}
+            className="px-6 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95"
+          >
+            <Save size={18} />
+            <span className="hidden md:inline">Save Ver</span>
           </button>
-          <button 
-             onClick={generateFullReport} 
-             disabled={isGeneratingPdf || activePrograms.length === 0}
-             className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50">
-             {isGeneratingPdf ? <Printer size={18} className="animate-spin"/> : <FileDown size={18} />}
-             <span>Export PDF Report</span>
+          <button
+            onClick={generateFullReport}
+            disabled={isGeneratingPdf || activePrograms.length === 0}
+            className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50"
+          >
+            {isGeneratingPdf ? (
+              <Printer size={18} className="animate-spin" />
+            ) : (
+              <FileDown size={18} />
+            )}
+            <span>Export PDF Report</span>
           </button>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2 md:gap-4 md:justify-center px-2">
-        {['Daily', 'Matrix', 'Roles', 'Staff Checks'].map(tab => (
-           <button
-             key={tab}
-             onClick={() => setActiveTab(tab as any)}
-             className={`px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex-1 md:flex-none ${activeTab === tab ? 'bg-slate-950 text-white shadow-xl scale-105' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'}`}
-           >
-             {tab} View
-           </button>
+        {["Daily", "Matrix", "Roles", "Staff Checks"].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab as any)}
+            className={`px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex-1 md:flex-none ${activeTab === tab ? "bg-slate-950 text-white shadow-xl scale-105" : "bg-white text-slate-500 hover:bg-slate-50 border border-slate-200"}`}
+          >
+            {tab} View
+          </button>
         ))}
       </div>
 
-      {(activeTab === 'Daily' || activeTab === 'Matrix') && (
-          <div className="flex justify-center px-2 mt-4">
-            <button
-               onClick={handleMarkAllCopied}
-               className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center gap-2">
-               <CheckCircle2 size={16} />
-               All Modifications Copied
-            </button>
-          </div>
+      {(activeTab === "Daily" || activeTab === "Matrix") && (
+        <div className="flex justify-center px-2 mt-4">
+          <button
+            onClick={handleMarkAllCopied}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center gap-2"
+          >
+            <CheckCircle2 size={16} />
+            All Modifications Copied
+          </button>
+        </div>
       )}
 
       {showHistory && (
         <div className="bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 shadow-xl animate-in slide-in-from-top-4">
-           <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-black uppercase italic text-slate-900 flex items-center gap-3">
-                <History className="text-emerald-500" />
-                Roster Time Machine
-              </h3>
-              <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase">Close</button>
-           </div>
-           
-           {versions.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 italic">No saved versions found. Save your first snapshot!</div>
-           ) : (
-              <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
-                 {versions.map(v => (
-                    <div key={v.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-colors group">
-                       <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-slate-400 font-black text-xs border border-slate-100">
-                             v{v.versionNumber}
-                          </div>
-                          <div>
-                             <h4 className="font-bold text-slate-800 text-sm">{v.name}</h4>
-                             <div className="flex items-center gap-3 mt-1">
-                                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-                                   <Clock size={10} /> {new Date(v.createdAt).toLocaleString()}
-                                </span>
-                                <span className="text-[10px] uppercase font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">
-                                   {v.periodStart} → {v.periodEnd}
-                                </span>
-                             </div>
-                          </div>
-                       </div>
-                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                             onClick={() => restoreVersion(v)}
-                             className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-emerald-400 shadow-sm flex items-center gap-2">
-                             <RotateCcw size={12} /> Restore
-                          </button>
-                          <button 
-                             onClick={() => deleteVersion(v.id)}
-                             className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors">
-                             <Trash2 size={16} />
-                          </button>
-                       </div>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-black uppercase italic text-slate-900 flex items-center gap-3">
+              <History className="text-emerald-500" />
+              Roster Time Machine
+            </h3>
+            <button
+              onClick={() => setShowHistory(false)}
+              className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase"
+            >
+              Close
+            </button>
+          </div>
+
+          {versions.length === 0 ? (
+            <div className="text-center py-12 text-slate-400 italic">
+              No saved versions found. Save your first snapshot!
+            </div>
+          ) : (
+            <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+              {versions.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-colors group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-slate-400 font-black text-xs border border-slate-100">
+                      v{v.versionNumber}
                     </div>
-                 ))}
-              </div>
-           )}
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm">
+                        {v.name}
+                      </h4>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                          <Clock size={10} />{" "}
+                          {new Date(v.createdAt).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] uppercase font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">
+                          {v.periodStart} → {v.periodEnd}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => restoreVersion(v)}
+                      className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase hover:bg-emerald-400 shadow-sm flex items-center gap-2"
+                    >
+                      <RotateCcw size={12} /> Restore
+                    </button>
+                    <button
+                      onClick={() => deleteVersion(v.id)}
+                      className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {(isFailedGeneration || stationHealth === 0) && (
         <div className="bg-rose-50 border-2 border-rose-200 rounded-[2.5rem] p-8 md:p-12 text-center animate-in zoom-in-95 shadow-xl">
-           <AlertTriangle size={64} className="mx-auto text-rose-500 mb-6" />
-           <h3 className="text-2xl font-black uppercase italic text-rose-900 tracking-tighter mb-2">AI Generation Failed</h3>
-           <p className="text-rose-700 font-bold max-w-lg mx-auto">
-             The Artificial Intelligence engine encountered a strategic conflict or returned invalid data structure.
-           </p>
-           <div className="mt-6 flex justify-center gap-4">
-              <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
-                 Code: JSON_PARSE_ERROR
-              </div>
-              <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
-                 Health: {stationHealth}%
-              </div>
-           </div>
-           <p className="text-[10px] uppercase font-black tracking-widest text-rose-400 mt-8">Recommendation: Check Shift/Staff Inputs and Retry</p>
+          <AlertTriangle size={64} className="mx-auto text-rose-500 mb-6" />
+          <h3 className="text-2xl font-black uppercase italic text-rose-900 tracking-tighter mb-2">
+            AI Generation Failed
+          </h3>
+          <p className="text-rose-700 font-bold max-w-lg mx-auto">
+            The Artificial Intelligence engine encountered a strategic conflict
+            or returned invalid data structure.
+          </p>
+          <div className="mt-6 flex justify-center gap-4">
+            <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
+              Code: JSON_PARSE_ERROR
+            </div>
+            <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
+              Health: {stationHealth}%
+            </div>
+          </div>
+          <p className="text-[10px] uppercase font-black tracking-widest text-rose-400 mt-8">
+            Recommendation: Check Shift/Staff Inputs and Retry
+          </p>
         </div>
       )}
 
       {!isFailedGeneration && stationHealth > 0 && (
         <div className="space-y-12">
-           {activePrograms.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300 gap-4 bg-white rounded-[2.5rem] border border-slate-100">
-                 <AlertTriangle size={48} />
-                 <span className="text-xl font-black uppercase italic">No Program Data for Selected Period</span>
-              </div>
-           ) : (
-              <>
-                 {activeTab === 'Matrix' && renderMatrixTab()}
-                 {activeTab === 'Roles' && renderRolesTab()}
-                 {activeTab === 'Staff Checks' && renderStaffCheckTab()}
-                 {activeTab === 'Daily' && activePrograms.map((prog, i) => {
-                    const d = new Date(prog.dateString || startDate);
-                    const dateLabel = `${DAYS_OF_WEEK_FULL[d.getUTCDay()].toUpperCase()} - ${d.getUTCDate()}/${d.getUTCMonth()+1}/${d.getUTCFullYear()}`;
-                 
-                 const workingIds = new Set(prog.assignments.map(a => a.staffId));
-                 const offStaff = staff.filter(s => !workingIds.has(s.id));
-                 const categories: Record<string, { staff: Staff, count: number, isLeave?: boolean, isRequestedDayOff?: boolean }[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
+          {activePrograms.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300 gap-4 bg-white rounded-[2.5rem] border border-slate-100">
+              <AlertTriangle size={48} />
+              <span className="text-xl font-black uppercase italic">
+                No Program Data for Selected Period
+              </span>
+            </div>
+          ) : (
+            <>
+              {activeTab === "Matrix" && renderMatrixTab()}
+              {activeTab === "Roles" && renderRolesTab()}
+              {activeTab === "Staff Checks" && renderStaffCheckTab()}
+              {activeTab === "Daily" &&
+                activePrograms.map((prog, i) => {
+                  const d = new Date(prog.dateString || startDate);
+                  const dateLabel = `${DAYS_OF_WEEK_FULL[d.getUTCDay()].toUpperCase()} - ${d.getUTCDate()}/${d.getUTCMonth() + 1}/${d.getUTCFullYear()}`;
 
-                 offStaff.forEach(s => {
-                     const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prog.dateString! && l.endDate >= prog.dateString!);
-                     let count = 1;
-                     if (leave) {
-                         const start = new Date(leave.startDate);
-                         const current = new Date(prog.dateString!);
-                         count = Math.floor((current.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                     } else {
-                         for (let idx = i - 1; idx >= 0; idx--) {
-                             const prevProg = activePrograms[idx];
-                             const worked = prevProg.assignments.some(a => a.staffId === s.id);
-                             const prevLeave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= prevProg.dateString! && l.endDate >= prevProg.dateString!);
-                             if (!worked && !prevLeave) count++; else break;
-                         }
-                     }
-                     
-                     let isRosterOutOfContract = false;
-                     if (s.type === 'Roster') {
-                       if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-                         isRosterOutOfContract = !s.rosterPeriods.some(p => prog.dateString! >= p.start && prog.dateString! <= p.end);
-                       } else if (s.workFromDate && s.workToDate) {
-                         isRosterOutOfContract = prog.dateString! < s.workFromDate || prog.dateString! > s.workToDate;
-                       }
-                     }
-                     const item = { staff: s, count, isLeave: !!leave, isRequestedDayOff: leave?.type === 'Day off' };
+                  const workingIds = new Set(
+                    prog.assignments.map((a) => a.staffId),
+                  );
+                  const offStaff = staff.filter((s) => !workingIds.has(s.id));
+                  const categories: Record<
+                    string,
+                    {
+                      staff: Staff;
+                      count: number;
+                      isLeave?: boolean;
+                      isRequestedDayOff?: boolean;
+                    }[]
+                  > = {
+                    "DAYS OFF": [],
+                    "ROSTER LEAVE": [],
+                    "ANNUAL LEAVE": [],
+                    "SICK LEAVE": [],
+                    "STANDBY (RESERVE)": [],
+                  };
 
-                     if (leave) {
-                        if (leave.type === 'Annual leave') categories['ANNUAL LEAVE'].push(item);
-                        else if (leave.type === 'Roster leave') categories['ROSTER LEAVE'].push(item);
-                        else if (leave.type === 'Sick leave') categories['SICK LEAVE'].push(item);
-                        else categories['DAYS OFF'].push(item);
-                     } else if (isRosterOutOfContract) {
-                        categories['ROSTER LEAVE'].push(item);
-                     } else {
-                        if (s.type === 'Local') {
-                           categories['DAYS OFF'].push(item);
-                        } else {
-                           categories['STANDBY (RESERVE)'].push(item);
-                        }
-                     }
-                 });
+                  offStaff.forEach((s) => {
+                    const leave = leaveRequests.find(
+                      (l) =>
+                        l.staffId === s.id &&
+                        l.startDate <= prog.dateString! &&
+                        l.endDate >= prog.dateString!,
+                    );
+                    let count = 1;
+                    if (leave) {
+                      const start = new Date(leave.startDate);
+                      const current = new Date(prog.dateString!);
+                      count =
+                        Math.floor(
+                          (current.getTime() - start.getTime()) /
+                            (1000 * 60 * 60 * 24),
+                        ) + 1;
+                    } else {
+                      for (let idx = i - 1; idx >= 0; idx--) {
+                        const prevProg = activePrograms[idx];
+                        const worked = prevProg.assignments.some(
+                          (a) => a.staffId === s.id,
+                        );
+                        const prevLeave = leaveRequests.find(
+                          (l) =>
+                            l.staffId === s.id &&
+                            l.startDate <= prevProg.dateString! &&
+                            l.endDate >= prevProg.dateString!,
+                        );
+                        if (!worked && !prevLeave) count++;
+                        else break;
+                      }
+                    }
 
-                 const refProg = referencePrograms.find(p => p.dateString === prog.dateString) || { assignments: [] as typeof prog.assignments, dateString: prog.dateString };
-                 const refWorkingIds = new Set(refProg.assignments.map(a => a.staffId));
-                 const refOffStaff = staff.filter(s => !refWorkingIds.has(s.id));
-                 const refCategories: Record<string, string[]> = { 'DAYS OFF': [], 'ROSTER LEAVE': [], 'ANNUAL LEAVE': [], 'SICK LEAVE': [], 'STANDBY (RESERVE)': [] };
-                 refOffStaff.forEach(s => {
-                     const leave = leaveRequests.find(l => l.staffId === s.id && l.startDate <= refProg.dateString! && l.endDate >= refProg.dateString!);
-                     let isRosterOutOfContract = false;
-                     if (s.type === 'Roster') {
-                       if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-                         isRosterOutOfContract = !s.rosterPeriods.some(p => refProg.dateString! >= p.start && refProg.dateString! <= p.end);
-                       } else if (s.workFromDate && s.workToDate) {
-                         isRosterOutOfContract = refProg.dateString! < s.workFromDate || refProg.dateString! > s.workToDate;
-                       }
-                     }
-                     if (leave) {
-                        if (leave.type === 'Annual leave') refCategories['ANNUAL LEAVE'].push(s.id);
-                        else if (leave.type === 'Roster leave') refCategories['ROSTER LEAVE'].push(s.id);
-                        else if (leave.type === 'Sick leave') refCategories['SICK LEAVE'].push(s.id);
-                        else refCategories['DAYS OFF'].push(s.id);
-                     } else if (isRosterOutOfContract) {
-                        refCategories['ROSTER LEAVE'].push(s.id);
-                     } else {
-                        if (s.type === 'Local') refCategories['DAYS OFF'].push(s.id);
-                        else refCategories['STANDBY (RESERVE)'].push(s.id);
-                     }
-                 });
+                    let isRosterOutOfContract = false;
+                    if (s.type === "Roster") {
+                      if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                        isRosterOutOfContract = !s.rosterPeriods.some(
+                          (p) =>
+                            prog.dateString! >= p.start &&
+                            prog.dateString! <= p.end,
+                        );
+                      } else if (s.workFromDate && s.workToDate) {
+                        isRosterOutOfContract =
+                          prog.dateString! < s.workFromDate ||
+                          prog.dateString! > s.workToDate;
+                      }
+                    }
+                    const item = {
+                      staff: s,
+                      count,
+                      isLeave: !!leave,
+                      isRequestedDayOff: leave?.type === "Day off",
+                    };
 
-                 const shiftsTodaySorted = shifts
-                    .filter(s => s.pickupDate === prog.dateString)
+                    if (leave) {
+                      if (leave.type === "Annual leave")
+                        categories["ANNUAL LEAVE"].push(item);
+                      else if (leave.type === "Roster leave")
+                        categories["ROSTER LEAVE"].push(item);
+                      else if (leave.type === "Sick leave")
+                        categories["SICK LEAVE"].push(item);
+                      else categories["DAYS OFF"].push(item);
+                    } else if (isRosterOutOfContract) {
+                      categories["ROSTER LEAVE"].push(item);
+                    } else {
+                      if (s.type === "Local") {
+                        categories["DAYS OFF"].push(item);
+                      } else {
+                        categories["STANDBY (RESERVE)"].push(item);
+                      }
+                    }
+                  });
+
+                  const refProg = referencePrograms.find(
+                    (p) => p.dateString === prog.dateString,
+                  ) || {
+                    assignments: [] as typeof prog.assignments,
+                    dateString: prog.dateString,
+                  };
+                  const refWorkingIds = new Set(
+                    refProg.assignments.map((a) => a.staffId),
+                  );
+                  const refOffStaff = staff.filter(
+                    (s) => !refWorkingIds.has(s.id),
+                  );
+                  const refCategories: Record<string, string[]> = {
+                    "DAYS OFF": [],
+                    "ROSTER LEAVE": [],
+                    "ANNUAL LEAVE": [],
+                    "SICK LEAVE": [],
+                    "STANDBY (RESERVE)": [],
+                  };
+                  refOffStaff.forEach((s) => {
+                    const leave = leaveRequests.find(
+                      (l) =>
+                        l.staffId === s.id &&
+                        l.startDate <= refProg.dateString! &&
+                        l.endDate >= refProg.dateString!,
+                    );
+                    let isRosterOutOfContract = false;
+                    if (s.type === "Roster") {
+                      if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+                        isRosterOutOfContract = !s.rosterPeriods.some(
+                          (p) =>
+                            refProg.dateString! >= p.start &&
+                            refProg.dateString! <= p.end,
+                        );
+                      } else if (s.workFromDate && s.workToDate) {
+                        isRosterOutOfContract =
+                          refProg.dateString! < s.workFromDate ||
+                          refProg.dateString! > s.workToDate;
+                      }
+                    }
+                    if (leave) {
+                      if (leave.type === "Annual leave")
+                        refCategories["ANNUAL LEAVE"].push(s.id);
+                      else if (leave.type === "Roster leave")
+                        refCategories["ROSTER LEAVE"].push(s.id);
+                      else if (leave.type === "Sick leave")
+                        refCategories["SICK LEAVE"].push(s.id);
+                      else refCategories["DAYS OFF"].push(s.id);
+                    } else if (isRosterOutOfContract) {
+                      refCategories["ROSTER LEAVE"].push(s.id);
+                    } else {
+                      if (s.type === "Local")
+                        refCategories["DAYS OFF"].push(s.id);
+                      else refCategories["STANDBY (RESERVE)"].push(s.id);
+                    }
+                  });
+
+                  const shiftsTodaySorted = shifts
+                    .filter((s) => s.pickupDate === prog.dateString)
                     .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
-                 return (
-                    <div key={i} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                       <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          <h3 className="text-lg font-black uppercase italic text-slate-900">{dateLabel}</h3>
-                          <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest">
-                             <span className="px-2 py-1 bg-slate-900 text-white rounded-md">Total: {staff.length}</span>
-                             <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md">Work: {workingIds.size}</span>
-                             <span className="px-2 py-1 bg-slate-200 text-slate-700 rounded-md">Off: {categories['DAYS OFF'].length}</span>
-                             <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-md">Leave: {categories['ANNUAL LEAVE'].length + categories['SICK LEAVE'].length}</span>
-                             <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-md">SBY: {categories['STANDBY (RESERVE)'].length}</span>
-                             <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-md">Roster Off: {categories['ROSTER LEAVE'].length}</span>
-                          </div>
-                       </div>
-                       
-                       <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                             <thead>
-                                <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
-                                   <th className="px-4 py-3 w-12 text-center">S/N</th>
-                                   <th className="px-4 py-3 w-24">Pickup</th>
-                                   <th className="px-4 py-3 w-24">Release</th>
-                                   <th className="px-4 py-3 w-32">Flights</th>
-                                   <th className="px-4 py-3 w-24 text-center">HC / Max</th>
-                                   <th className="px-4 py-3">Personnel & Assigned Roles</th>
-                                </tr>
-                             </thead>
-                             <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                                {shiftsTodaySorted.map((shift, idx, shiftsToday) => {
-                                   const assignments = prog.assignments.filter(a => a.shiftId === shift.id);
-                                   const flightStrs = (shift.flightIds || []).map(fid => getFlight(fid)?.flightNumber).filter(Boolean).join(' / ') || 'NIL';
-                                   const isFull = assignments.length >= shift.maxStaff;
-                                   const isOver = assignments.length > shift.maxStaff;
-                                   
-                                   const hasSL = assignments.some(a => a.role === 'SL' || a.role === 'Shift Leader' || getStaff(a.staffId)?.isShiftLeader || getStaff(a.staffId)?.initials.toUpperCase() === 'SK-ATZ');
-                                   const hasLC = assignments.some(a => a.role === 'LC' || a.role === 'Load Control' || getStaff(a.staffId)?.isLoadControl || getStaff(a.staffId)?.initials.toUpperCase() === 'SK-ATZ');
-                                   const isCriticalMissing = (!hasSL && (shift.roleCounts?.['Shift Leader'] || 0) > 0) || (!hasLC && (shift.roleCounts?.['Load Control'] || 0) > 0);
+                  return (
+                    <div
+                      key={i}
+                      className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden"
+                    >
+                      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <h3 className="text-lg font-black uppercase italic text-slate-900">
+                          {dateLabel}
+                        </h3>
+                        <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest">
+                          <span className="px-2 py-1 bg-slate-900 text-white rounded-md">
+                            Total: {staff.length}
+                          </span>
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md">
+                            Work: {workingIds.size}
+                          </span>
+                          <span className="px-2 py-1 bg-slate-200 text-slate-700 rounded-md">
+                            Off: {categories["DAYS OFF"].length}
+                          </span>
+                          <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-md">
+                            Leave:{" "}
+                            {categories["ANNUAL LEAVE"].length +
+                              categories["SICK LEAVE"].length}
+                          </span>
+                          <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-md">
+                            SBY: {categories["STANDBY (RESERVE)"].length}
+                          </span>
+                          <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-md">
+                            Roster Off: {categories["ROSTER LEAVE"].length}
+                          </span>
+                        </div>
+                      </div>
 
-                                   const curShiftAssig = assignments.map(a => a.staffId).sort().join(',');
-                                   const refShiftAssig = refProg.assignments.filter(a => a.shiftId === shift.id).map(a => a.staffId).sort().join(',');
-                                   const isShiftModified = curShiftAssig !== refShiftAssig;
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
+                              <th className="px-4 py-3 w-12 text-center">
+                                S/N
+                              </th>
+                              <th className="px-4 py-3 w-24">Pickup</th>
+                              <th className="px-4 py-3 w-24">Release</th>
+                              <th className="px-4 py-3 w-32">Flights</th>
+                              <th className="px-4 py-3 w-24 text-center">
+                                HC / Max
+                              </th>
+                              <th className="px-4 py-3">
+                                Personnel & Assigned Roles
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                            {shiftsTodaySorted.map(
+                              (shift, idx, shiftsToday) => {
+                                const assignments = prog.assignments.filter(
+                                  (a) => a.shiftId === shift.id,
+                                );
+                                const flightStrs =
+                                  (shift.flightIds || [])
+                                    .map((fid) => getFlight(fid)?.flightNumber)
+                                    .filter(Boolean)
+                                    .join(" / ") || "NIL";
+                                const isFull =
+                                  assignments.length >= shift.maxStaff;
+                                const isOver =
+                                  assignments.length > shift.maxStaff;
 
-                                   return (
-                                      <tr key={shift.id} 
-                                          onDragOver={handleDragOver}
-                                          onDrop={(e) => handleDrop(e, shift.id, prog.dateString!)}
-                                          className={`hover:bg-slate-50 transition-colors ${isShiftModified ? 'bg-indigo-50/70 border-l-4 border-indigo-400' : isCriticalMissing ? 'bg-rose-50/50' : ''}`}>
-                                         <td className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? 'text-rose-500' : 'text-slate-400'}`}>{idx + 1}</td>
-                                         <td className="px-4 py-3 font-mono">{shift.pickupTime}</td>
-                                         <td className="px-4 py-3 font-mono">{shift.endTime}</td>
-                                         <td className="px-4 py-3 font-bold text-blue-600">{flightStrs}</td>
-                                         <td className={`px-4 py-3 text-center font-bold ${isOver ? 'text-rose-500' : isFull ? 'text-emerald-500' : 'text-amber-500'}`}>
-                                            {assignments.length} / {shift.maxStaff}
-                                         </td>
-                                         <td className="px-4 py-3">
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex flex-wrap gap-2">
-                                                   {assignments.map(a => {
-                                                       const st = getStaff(a.staffId);
-                                                       if (!st) return null;
-                                                       
-                                                       const pDate = new Date(prog.dateString!);
-                                                       const [ph, pm] = shift.pickupTime.split(':').map(Number);
-                                                       const shiftStart = new Date(pDate);
-                                                       shiftStart.setHours(ph, pm, 0, 0);
-                                                       
-                                                       const rest = calculateRestHours(st.id, shiftStart);
-                                                       const daysWorked = getStaffWorkload(st.id);
-                                                       const colorClass = getStaffColor(st, daysWorked, rest);
-                                                       
-                                                       let target = 5;
-                                                       if (st.type === 'Roster') {
-                                                           const progStart = new Date(startDate);
-                                                           const progEnd = new Date(endDate);
-                                                           const workFrom = st.workFromDate ? new Date(st.workFromDate) : progStart;
-                                                           const workTo = st.workToDate ? new Date(st.workToDate) : progEnd;
-                                                           const overlapStart = workFrom > progStart ? workFrom : progStart;
-                                                           const overlapEnd = workTo < progEnd ? workTo : progEnd;
-                                                           if (overlapStart <= overlapEnd) {
-                                                              target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                                                           } else { target = 0; }
-                                                       }
-                                                       const showDays = daysWorked !== target;
+                                const hasSL = assignments.some(
+                                  (a) =>
+                                    a.role === "SL" ||
+                                    a.role === "Shift Leader" ||
+                                    getStaff(a.staffId)?.isShiftLeader ||
+                                    getStaff(
+                                      a.staffId,
+                                    )?.initials.toUpperCase() === "SK-ATZ",
+                                );
+                                const hasLC = assignments.some(
+                                  (a) =>
+                                    a.role === "LC" ||
+                                    a.role === "Load Control" ||
+                                    getStaff(a.staffId)?.isLoadControl ||
+                                    getStaff(
+                                      a.staffId,
+                                    )?.initials.toUpperCase() === "SK-ATZ",
+                                );
+                                const isCriticalMissing =
+                                  (!hasSL &&
+                                    (shift.roleCounts?.["Shift Leader"] || 0) >
+                                      0) ||
+                                  (!hasLC &&
+                                    (shift.roleCounts?.["Load Control"] || 0) >
+                                      0);
 
-                                                       const isLastShiftOfDay = !shiftsToday.slice(idx + 1).some(futureShift => 
-                                                           prog.assignments.some(ass => ass.shiftId === futureShift.id && ass.staffId === st.id)
-                                                       );
-                                                       let nextDayShiftTime: string | null = null;
-                                                       const nextProg = activePrograms[i + 1];
-                                                       if (isLastShiftOfDay && nextProg) {
-                                                           const shiftsTomorrow = shifts
-                                                               .filter(s => s.pickupDate === nextProg.dateString)
-                                                               .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
-                                                           for (const tomorrowShift of shiftsTomorrow) {
-                                                               const nextAssignment = nextProg.assignments.find(ass => ass.shiftId === tomorrowShift.id && ass.staffId === st.id);
-                                                               if (nextAssignment) {
-                                                                   nextDayShiftTime = tomorrowShift.pickupTime;
-                                                                   break;
-                                                               }
-                                                           }
-                                                       }
+                                const curShiftAssig = assignments
+                                  .map((a) => a.staffId)
+                                  .sort()
+                                  .join(",");
+                                const refShiftAssig = refProg.assignments
+                                  .filter((a) => a.shiftId === shift.id)
+                                  .map((a) => a.staffId)
+                                  .sort()
+                                  .join(",");
+                                const isShiftModified =
+                                  curShiftAssig !== refShiftAssig;
 
-                                                       return (
-                                                          <div 
-                                                             key={a.id}
-                                                             draggable={!(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id))}
-                                                             onDragStart={(e) => {
-                                                                 if (manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) { e.preventDefault(); return; }
-                                                                 handleDragStart(e, st.id, shift.id, prog.dateString!, a.role)
-                                                             }}
-                                                             className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) ? 'opacity-80 cursor-not-allowed border-indigo-200' : 'cursor-move hover:scale-105'}`}>
-                                                             <span>{st.initials}</span>
-                                                             {(manualAssignments && manualAssignments.some(ma => ma.staffId === st.id && ma.shiftId === shift.id)) ? <Lock size={8} className="text-slate-500 opacity-70 -ml-0.5" /> : null}
-                                                             {rest !== null && rest < minRestHours && <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">{rest}H</span>}
-                                                             {showDays && <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{daysWorked}</span>}
-                                                             {nextDayShiftTime && <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">→ {nextDayShiftTime}</span>}
-                                                          </div>
-                                                       );
-                                                   })}
-                                                   {assignments.length === 0 && <span className="text-[10px] italic text-slate-300">Drag staff here...</span>}
-                                                </div>
-                                                
-                                                {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
-                                                        {Object.entries(shift.roleCounts || {}).filter(([_, count]) => count > 0).map(([role, count]) => {
-                                                            let roleKey = role;
-                                                            if (role === 'Load Control') roleKey = 'LC';
-                                                            if (role === 'Shift Leader') roleKey = 'SL';
-                                                            if (role === 'Ramp') roleKey = 'RMP';
-                                                            if (role === 'Operations') roleKey = 'OPS';
-                                                            if (role === 'Lost and Found') roleKey = 'LF';
+                                return (
+                                  <tr
+                                    key={shift.id}
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) =>
+                                      handleDrop(e, shift.id, prog.dateString!)
+                                    }
+                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""}`}
+                                  >
+                                    <td
+                                      className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? "text-rose-500" : "text-slate-400"}`}
+                                    >
+                                      {idx + 1}
+                                    </td>
+                                    <td className="px-4 py-3 font-mono">
+                                      {shift.pickupTime}
+                                    </td>
+                                    <td className="px-4 py-3 font-mono">
+                                      {shift.endTime}
+                                    </td>
+                                    <td className="px-4 py-3 font-bold text-blue-600">
+                                      {flightStrs}
+                                    </td>
+                                    <td
+                                      className={`px-4 py-3 text-center font-bold ${isOver ? "text-rose-500" : isFull ? "text-emerald-500" : "text-amber-500"}`}
+                                    >
+                                      {assignments.length} / {shift.maxStaff}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex flex-col gap-2">
+                                        <div className="flex flex-wrap gap-2">
+                                          {assignments.map((a) => {
+                                            const st = getStaff(a.staffId);
+                                            if (!st) return null;
 
-                                                            const fulfilledCount = assignments.filter(a => {
-                                                                const st = getStaff(a.staffId);
-                                                                if (!st) return false;
-                                                                if (a.role === roleKey || a.role === role) return true;
-                                                                if (roleKey === 'LC' && (st.isLoadControl || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                                                                if (roleKey === 'SL' && (st.isShiftLeader || st.initials.toUpperCase() === 'SK-ATZ')) return true;
-                                                                if (roleKey === 'RMP' && st.isRamp) return true;
-                                                                if (roleKey === 'OPS' && st.isOps) return true;
-                                                                if (roleKey === 'LF' && st.isLostFound) return true;
-                                                                return false;
-                                                            }).length;
-                                                            const isFulfilled = fulfilledCount >= count;
+                                            const pDate = new Date(
+                                              prog.dateString!,
+                                            );
+                                            const [ph, pm] = shift.pickupTime
+                                              .split(":")
+                                              .map(Number);
+                                            const shiftStart = new Date(pDate);
+                                            shiftStart.setHours(ph, pm, 0, 0);
 
-                                                            return (
-                                                                <span key={roleKey} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 ${isFulfilled ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
-                                                                    {roleKey} {isFulfilled ? '✅' : '❌'}
-                                                                </span>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                         </td>
-                                      </tr>
-                                   );
-                                })}
-                             </tbody>
-                          </table>
-                       </div>
+                                            const rest = calculateRestHours(
+                                              st.id,
+                                              shiftStart,
+                                            );
+                                            const daysWorked = getStaffWorkload(
+                                              st.id,
+                                            );
+                                            const colorClass = getStaffColor(
+                                              st,
+                                              daysWorked,
+                                              rest,
+                                            );
 
-                       <div 
-                          className="border-t-4 border-slate-100"
-                          onDragOver={handleDragOver}
-                          onDrop={(e) => handleDrop(e, 'ABSENCE', prog.dateString!)}>
-                          <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                             <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">Absence and Rest Registry</h4>
-                             <span className="text-[9px] font-bold text-slate-400 italic">Drag here to unassign</span>
-                          </div>
-                          <table className="w-full text-left border-collapse">
-                             <thead className="bg-slate-800 text-white text-[9px] font-black uppercase tracking-wider">
-                                <tr>
-                                   <th className="px-4 py-2 w-48">Status Category</th>
-                                   <th className="px-4 py-2">Personnel Initials</th>
-                                </tr>
-                             </thead>
-                             <tbody className="text-[10px] font-medium text-slate-600 divide-y divide-slate-100">
-                                {Object.entries(categories).map(([cat, items]) => {
-                                   const curCatIds = items.map((i: any) => i.staff.id).sort().join(',');
-                                   const refCatIds = (refCategories[cat] || []).sort().join(',');
-                                   const isCatModified = curCatIds !== refCatIds;
+                                            let target = 5;
+                                            if (st.type === "Roster") {
+                                              const progStart = new Date(
+                                                startDate,
+                                              );
+                                              const progEnd = new Date(endDate);
+                                              const workFrom = st.workFromDate
+                                                ? new Date(st.workFromDate)
+                                                : progStart;
+                                              const workTo = st.workToDate
+                                                ? new Date(st.workToDate)
+                                                : progEnd;
+                                              const overlapStart =
+                                                workFrom > progStart
+                                                  ? workFrom
+                                                  : progStart;
+                                              const overlapEnd =
+                                                workTo < progEnd
+                                                  ? workTo
+                                                  : progEnd;
+                                              if (overlapStart <= overlapEnd) {
+                                                target =
+                                                  Math.floor(
+                                                    (overlapEnd.getTime() -
+                                                      overlapStart.getTime()) /
+                                                      (1000 * 60 * 60 * 24),
+                                                  ) + 1;
+                                              } else {
+                                                target = 0;
+                                              }
+                                            }
+                                            const showDays =
+                                              daysWorked !== target;
 
-                                   return (
-                                   <tr key={cat} className={isCatModified ? 'bg-indigo-50/70 border-l-4 border-indigo-400' : ''}>
-                                      <td className="px-4 py-3 font-bold align-top">{cat}</td>
-                                      <td className="px-4 py-3">
-                                         <div className="flex flex-wrap gap-2">
-                                            {items.map((item) => {
-                                                const { staff: s, count, isRequestedDayOff } = item as any;
-                                                const daysWorked = getStaffWorkload(s.id);
-                                                const colorClass = getStaffColor(s, daysWorked, null);
-                                                const isLocked = cat === 'ROSTER LEAVE' || cat === 'ANNUAL LEAVE' || isRequestedDayOff;
-                                                return (
-                                                   <div 
-                                                      key={s.id}
-                                                      draggable={!isLocked}
-                                                      onDragStart={(e) => {
-                                                          if (isLocked) {
-                                                              e.preventDefault();
-                                                              return;
-                                                          }
-                                                          handleDragStart(e, s.id, 'ABSENCE', prog.dateString!, (s.isShiftLeader || s.initials.toUpperCase() === 'SK-ATZ') ? 'SL' : (s.isLoadControl || s.initials.toUpperCase() === 'SK-ATZ') ? 'LC' : s.isRamp ? 'RMP' : s.isLostFound ? 'LF' : 'OPS')
-                                                      }}
-                                                      className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-move hover:scale-105'}`}>
-                                                      <span>{s.initials}</span>
-                                                      {isLocked ? <Lock size={8} className="text-slate-500 opacity-70 -ml-0.5" /> : null}
-                                                      <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">{count}</span>
-                                                   </div>
+                                            const isLastShiftOfDay =
+                                              !shiftsToday
+                                                .slice(idx + 1)
+                                                .some((futureShift) =>
+                                                  prog.assignments.some(
+                                                    (ass) =>
+                                                      ass.shiftId ===
+                                                        futureShift.id &&
+                                                      ass.staffId === st.id,
+                                                  ),
                                                 );
-                                            })}
-                                            {items.length === 0 && <span className="text-slate-300 italic">None</span>}
-                                         </div>
-                                      </td>
-                                   </tr>
-                                )})}
-                             </tbody>
-                          </table>
-                       </div>
+                                            let nextDayShiftTime:
+                                              | string
+                                              | null = null;
+                                            const nextProg =
+                                              activePrograms[i + 1];
+                                            if (isLastShiftOfDay && nextProg) {
+                                              const shiftsTomorrow = shifts
+                                                .filter(
+                                                  (s) =>
+                                                    s.pickupDate ===
+                                                    nextProg.dateString,
+                                                )
+                                                .sort((a, b) =>
+                                                  a.pickupTime.localeCompare(
+                                                    b.pickupTime,
+                                                  ),
+                                                );
+                                              for (const tomorrowShift of shiftsTomorrow) {
+                                                const nextAssignment =
+                                                  nextProg.assignments.find(
+                                                    (ass) =>
+                                                      ass.shiftId ===
+                                                        tomorrowShift.id &&
+                                                      ass.staffId === st.id,
+                                                  );
+                                                if (nextAssignment) {
+                                                  nextDayShiftTime =
+                                                    tomorrowShift.pickupTime;
+                                                  break;
+                                                }
+                                              }
+                                            }
+
+                                            return (
+                                              <div
+                                                key={a.id}
+                                                draggable={
+                                                  !(
+                                                    manualAssignments &&
+                                                    manualAssignments.some(
+                                                      (ma) =>
+                                                        ma.staffId === st.id &&
+                                                        ma.shiftId === shift.id,
+                                                    )
+                                                  )
+                                                }
+                                                onDragStart={(e) => {
+                                                  if (
+                                                    manualAssignments &&
+                                                    manualAssignments.some(
+                                                      (ma) =>
+                                                        ma.staffId === st.id &&
+                                                        ma.shiftId === shift.id,
+                                                    )
+                                                  ) {
+                                                    e.preventDefault();
+                                                    return;
+                                                  }
+                                                  handleDragStart(
+                                                    e,
+                                                    st.id,
+                                                    shift.id,
+                                                    prog.dateString!,
+                                                    a.role,
+                                                  );
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
+                                              >
+                                                <span>{st.initials}</span>
+                                                {manualAssignments &&
+                                                manualAssignments.some(
+                                                  (ma) =>
+                                                    ma.staffId === st.id &&
+                                                    ma.shiftId === shift.id,
+                                                ) ? (
+                                                  <Lock
+                                                    size={8}
+                                                    className="text-slate-500 opacity-70 -ml-0.5"
+                                                  />
+                                                ) : null}
+                                                {rest !== null &&
+                                                  rest < minRestHours && (
+                                                    <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">
+                                                      {rest}H
+                                                    </span>
+                                                  )}
+                                                {showDays && (
+                                                  <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">
+                                                    {daysWorked}
+                                                  </span>
+                                                )}
+                                                {nextDayShiftTime && (
+                                                  <span className="ml-1 px-1 bg-slate-400 text-white rounded text-[8px] font-mono">
+                                                    → {nextDayShiftTime}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                          {assignments.length === 0 && (
+                                            <span className="text-[10px] italic text-slate-300">
+                                              Drag staff here...
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {Object.entries(
+                                          shift.roleCounts || {},
+                                        ).filter(([_, count]) => count > 0)
+                                          .length > 0 && (
+                                          <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
+                                            {Object.entries(
+                                              shift.roleCounts || {},
+                                            )
+                                              .filter(([_, count]) => count > 0)
+                                              .map(([role, count]) => {
+                                                let roleKey = role;
+                                                if (role === "Load Control")
+                                                  roleKey = "LC";
+                                                if (role === "Shift Leader")
+                                                  roleKey = "SL";
+                                                if (role === "Ramp")
+                                                  roleKey = "RMP";
+                                                if (role === "Operations")
+                                                  roleKey = "OPS";
+                                                if (role === "Lost and Found")
+                                                  roleKey = "LF";
+
+                                                const fulfilledCount =
+                                                  assignments.filter((a) => {
+                                                    const st = getStaff(
+                                                      a.staffId,
+                                                    );
+                                                    if (!st) return false;
+                                                    if (
+                                                      a.role === roleKey ||
+                                                      a.role === role
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      roleKey === "LC" &&
+                                                      (st.isLoadControl ||
+                                                        st.initials.toUpperCase() ===
+                                                          "SK-ATZ")
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      roleKey === "SL" &&
+                                                      (st.isShiftLeader ||
+                                                        st.initials.toUpperCase() ===
+                                                          "SK-ATZ")
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      roleKey === "RMP" &&
+                                                      st.isRamp
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      roleKey === "OPS" &&
+                                                      st.isOps
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      roleKey === "LF" &&
+                                                      st.isLostFound
+                                                    )
+                                                      return true;
+                                                    return false;
+                                                  }).length;
+                                                const isFulfilled =
+                                                  fulfilledCount >= count;
+
+                                                return (
+                                                  <span
+                                                    key={roleKey}
+                                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 ${isFulfilled ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-rose-50 text-rose-600 border border-rose-100"}`}
+                                                  >
+                                                    {roleKey}{" "}
+                                                    {isFulfilled ? "✅" : "❌"}
+                                                  </span>
+                                                );
+                                              })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              },
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div
+                        className="border-t-4 border-slate-100"
+                        onDragOver={handleDragOver}
+                        onDrop={(e) =>
+                          handleDrop(e, "ABSENCE", prog.dateString!)
+                        }
+                      >
+                        <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                          <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
+                            Absence and Rest Registry
+                          </h4>
+                          <span className="text-[9px] font-bold text-slate-400 italic">
+                            Drag here to unassign
+                          </span>
+                        </div>
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-slate-800 text-white text-[9px] font-black uppercase tracking-wider">
+                            <tr>
+                              <th className="px-4 py-2 w-48">
+                                Status Category
+                              </th>
+                              <th className="px-4 py-2">Personnel Initials</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-[10px] font-medium text-slate-600 divide-y divide-slate-100">
+                            {Object.entries(categories).map(([cat, items]) => {
+                              const curCatIds = items
+                                .map((i: any) => i.staff.id)
+                                .sort()
+                                .join(",");
+                              const refCatIds = (refCategories[cat] || [])
+                                .sort()
+                                .join(",");
+                              const isCatModified = curCatIds !== refCatIds;
+
+                              return (
+                                <tr
+                                  key={cat}
+                                  className={
+                                    isCatModified
+                                      ? "bg-indigo-50/70 border-l-4 border-indigo-400"
+                                      : ""
+                                  }
+                                >
+                                  <td className="px-4 py-3 font-bold align-top">
+                                    {cat}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      {items.map((item) => {
+                                        const {
+                                          staff: s,
+                                          count,
+                                          isRequestedDayOff,
+                                        } = item as any;
+                                        const daysWorked = getStaffWorkload(
+                                          s.id,
+                                        );
+                                        const colorClass = getStaffColor(
+                                          s,
+                                          daysWorked,
+                                          null,
+                                        );
+                                        const isLocked =
+                                          cat === "ROSTER LEAVE" ||
+                                          cat === "ANNUAL LEAVE" ||
+                                          isRequestedDayOff;
+                                        return (
+                                          <div
+                                            key={s.id}
+                                            draggable={!isLocked}
+                                            onDragStart={(e) => {
+                                              if (isLocked) {
+                                                e.preventDefault();
+                                                return;
+                                              }
+                                              handleDragStart(
+                                                e,
+                                                s.id,
+                                                "ABSENCE",
+                                                prog.dateString!,
+                                                s.isShiftLeader ||
+                                                  s.initials.toUpperCase() ===
+                                                    "SK-ATZ"
+                                                  ? "SL"
+                                                  : s.isLoadControl ||
+                                                      s.initials.toUpperCase() ===
+                                                        "SK-ATZ"
+                                                    ? "LC"
+                                                    : s.isRamp
+                                                      ? "RMP"
+                                                      : s.isLostFound
+                                                        ? "LF"
+                                                        : "OPS",
+                                              );
+                                            }}
+                                            className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-50 cursor-not-allowed" : "cursor-move hover:scale-105"}`}
+                                          >
+                                            <span>{s.initials}</span>
+                                            {isLocked ? (
+                                              <Lock
+                                                size={8}
+                                                className="text-slate-500 opacity-70 -ml-0.5"
+                                              />
+                                            ) : null}
+                                            <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">
+                                              {count}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                      {items.length === 0 && (
+                                        <span className="text-slate-300 italic">
+                                          None
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                 );
-              })}
-              </>
-           )}
+                  );
+                })}
+            </>
+          )}
         </div>
       )}
     </div>

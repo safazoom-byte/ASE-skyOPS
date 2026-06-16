@@ -1,28 +1,39 @@
-
-export type Skill = 'Ramp' | 'Load Control' | 'Lost and Found' | 'Shift Leader' | 'Operations' | 'Labour';
-export type ProficiencyLevel = 'Yes' | 'No';
-export type StaffCategory = 'Local' | 'Roster';
+export type Skill =
+  | "Ramp"
+  | "Load Control"
+  | "Lost and Found"
+  | "Shift Leader"
+  | "Operations"
+  | "Labour";
+export type ProficiencyLevel = "Yes" | "No";
+export type StaffCategory = "Local" | "Roster";
 export type WorkPattern = string;
-export type LeaveType = 'Day off' | 'Annual leave' | 'Lieu leave' | 'Sick leave' | 'Roster leave' | 'NIL';
+export type LeaveType =
+  | "Day off"
+  | "Annual leave"
+  | "Lieu leave"
+  | "Sick leave"
+  | "Roster leave"
+  | "NIL";
 
 export interface Flight {
   id: string;
   flightNumber: string;
   from: string;
   to: string;
-  sta?: string; 
-  std?: string; 
+  sta?: string;
+  std?: string;
   date: string; // Mandatory date string (YYYY-MM-DD)
   day: number; // Offset for roster logic
-  type: 'Arrival' | 'Departure' | 'Turnaround';
-  priority: 'High' | 'Standard' | 'Low';
+  type: "Arrival" | "Departure" | "Turnaround";
+  priority: "High" | "Standard" | "Low";
   aircraftType?: string;
 }
 
 export interface Staff {
   id: string;
   name: string;
-  initials: string; 
+  initials: string;
   type: StaffCategory;
   workPattern: WorkPattern;
   // Flattened for direct DB/Excel mapping
@@ -61,12 +72,12 @@ export interface ShiftConfig {
   pickupTime: string; // HH:mm
   endDate: string; // YYYY-MM-DD
   endTime: string; // HH:mm
-  pickupDayOffset?: number; 
+  pickupDayOffset?: number;
   minStaff: number;
   maxStaff: number;
-  targetPower?: number; 
-  roleCounts?: Partial<Record<Skill, number>>; 
-  flightIds?: string[]; 
+  targetPower?: number;
+  roleCounts?: Partial<Record<Skill, number>>;
+  flightIds?: string[];
   description?: string;
 }
 
@@ -75,7 +86,7 @@ export interface Assignment {
   staffId: string;
   flightId: string;
   role: string; // Changed from Skill to string to support combined roles like 'SL+LC'
-  shiftId?: string; 
+  shiftId?: string;
 }
 
 export interface OffDutyRecord {
@@ -111,7 +122,7 @@ export interface ManualAssignment {
 export interface UserProfile {
   id: string;
   email: string;
-  role: 'master' | 'planner';
+  role: "master" | "planner";
   aiDailyLimit: number;
   aiWeeklyLimit: number;
   aiMonthlyLimit: number;
@@ -124,8 +135,14 @@ export interface AuditLog {
   id: string;
   userId: string;
   userEmail: string;
-  actionType: 'CREATE' | 'UPDATE' | 'DELETE' | 'GENERATE_AI';
-  entityType: 'FLIGHT' | 'STAFF' | 'SHIFT' | 'PROGRAM' | 'LEAVE' | 'USER_PROFILE';
+  actionType: "CREATE" | "UPDATE" | "DELETE" | "GENERATE_AI";
+  entityType:
+    | "FLIGHT"
+    | "STAFF"
+    | "SHIFT"
+    | "PROGRAM"
+    | "LEAVE"
+    | "USER_PROFILE";
   entityId: string;
   details: string;
   createdAt: string;

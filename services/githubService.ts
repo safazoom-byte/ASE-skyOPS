@@ -1,4 +1,3 @@
-
 export interface GitHubConfig {
   token: string;
   owner: string;
@@ -8,20 +7,27 @@ export interface GitHubConfig {
 }
 
 export const githubService = {
-  async pushToGitHub(config: GitHubConfig, data: any, message: string = 'SkyOPS: Automated Station Registry Update') {
+  async pushToGitHub(
+    config: GitHubConfig,
+    data: any,
+    message: string = "SkyOPS: Automated Station Registry Update",
+  ) {
     const { token, owner, repo, branch, path } = config;
     const baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
     const headers = {
-      'Authorization': `token ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json',
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "Content-Type": "application/json",
     };
 
     try {
       // 1. Get the current file's SHA if it exists
       let sha: string | null = null;
       try {
-        const fileRes = await fetch(`${baseUrl}/contents/${path}?ref=${branch}`, { headers });
+        const fileRes = await fetch(
+          `${baseUrl}/contents/${path}?ref=${branch}`,
+          { headers },
+        );
         if (fileRes.ok) {
           const fileData = await fileRes.json();
           sha = fileData.sha;
@@ -35,19 +41,19 @@ export const githubService = {
 
       // 3. Update or Create file
       const updateRes = await fetch(`${baseUrl}/contents/${path}`, {
-        method: 'PUT',
+        method: "PUT",
         headers,
         body: JSON.stringify({
           message,
           content,
           sha: sha || undefined,
-          branch
-        })
+          branch,
+        }),
       });
 
       if (!updateRes.ok) {
         const errData = await updateRes.json();
-        throw new Error(errData.message || 'GitHub Uplink Rejected');
+        throw new Error(errData.message || "GitHub Uplink Rejected");
       }
 
       return await updateRes.json();
@@ -55,5 +61,5 @@ export const githubService = {
       console.error("GitHub Sync Error:", err);
       throw err;
     }
-  }
+  },
 };

@@ -1,12 +1,31 @@
-import { createClient } from '@supabase/supabase-js';
-import { Flight, Staff, ShiftConfig, DailyProgram, LeaveRequest, IncomingDuty, ProgramVersion, UserProfile, AuditLog } from '../types';
+import { createClient } from "@supabase/supabase-js";
+import {
+  Flight,
+  Staff,
+  ShiftConfig,
+  DailyProgram,
+  LeaveRequest,
+  IncomingDuty,
+  ProgramVersion,
+  UserProfile,
+  AuditLog,
+} from "../types";
 
-const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+const SUPABASE_URL =
+  (import.meta as any).env.VITE_SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "";
+const SUPABASE_ANON_KEY =
+  (import.meta as any).env.VITE_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "";
 
-const isConfigured = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 5;
+const isConfigured =
+  SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 5;
 
-export const supabase = isConfigured 
+export const supabase = isConfigured
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
@@ -32,16 +51,20 @@ export const auth = {
     try {
       const { data } = await client.auth.getSession();
       return data.session;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   },
   onAuthStateChange(callback: (session: any) => void) {
     const client = supabase;
     if (!client) return () => {};
-    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((_event, session) => {
       callback(session);
     });
     return () => subscription.unsubscribe();
-  }
+  },
 };
 
 export const db = {
@@ -53,12 +76,18 @@ export const db = {
       if (!session) return null;
 
       const [fRes, sRes, shRes, pRes, lRes, iRes] = await Promise.all([
-        client.from('flights').select('*').eq('user_id', session.user.id),
-        client.from('staff').select('*').eq('user_id', session.user.id),
-        client.from('shifts').select('*').eq('user_id', session.user.id),
-        client.from('programs').select('*').eq('user_id', session.user.id),
-        client.from('leave_requests').select('*').eq('user_id', session.user.id),
-        client.from('incoming_duties').select('*').eq('user_id', session.user.id)
+        client.from("flights").select("*").eq("user_id", session.user.id),
+        client.from("staff").select("*").eq("user_id", session.user.id),
+        client.from("shifts").select("*").eq("user_id", session.user.id),
+        client.from("programs").select("*").eq("user_id", session.user.id),
+        client
+          .from("leave_requests")
+          .select("*")
+          .eq("user_id", session.user.id),
+        client
+          .from("incoming_duties")
+          .select("*")
+          .eq("user_id", session.user.id),
       ]);
 
       return {
@@ -70,15 +99,15 @@ export const db = {
           sta: f.sta,
           std: f.std,
           date: f.flight_date,
-          type: f.flight_type || 'Turnaround',
+          type: f.flight_type || "Turnaround",
           day: f.day || 0,
-          priority: 'Standard' as 'High' | 'Standard' | 'Low'
+          priority: "Standard" as "High" | "Standard" | "Low",
         })),
         staff: (sRes.data || []).map((s: any) => {
           let workPattern = s.work_pattern;
           let rosterPeriods = undefined;
-          if (workPattern && workPattern.includes('|')) {
-            const parts = workPattern.split('|');
+          if (workPattern && workPattern.includes("|")) {
+            const parts = workPattern.split("|");
             workPattern = parts[0];
             try {
               rosterPeriods = JSON.parse(parts[1]);
@@ -100,7 +129,7 @@ export const db = {
             maxShiftsPerWeek: s.max_shifts_per_week || 5,
             workFromDate: s.work_from_date,
             workToDate: s.work_to_date,
-            rosterPeriods
+            rosterPeriods,
           };
         }),
         shifts: (shRes.data || []).map((s: any) => ({
@@ -112,32 +141,32 @@ export const db = {
           endTime: s.end_time,
           minStaff: s.min_staff || 1,
           maxStaff: s.max_staff || 10,
-          roleCounts: s.role_counts || {}, 
-          flightIds: s.flight_ids || []
+          roleCounts: s.role_counts || {},
+          flightIds: s.flight_ids || [],
         })),
         programs: (pRes.data || []).map((p: any) => ({
           day: p.day,
           dateString: p.date_string,
           assignments: p.assignments || [],
-          offDuty: p.off_duty || []
+          offDuty: p.off_duty || [],
         })),
         leaveRequests: (lRes.data || []).map((l: any) => ({
           id: l.id,
           staffId: l.staff_id,
           startDate: l.start_date,
           endDate: l.end_date,
-          type: l.leave_type
+          type: l.leave_type,
         })),
         incomingDuties: (iRes.data || []).map((i: any) => ({
           id: i.id,
           staffId: i.staff_id,
           date: i.date,
-          shiftEndTime: i.shift_end_time
-        }))
+          shiftEndTime: i.shift_end_time,
+        })),
       };
-    } catch (e) { 
+    } catch (e) {
       console.error("Database fetch failure:", e);
-      return null; 
+      return null;
     }
   },
 
@@ -146,17 +175,17 @@ export const db = {
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('flights').upsert({
-      id: f.id, 
-      user_id: session.user.id, 
-      flight_number: f.flightNumber, 
+    await client.from("flights").upsert({
+      id: f.id,
+      user_id: session.user.id,
+      flight_number: f.flightNumber,
       origin: f.from,
-      destination: f.to, 
-      sta: f.sta || null, 
-      std: f.std || null, 
+      destination: f.to,
+      sta: f.sta || null,
+      std: f.std || null,
       flight_date: f.date,
-      flight_type: f.type, 
-      day: f.day
+      flight_type: f.type,
+      day: f.day,
     });
   },
 
@@ -165,23 +194,26 @@ export const db = {
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('staff').upsert({
-      id: s.id, 
-      user_id: session.user.id, 
-      name: s.name, 
+    await client.from("staff").upsert({
+      id: s.id,
+      user_id: session.user.id,
+      name: s.name,
       initials: s.initials,
-      type: s.type, 
-      work_pattern: s.type === 'Roster' && s.rosterPeriods ? `${s.workPattern}|${JSON.stringify(s.rosterPeriods)}` : s.workPattern, 
+      type: s.type,
+      work_pattern:
+        s.type === "Roster" && s.rosterPeriods
+          ? `${s.workPattern}|${JSON.stringify(s.rosterPeriods)}`
+          : s.workPattern,
       is_ramp: s.isRamp,
-      is_shift_leader: s.isShiftLeader, 
+      is_shift_leader: s.isShiftLeader,
       is_operations: s.isOps,
-      is_load_control: s.isLoadControl, 
+      is_load_control: s.isLoadControl,
       is_lost_found: s.isLostFound,
       is_labour: s.isLabour,
-      power_rate: s.powerRate, 
+      power_rate: s.powerRate,
       max_shifts_per_week: s.maxShiftsPerWeek,
-      work_from_date: s.workFromDate || null, 
-      work_to_date: s.workToDate || null
+      work_from_date: s.workFromDate || null,
+      work_to_date: s.workToDate || null,
     });
   },
 
@@ -190,18 +222,18 @@ export const db = {
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('shifts').upsert({
-      id: s.id, 
-      user_id: session.user.id, 
-      day: s.day, 
+    await client.from("shifts").upsert({
+      id: s.id,
+      user_id: session.user.id,
+      day: s.day,
       pickup_date: s.pickupDate,
-      pickup_time: s.pickupTime, 
-      end_date: s.endDate, 
+      pickup_time: s.pickupTime,
+      end_date: s.endDate,
       end_time: s.endTime,
-      min_staff: s.minStaff || 1, 
+      min_staff: s.minStaff || 1,
       max_staff: s.maxStaff || 10,
-      role_counts: s.roleCounts || {}, 
-      flight_ids: s.flightIds || []
+      role_counts: s.roleCounts || {},
+      flight_ids: s.flightIds || [],
     });
   },
 
@@ -210,13 +242,13 @@ export const db = {
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('leave_requests').upsert({
+    await client.from("leave_requests").upsert({
       id: l.id,
       user_id: session.user.id,
       staff_id: l.staffId,
       start_date: l.startDate,
       end_date: l.endDate,
-      leave_type: l.type
+      leave_type: l.type,
     });
   },
 
@@ -225,15 +257,15 @@ export const db = {
     if (!client || leaves.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('leave_requests').upsert(
-      leaves.map(l => ({
+    await client.from("leave_requests").upsert(
+      leaves.map((l) => ({
         id: l.id,
         user_id: session.user.id,
         staff_id: l.staffId,
         start_date: l.startDate,
         end_date: l.endDate,
-        leave_type: l.type
-      }))
+        leave_type: l.type,
+      })),
     );
   },
 
@@ -242,12 +274,12 @@ export const db = {
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('incoming_duties').upsert({
+    await client.from("incoming_duties").upsert({
       id: d.id,
       user_id: session.user.id,
       staff_id: d.staffId,
       date: d.date,
-      shift_end_time: d.shiftEndTime
+      shift_end_time: d.shiftEndTime,
     });
   },
 
@@ -256,14 +288,14 @@ export const db = {
     if (!client || duties.length === 0) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('incoming_duties').upsert(
-      duties.map(d => ({
+    await client.from("incoming_duties").upsert(
+      duties.map((d) => ({
         id: d.id,
         user_id: session.user.id,
         staff_id: d.staffId,
         date: d.date,
-        shift_end_time: d.shiftEndTime
-      }))
+        shift_end_time: d.shiftEndTime,
+      })),
     );
   },
 
@@ -273,38 +305,84 @@ export const db = {
     const session = await auth.getSession();
     if (!session) return;
 
-    const datesToOverwrite = programs.map(p => p.dateString).filter(Boolean);
-    
+    const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
+
     if (datesToOverwrite.length > 0) {
-      await client.from('programs')
+      await client
+        .from("programs")
         .delete()
-        .eq('user_id', session.user.id)
-        .in('date_string', datesToOverwrite);
+        .eq("user_id", session.user.id)
+        .in("date_string", datesToOverwrite);
     }
 
-    await client.from('programs').insert(
-      programs.map(p => ({
-        user_id: session.user.id, 
-        day: p.day, 
-        date_string: p.dateString || '',
-        assignments: p.assignments || [], 
-        off_duty: p.offDuty || []
-      }))
+    await client.from("programs").insert(
+      programs.map((p) => ({
+        user_id: session.user.id,
+        day: p.day,
+        date_string: p.dateString || "",
+        assignments: p.assignments || [],
+        off_duty: p.offDuty || [],
+      })),
     );
   },
 
-  async deleteFlight(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('flights').delete().eq('id', id).eq('user_id', session.user.id); },
-  async deleteStaff(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('staff').delete().eq('id', id).eq('user_id', session.user.id); },
-  async deleteShift(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('shifts').delete().eq('id', id).eq('user_id', session.user.id); },
-  async deleteLeave(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('leave_requests').delete().eq('id', id).eq('user_id', session.user.id); },
-  async deleteIncomingDuty(id: string) { const client = supabase; const session = await auth.getSession(); if (client && session) await client.from('incoming_duties').delete().eq('id', id).eq('user_id', session.user.id); },
+  async deleteFlight(id: string) {
+    const client = supabase;
+    const session = await auth.getSession();
+    if (client && session)
+      await client
+        .from("flights")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
+  },
+  async deleteStaff(id: string) {
+    const client = supabase;
+    const session = await auth.getSession();
+    if (client && session)
+      await client
+        .from("staff")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
+  },
+  async deleteShift(id: string) {
+    const client = supabase;
+    const session = await auth.getSession();
+    if (client && session)
+      await client
+        .from("shifts")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
+  },
+  async deleteLeave(id: string) {
+    const client = supabase;
+    const session = await auth.getSession();
+    if (client && session)
+      await client
+        .from("leave_requests")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
+  },
+  async deleteIncomingDuty(id: string) {
+    const client = supabase;
+    const session = await auth.getSession();
+    if (client && session)
+      await client
+        .from("incoming_duties")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
+  },
 
   async saveProgramVersion(v: ProgramVersion) {
     const client = supabase;
     if (!client) return;
     const session = await auth.getSession();
     if (!session) return;
-    await client.from('program_versions').upsert({
+    await client.from("program_versions").upsert({
       id: v.id,
       user_id: session.user.id,
       version_number: v.versionNumber,
@@ -314,7 +392,7 @@ export const db = {
       period_end: v.periodEnd,
       programs: v.programs,
       station_health: v.stationHealth,
-      is_auto_save: v.isAutoSave || false
+      is_auto_save: v.isAutoSave || false,
     });
   },
 
@@ -323,7 +401,11 @@ export const db = {
     if (!client) return [];
     const session = await auth.getSession();
     if (!session) return [];
-    const { data } = await client.from('program_versions').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
+    const { data } = await client
+      .from("program_versions")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false });
     if (!data) return [];
     return data.map((v: any) => ({
       id: v.id,
@@ -334,85 +416,110 @@ export const db = {
       periodEnd: v.period_end,
       programs: v.programs,
       stationHealth: v.station_health,
-      isAutoSave: v.is_auto_save
+      isAutoSave: v.is_auto_save,
     }));
   },
 
   async deleteProgramVersion(id: string) {
     const client = supabase;
     const session = await auth.getSession();
-    if (client && session) await client.from('program_versions').delete().eq('id', id).eq('user_id', session.user.id);
+    if (client && session)
+      await client
+        .from("program_versions")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", session.user.id);
   },
 
   async getUserProfile(): Promise<UserProfile | null> {
     const session = await auth.getSession();
     if (!session) return null;
-    
+
     // Fallback to local storage if no DB
-    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
-    let profile = localProfiles.find((p: UserProfile) => p.id === session.user.id);
-    
+    const localProfiles = JSON.parse(
+      localStorage.getItem("skyops_user_profiles") || "[]",
+    );
+    let profile = localProfiles.find(
+      (p: UserProfile) => p.id === session.user.id,
+    );
+
     if (supabase) {
       try {
-        const { data } = await supabase.from('user_profiles').select('*').eq('id', session.user.id).single();
+        const { data } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .single();
         if (data) {
           profile = {
             id: data.id,
             email: data.email,
-            role: data.role || 'planner',
+            role: data.role || "planner",
             aiDailyLimit: data.ai_daily_limit ?? 5,
             aiWeeklyLimit: data.ai_weekly_limit ?? 20,
             aiMonthlyLimit: data.ai_monthly_limit ?? 50,
             maxStaff: data.max_staff ?? 50,
             maxShifts: data.max_shifts ?? 20,
-            isActive: data.is_active ?? true
+            isActive: data.is_active ?? true,
           };
         } else {
           // Check if a profile was pre-created by email
-          const { data: emailData } = await supabase.from('user_profiles').select('*').eq('email', session.user.email).single();
+          const { data: emailData } = await supabase
+            .from("user_profiles")
+            .select("*")
+            .eq("email", session.user.email)
+            .single();
           if (emailData) {
             // Update the ID to match the real auth ID
-            await supabase.from('user_profiles').delete().eq('id', emailData.id); // Delete the temp one
-            await supabase.from('user_profiles').insert({
+            await supabase
+              .from("user_profiles")
+              .delete()
+              .eq("id", emailData.id); // Delete the temp one
+            await supabase.from("user_profiles").insert({
               ...emailData,
-              id: session.user.id // Insert with real ID
+              id: session.user.id, // Insert with real ID
             });
             profile = {
               id: session.user.id,
               email: emailData.email,
-              role: emailData.role || 'planner',
+              role: emailData.role || "planner",
               aiDailyLimit: emailData.ai_daily_limit ?? 5,
               aiWeeklyLimit: emailData.ai_weekly_limit ?? 20,
               aiMonthlyLimit: emailData.ai_monthly_limit ?? 50,
               maxStaff: emailData.max_staff ?? 50,
               maxShifts: emailData.max_shifts ?? 20,
-              isActive: emailData.is_active ?? true
+              isActive: emailData.is_active ?? true,
             };
           }
         }
-      } catch (e) { console.warn("Could not fetch profile from DB, using local"); }
+      } catch (e) {
+        console.warn("Could not fetch profile from DB, using local");
+      }
     }
-    
+
     // If no profile exists, create a default one (first user is master)
     if (!profile) {
       const isFirstUser = localProfiles.length === 0;
       profile = {
         id: session.user.id,
         email: session.user.email,
-        role: isFirstUser ? 'master' : 'planner',
+        role: isFirstUser ? "master" : "planner",
         aiDailyLimit: 5,
         aiWeeklyLimit: 20,
         aiMonthlyLimit: 50,
         maxStaff: 50,
         maxShifts: 20,
-        isActive: true
+        isActive: true,
       };
       localProfiles.push(profile);
-      localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
-      
+      localStorage.setItem(
+        "skyops_user_profiles",
+        JSON.stringify(localProfiles),
+      );
+
       if (supabase) {
         try {
-          await supabase.from('user_profiles').insert({
+          await supabase.from("user_profiles").insert({
             id: profile.id,
             email: profile.email,
             role: profile.role,
@@ -421,19 +528,25 @@ export const db = {
             ai_monthly_limit: profile.aiMonthlyLimit,
             max_staff: profile.maxStaff,
             max_shifts: profile.maxShifts,
-            is_active: profile.isActive
+            is_active: profile.isActive,
           });
-        } catch (e) { console.warn("Could not insert profile to DB"); }
+        } catch (e) {
+          console.warn("Could not insert profile to DB");
+        }
       }
     }
     return profile;
   },
 
   async getAllUserProfiles(): Promise<UserProfile[]> {
-    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    const localProfiles = JSON.parse(
+      localStorage.getItem("skyops_user_profiles") || "[]",
+    );
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('user_profiles').select('*');
+        const { data, error } = await supabase
+          .from("user_profiles")
+          .select("*");
         if (error) {
           console.error("Supabase select error:", error);
         }
@@ -447,32 +560,41 @@ export const db = {
             aiMonthlyLimit: d.ai_monthly_limit,
             maxStaff: d.max_staff,
             maxShifts: d.max_shifts,
-            isActive: d.is_active
+            isActive: d.is_active,
           }));
-          
+
           // Merge local profiles that aren't in the DB yet
-          const missingInDb = localProfiles.filter((lp: UserProfile) => !dbProfiles.some((dp: UserProfile) => dp.email === lp.email));
-          
+          const missingInDb = localProfiles.filter(
+            (lp: UserProfile) =>
+              !dbProfiles.some((dp: UserProfile) => dp.email === lp.email),
+          );
+
           return [...dbProfiles, ...missingInDb];
         }
-      } catch (e) { console.warn("Could not fetch profiles from DB", e); }
+      } catch (e) {
+        console.warn("Could not fetch profiles from DB", e);
+      }
     }
     return localProfiles;
   },
 
   async updateUserProfile(profile: UserProfile) {
-    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
-    const index = localProfiles.findIndex((p: UserProfile) => p.id === profile.id);
+    const localProfiles = JSON.parse(
+      localStorage.getItem("skyops_user_profiles") || "[]",
+    );
+    const index = localProfiles.findIndex(
+      (p: UserProfile) => p.id === profile.id,
+    );
     if (index >= 0) {
       localProfiles[index] = profile;
     } else {
       localProfiles.push(profile);
     }
-    localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
+    localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
 
     if (supabase) {
       try {
-        await supabase.from('user_profiles').upsert({
+        await supabase.from("user_profiles").upsert({
           id: profile.id,
           email: profile.email,
           role: profile.role,
@@ -481,32 +603,40 @@ export const db = {
           ai_monthly_limit: profile.aiMonthlyLimit,
           max_staff: profile.maxStaff,
           max_shifts: profile.maxShifts,
-          is_active: profile.isActive
+          is_active: profile.isActive,
         });
-      } catch (e) { console.warn("Could not update profile in DB"); }
+      } catch (e) {
+        console.warn("Could not update profile in DB");
+      }
     }
   },
 
   async deleteUserProfile(id: string) {
-    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    const localProfiles = JSON.parse(
+      localStorage.getItem("skyops_user_profiles") || "[]",
+    );
     const updated = localProfiles.filter((p: UserProfile) => p.id !== id);
-    localStorage.setItem('skyops_user_profiles', JSON.stringify(updated));
+    localStorage.setItem("skyops_user_profiles", JSON.stringify(updated));
 
     if (supabase) {
       try {
-        await supabase.from('user_profiles').delete().eq('id', id);
-      } catch (e) { console.warn("Could not delete profile from DB"); }
+        await supabase.from("user_profiles").delete().eq("id", id);
+      } catch (e) {
+        console.warn("Could not delete profile from DB");
+      }
     }
   },
 
   async createUserProfile(profile: UserProfile) {
-    const localProfiles = JSON.parse(localStorage.getItem('skyops_user_profiles') || '[]');
+    const localProfiles = JSON.parse(
+      localStorage.getItem("skyops_user_profiles") || "[]",
+    );
     localProfiles.push(profile);
-    localStorage.setItem('skyops_user_profiles', JSON.stringify(localProfiles));
+    localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
 
     if (supabase) {
       try {
-        const { error } = await supabase.from('user_profiles').insert({
+        const { error } = await supabase.from("user_profiles").insert({
           id: profile.id,
           email: profile.email,
           role: profile.role,
@@ -515,17 +645,24 @@ export const db = {
           ai_monthly_limit: profile.aiMonthlyLimit,
           max_staff: profile.maxStaff,
           max_shifts: profile.maxShifts,
-          is_active: profile.isActive
+          is_active: profile.isActive,
         });
         if (error) console.error("Supabase insert error:", error);
-      } catch (e) { console.warn("Could not insert profile to DB", e); }
+      } catch (e) {
+        console.warn("Could not insert profile to DB", e);
+      }
     }
   },
 
-  async logAction(actionType: AuditLog['actionType'], entityType: AuditLog['entityType'], entityId: string, details: string) {
+  async logAction(
+    actionType: AuditLog["actionType"],
+    entityType: AuditLog["entityType"],
+    entityId: string,
+    details: string,
+  ) {
     const session = await auth.getSession();
     if (!session) return;
-    
+
     const log: AuditLog = {
       id: Math.random().toString(36).substr(2, 9),
       userId: session.user.id,
@@ -534,16 +671,21 @@ export const db = {
       entityType,
       entityId,
       details,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
-    const localLogs = JSON.parse(localStorage.getItem('skyops_audit_logs') || '[]');
+    const localLogs = JSON.parse(
+      localStorage.getItem("skyops_audit_logs") || "[]",
+    );
     localLogs.unshift(log);
-    localStorage.setItem('skyops_audit_logs', JSON.stringify(localLogs.slice(0, 1000))); // keep last 1000
+    localStorage.setItem(
+      "skyops_audit_logs",
+      JSON.stringify(localLogs.slice(0, 1000)),
+    ); // keep last 1000
 
     if (supabase) {
       try {
-        await supabase.from('audit_logs').insert({
+        await supabase.from("audit_logs").insert({
           id: log.id,
           user_id: log.userId,
           user_email: log.userEmail,
@@ -551,16 +693,22 @@ export const db = {
           entity_type: log.entityType,
           entity_id: log.entityId,
           details: log.details,
-          created_at: log.createdAt
+          created_at: log.createdAt,
         });
-      } catch (e) { console.warn("Could not insert audit log to DB"); }
+      } catch (e) {
+        console.warn("Could not insert audit log to DB");
+      }
     }
   },
 
   async getAuditLogs(): Promise<AuditLog[]> {
     if (supabase) {
       try {
-        const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500);
+        const { data } = await supabase
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(500);
         if (data && data.length > 0) {
           return data.map((d: any) => ({
             id: d.id,
@@ -570,35 +718,41 @@ export const db = {
             entityType: d.entity_type,
             entityId: d.entity_id,
             details: d.details,
-            createdAt: d.created_at
+            createdAt: d.created_at,
           }));
         }
-      } catch (e) { console.warn("Could not fetch audit logs from DB"); }
+      } catch (e) {
+        console.warn("Could not fetch audit logs from DB");
+      }
     }
-    return JSON.parse(localStorage.getItem('skyops_audit_logs') || '[]');
+    return JSON.parse(localStorage.getItem("skyops_audit_logs") || "[]");
   },
 
-  async getAIGenerationCount(userId: string, period: 'daily' | 'weekly' | 'monthly'): Promise<number> {
+  async getAIGenerationCount(
+    userId: string,
+    period: "daily" | "weekly" | "monthly",
+  ): Promise<number> {
     const logs = await this.getAuditLogs();
     const now = new Date();
     let startDate = new Date();
-    
-    if (period === 'daily') {
+
+    if (period === "daily") {
       startDate.setHours(0, 0, 0, 0);
-    } else if (period === 'weekly') {
+    } else if (period === "weekly") {
       const day = startDate.getDay();
       const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
       startDate.setDate(diff);
       startDate.setHours(0, 0, 0, 0);
-    } else if (period === 'monthly') {
+    } else if (period === "monthly") {
       startDate.setDate(1);
       startDate.setHours(0, 0, 0, 0);
     }
 
-    return logs.filter(l => 
-      l.userId === userId && 
-      l.actionType === 'GENERATE_AI' && 
-      new Date(l.createdAt) >= startDate
+    return logs.filter(
+      (l) =>
+        l.userId === userId &&
+        l.actionType === "GENERATE_AI" &&
+        new Date(l.createdAt) >= startDate,
     ).length;
-  }
+  },
 };
