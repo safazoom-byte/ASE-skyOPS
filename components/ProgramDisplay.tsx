@@ -475,7 +475,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             else break;
           }
         }
-        const label = `${s.initials} (${count})`;
+        const label = s.initials;
         let isRosterOutOfContract = false;
         if (s.type === "Roster") {
           if (s.rosterPeriods && s.rosterPeriods.length > 0) {
@@ -631,13 +631,13 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.text("ABSENCE AND REST REGISTRY", 14, finalY);
 
       const registryData = [
-        ["DAYS OFF", pdfCategories["DAYS OFF"].join(", ") || "NIL"],
-        ["ROSTER LEAVE", pdfCategories["ROSTER LEAVE"].join(", ") || "NIL"],
-        ["ANNUAL LEAVE", pdfCategories["ANNUAL LEAVE"].join(", ") || "NIL"],
-        ["SICK LEAVE", pdfCategories["SICK LEAVE"].join(", ") || "NIL"],
+        ["DAYS OFF", pdfCategories["DAYS OFF"].join("-") || "NIL"],
+        ["ROSTER LEAVE", pdfCategories["ROSTER LEAVE"].join("-") || "NIL"],
+        ["ANNUAL LEAVE", pdfCategories["ANNUAL LEAVE"].join("-") || "NIL"],
+        ["SICK LEAVE", pdfCategories["SICK LEAVE"].join("-") || "NIL"],
         [
           "STANDBY (RESERVE)",
-          pdfCategories["STANDBY (RESERVE)"].join(", ") || "NIL",
+          pdfCategories["STANDBY (RESERVE)"].join("-") || "NIL",
         ],
       ];
 
@@ -2463,8 +2463,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     {cat}
                                   </td>
                                   <td className="px-4 py-3">
-                                    <div className="flex flex-wrap gap-2">
-                                      {items.map((item) => {
+                                    <div className="flex flex-wrap items-center">
+                                      {items.map((item, idx) => {
                                         const {
                                           staff: s,
                                           count,
@@ -2483,49 +2483,50 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           cat === "ANNUAL LEAVE" ||
                                           isRequestedDayOff;
                                         return (
-                                          <div
-                                            key={s.id}
-                                            draggable={!isLocked}
-                                            onDragStart={(e) => {
-                                              if (isLocked) {
-                                                e.preventDefault();
-                                                return;
-                                              }
-                                              handleDragStart(
-                                                e,
-                                                s.id,
-                                                "ABSENCE",
-                                                prog.dateString!,
-                                                s.isShiftLeader ||
-                                                  s.initials.toUpperCase() ===
-                                                    "SK-ATZ"
-                                                  ? "SL"
-                                                  : s.isLoadControl ||
-                                                      s.initials.toUpperCase() ===
-                                                        "SK-ATZ"
-                                                    ? "LC"
-                                                    : s.isRamp
-                                                      ? "RMP"
-                                                      : s.isLostFound
-                                                        ? "LF"
-                                                        : s.isLabour
-                                                          ? "LBR"
-                                                          : "OPS",
-                                              );
-                                            }}
-                                            className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-50 cursor-not-allowed" : "cursor-move hover:scale-105"}`}
-                                          >
-                                            <span>{s.initials}</span>
-                                            {isLocked ? (
-                                              <Lock
-                                                size={8}
-                                                className="text-slate-500 opacity-70 -ml-0.5"
-                                              />
-                                            ) : null}
-                                            <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">
-                                              {count}
-                                            </span>
-                                          </div>
+                                          <React.Fragment key={s.id}>
+                                            <div
+                                              draggable={!isLocked}
+                                              onDragStart={(e) => {
+                                                if (isLocked) {
+                                                  e.preventDefault();
+                                                  return;
+                                                }
+                                                handleDragStart(
+                                                  e,
+                                                  s.id,
+                                                  "ABSENCE",
+                                                  prog.dateString!,
+                                                  s.isShiftLeader ||
+                                                    s.initials.toUpperCase() ===
+                                                      "SK-ATZ"
+                                                    ? "SL"
+                                                    : s.isLoadControl ||
+                                                        s.initials.toUpperCase() ===
+                                                          "SK-ATZ"
+                                                      ? "LC"
+                                                      : s.isRamp
+                                                        ? "RMP"
+                                                        : s.isLostFound
+                                                          ? "LF"
+                                                          : s.isLabour
+                                                            ? "LBR"
+                                                            : "OPS",
+                                                );
+                                              }}
+                                              className={`text-[10px] font-bold uppercase transition-all flex items-center group ${isLocked ? "text-slate-400 cursor-not-allowed" : "cursor-move hover:scale-105 hover:text-indigo-600 text-slate-700"}`}
+                                            >
+                                              <span>{s.initials}</span>
+                                              {isLocked ? (
+                                                <Lock
+                                                  size={8}
+                                                  className="opacity-70 ml-0.5"
+                                                />
+                                              ) : null}
+                                            </div>
+                                            {idx < items.length - 1 && (
+                                              <span className="text-slate-400 font-bold mx-1">-</span>
+                                            )}
+                                          </React.Fragment>
                                         );
                                       })}
                                       {items.length === 0 && (
