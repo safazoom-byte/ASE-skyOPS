@@ -545,12 +545,16 @@ export const generateAIProgram = async (
                 a.role.includes(roleKey)
               )
                 return true;
-              if (roleKey === "LC" && st.isLoadControl) return true;
-              if (roleKey === "SL" && st.isShiftLeader) return true;
-              if (roleKey === "RMP" && st.isRamp) return true;
-              if (roleKey === "OPS" && st.isOps) return true;
-              if (roleKey === "LF" && st.isLostFound) return true;
-              if (roleKey === "LBR" && st.isLabour) return true;
+              const isGeneric =
+                !a.role || a.role === "Labour" || a.role === "LBR";
+              if (isGeneric) {
+                if (roleKey === "LC" && st.isLoadControl) return true;
+                if (roleKey === "SL" && st.isShiftLeader) return true;
+                if (roleKey === "RMP" && st.isRamp) return true;
+                if (roleKey === "OPS" && st.isOps) return true;
+                if (roleKey === "LF" && st.isLostFound) return true;
+                if (roleKey === "LBR" && st.isLabour) return true;
+              }
               return false;
             }).length;
 

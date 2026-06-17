@@ -919,6 +919,23 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
 
+          const isGeneric = !a.role || a.role === "Labour" || a.role === "LBR";
+          if (isGeneric) {
+            if (
+              targetRole === "Load Control" &&
+              (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
+            )
+              return true;
+            if (
+              targetRole === "Shift Leader" &&
+              (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
+            )
+              return true;
+            if (targetRole === "Ramp" && st.isRamp) return true;
+            if (targetRole === "Operations" && st.isOps) return true;
+            if (targetRole === "Lost and Found" && st.isLostFound)
+              return true;
+          }
           return false;
         };
         const getStaffForRole = (role: string) => {
@@ -1392,6 +1409,23 @@ export const ProgramDisplay: React.FC<Props> = ({
                               : targetRole;
                   if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
                   
+                  const isGeneric = !a.role || a.role === "Labour" || a.role === "LBR";
+                  if (isGeneric) {
+                    if (
+                      targetRole === "Load Control" &&
+                      (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
+                    )
+                      return true;
+                    if (
+                      targetRole === "Shift Leader" &&
+                      (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
+                    )
+                      return true;
+                    if (targetRole === "Ramp" && st.isRamp) return true;
+                    if (targetRole === "Operations" && st.isOps) return true;
+                    if (targetRole === "Lost and Found" && st.isLostFound)
+                      return true;
+                  }
                   return false;
                 };
                 const getRoleCell = (role: string, reqFlag: boolean) => {
