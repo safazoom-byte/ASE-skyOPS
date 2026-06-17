@@ -300,11 +300,16 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (s) {
         const [sh, sm] = s.endTime.split(":").map(Number);
         const [ph, pm] = s.pickupTime.split(":").map(Number);
+        const startDt = new Date(a.dateString);
+        startDt.setHours(ph, pm, 0, 0);
         const endDt = new Date(a.dateString);
         endDt.setHours(sh, sm, 0, 0);
         if (sh < ph) endDt.setDate(endDt.getDate() + 1);
+        
+        // We only consider previous shifts (ones that started before this current one).
+        // If they end after currentShiftStart, diffMs will be negative and throw a warning.
         if (
-          endDt <= currentShiftStart &&
+          startDt < currentShiftStart &&
           (!lastEndTime || endDt > lastEndTime)
         ) {
           lastEndTime = endDt;
@@ -1319,15 +1324,20 @@ export const ProgramDisplay: React.FC<Props> = ({
                     );
                   })}
                   <td className="px-4 py-2 text-center border-l-2 border-indigo-100 bg-indigo-50/50">
-                    <div className="font-bold text-indigo-900">
+                    <div className={`font-bold ${s.type === "Local" && workedCount > Math.round(Math.max(0, activePrograms.length - excusedLeaves) * (5 / 7)) ? "text-rose-600" : "text-indigo-900"}`}>
                       {workedCount}/{activePrograms.length}
                     </div>
-                    <div className="text-[10px] text-indigo-600 font-bold mt-0.5">
-                      [{s.totalHours.toFixed(1)}H]
+                    <div className="text-[10px] text-indigo-600 font-bold mt-0.5 flex items-center justify-center gap-1">
+                      <span>[{s.totalHours.toFixed(1)}H]</span>
                     </div>
                     {excusedLeaves > 0 && (
                       <div className="text-[9px] text-rose-500 font-bold mt-0.5">
                         (+{excusedLeaves} AL)
+                      </div>
+                    )}
+                    {s.type === "Local" && workedCount > Math.round(Math.max(0, activePrograms.length - excusedLeaves) * (5 / 7)) && (
+                      <div className="text-[9px] text-rose-600 font-bold mt-1 bg-rose-100 px-1 py-0.5 rounded inline-block">
+                        ⚠️ MAX {Math.round(Math.max(0, activePrograms.length - excusedLeaves) * (5 / 7))}
                       </div>
                     )}
                   </td>

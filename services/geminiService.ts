@@ -144,13 +144,43 @@ export const calculateCredits = (
   const progEnd = new Date(startDate);
   progEnd.setDate(progStart.getDate() + duration - 1);
 
-  let grossCredits = 0;
+  let leaveDeduction = 0;
+  const staffLeaves = leaveRequests.filter((l) => l.staffId === staff.id);
+  staffLeaves.forEach((leave) => {
+    if (
+      [
+        "Annual leave",
+        "Sick leave",
+        "Lieu leave",
+        "Day off",
+        "Roster leave",
+      ].includes(leave.type)
+    ) {
+      const leaveStart = new Date(leave.startDate);
+      const leaveEnd = new Date(leave.endDate);
+      const overlapStart = progStart > leaveStart ? progStart : leaveStart;
+      const overlapEnd = progEnd < leaveEnd ? progEnd : leaveEnd;
+      if (overlapStart <= overlapEnd) {
+        leaveDeduction +=
+          Math.floor(
+            (overlapEnd.getTime() - overlapStart.getTime()) /
+              (1000 * 60 * 60 * 24),
+          ) + 1;
+      }
+    }
+  });
+
   if (staff.type === "Local") {
-    // 5/2 Rule Logic: For every 7 days, 5 days work.
-    grossCredits = Math.floor(duration * (5 / 7));
+    // 5/2 Rule Logic adjusted for leaves
+    const activeDays = Math.max(0, duration - leaveDeduction);
+    let grossCredits = Math.round(activeDays * (5 / 7));
     // Fallback for short periods (e.g. 1-4 days) to allow utilization
-    if (duration < 7 && duration > 0) grossCredits = Math.ceil(duration * 0.8);
+    if (duration < 7 && duration > 0) {
+      grossCredits = Math.ceil(activeDays * 0.8);
+    }
+    return grossCredits;
   } else {
+    let grossCredits = 0;
     if (staff.rosterPeriods && staff.rosterPeriods.length > 0) {
       grossCredits = 0;
       staff.rosterPeriods.forEach((period) => {
@@ -178,35 +208,8 @@ export const calculateCredits = (
         grossCredits = 0;
       }
     }
+    return Math.max(0, grossCredits - leaveDeduction);
   }
-
-  let leaveDeduction = 0;
-  const staffLeaves = leaveRequests.filter((l) => l.staffId === staff.id);
-  staffLeaves.forEach((leave) => {
-    if (
-      [
-        "Annual leave",
-        "Sick leave",
-        "Lieu leave",
-        "Day off",
-        "Roster leave",
-      ].includes(leave.type)
-    ) {
-      const leaveStart = new Date(leave.startDate);
-      const leaveEnd = new Date(leave.endDate);
-      const overlapStart = progStart > leaveStart ? progStart : leaveStart;
-      const overlapEnd = progEnd < leaveEnd ? progEnd : leaveEnd;
-      if (overlapStart <= overlapEnd) {
-        leaveDeduction +=
-          Math.floor(
-            (overlapEnd.getTime() - overlapStart.getTime()) /
-              (1000 * 60 * 60 * 24),
-          ) + 1;
-      }
-    }
-  });
-
-  return Math.max(0, grossCredits - leaveDeduction);
 };
 
 export const generateAIProgram = async (
@@ -262,7 +265,32 @@ export const generateAIProgram = async (
   }
 
   // 2. Calculate Target Off Quotas
-  let totalDaysOffNeeded = localStaff.length * 2;
+  const requiredOffPerStaff = new Map<string, number>();
+  let totalDaysOffNeeded = 0;
+  
+  localStaff.forEach((s) => {
+    let leaveDeduction = 0;
+    const staffLeaves = data.leaveRequests?.filter((l) => l.staffId === s.id) || [];
+    staffLeaves.forEach((leave) => {
+      if (["Annual leave", "Sick leave", "Lieu leave", "Day off", "Roster leave"].includes(leave.type)) {
+        const leaveStart = new Date(leave.startDate);
+        const leaveEnd = new Date(leave.endDate);
+        const overlapStart = programStart > leaveStart ? programStart : leaveStart;
+        const overlapEnd = programEnd < leaveEnd ? programEnd : leaveEnd;
+        if (overlapStart <= overlapEnd) {
+          leaveDeduction += Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        }
+      }
+    });
+    
+    const activeDays = Math.max(0, config.numDays - leaveDeduction);
+    const maxWorking = Math.round(activeDays * (5 / 7));
+    const requiredOff = Math.max(0, activeDays - maxWorking);
+    
+    requiredOffPerStaff.set(s.id, requiredOff);
+    totalDaysOffNeeded += requiredOff;
+  });
+
   const dailyOffQuota = new Array(config.numDays).fill(0);
 
   // Distribute days off to the days with the highest surplus first
@@ -302,8 +330,9 @@ export const generateAIProgram = async (
   sortedLocals.forEach((s) => {
     const init = s.initials.toUpperCase();
     plannedDaysOff[init] = [];
+    const requiredOff = requiredOffPerStaff.get(s.id) || 0;
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < requiredOff; i++) {
       let bestDay = -1;
       let bestScore = -Infinity;
 

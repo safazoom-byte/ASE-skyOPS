@@ -57,11 +57,6 @@ export const CapacityForecast: React.FC<Props> = ({
     let totalLeaveLost = 0;
 
     localStaff.forEach((s) => {
-      // Base capacity calculation aligned with AI Engine
-      let baseCap = Math.floor(duration * (5 / 7));
-      // Permissive scale for short durations (< 1 week)
-      if (duration < 7 && duration > 0) baseCap = Math.ceil(duration * 0.75);
-
       // Calculate leave overlap
       let leaveDays = 0;
       const sLeaves = leaveRequests.filter((l) => l.staffId === s.id);
@@ -72,9 +67,12 @@ export const CapacityForecast: React.FC<Props> = ({
         leaveDays += getOverlapDays(start, end, lStart, lEnd);
       });
 
+      const activeDays = Math.max(0, duration - leaveDays);
+      let netCap = Math.round(activeDays * (5 / 7));
+      if (duration < 7 && duration > 0) netCap = Math.ceil(activeDays * 0.8);
+
       totalLeaveLost += leaveDays;
-      // Net capacity cannot be negative
-      localCapacity += Math.max(0, baseCap - leaveDays);
+      localCapacity += netCap;
     });
 
     // --- ROSTER CAPACITY CALCULATION ---
