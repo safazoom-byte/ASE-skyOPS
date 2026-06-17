@@ -204,6 +204,27 @@ export const ProgramDisplay: React.FC<Props> = ({
     })
     .sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
 
+  const leaveMapByStaff = React.useMemo(() => {
+    const map: Record<string, LeaveRequest[]> = {};
+    leaveRequests.forEach((l) => {
+      if (!map[l.staffId]) map[l.staffId] = [];
+      map[l.staffId].push(l);
+    });
+    return map;
+  }, [leaveRequests]);
+
+  const hasLeaveOnDate = React.useCallback(
+    (staffId: string, dateString: string, excludeDayOff = false) => {
+      const leaves = leaveMapByStaff[staffId];
+      if (!leaves) return null;
+      return leaves.find((l) => {
+        if (excludeDayOff && l.type === "Day off") return false;
+        return l.startDate <= dateString && l.endDate >= dateString;
+      });
+    },
+    [leaveMapByStaff],
+  );
+
   const totalAssignments = activePrograms.reduce(
     (acc, p) => acc + p.assignments.length,
     0,
@@ -211,12 +232,34 @@ export const ProgramDisplay: React.FC<Props> = ({
   const isFailedGeneration =
     activePrograms.length > 0 && totalAssignments === 0;
 
+  const incomingDutiesByStaff = React.useMemo(() => {
+    const map: Record<string, IncomingDuty[]> = {};
+    incomingDuties.forEach(d => {
+      if (!map[d.staffId]) map[d.staffId] = [];
+      map[d.staffId].push(d);
+    });
+    return map;
+  }, [incomingDuties]);
+
+  const assignmentsByStaff = React.useMemo(() => {
+    const map: Record<string, { shiftId: string; dateString: string }[]> = {};
+    programs.forEach(p => {
+      const pDate = p.dateString || startDate;
+      p.assignments.forEach(a => {
+        if (!map[a.staffId]) map[a.staffId] = [];
+        map[a.staffId].push({ shiftId: a.shiftId || "", dateString: pDate });
+      });
+    });
+    return map;
+  }, [programs, startDate]);
+
   const calculateRestHours = (
     staffId: string,
     currentShiftStart: Date,
   ): number | null => {
     let lastEndTime: Date | null = null;
-    const staffIncoming = incomingDuties.filter((d) => d.staffId === staffId);
+    const staffIncoming = incomingDutiesByStaff[staffId] || [];
+    
     staffIncoming.forEach((d) => {
       const dateStr = d.date || startDate;
       const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
@@ -224,30 +267,27 @@ export const ProgramDisplay: React.FC<Props> = ({
         lastEndTime = dt;
       }
     });
-    programs.forEach((p) => {
-      p.assignments
-        .filter((a) => a.staffId === staffId)
-        .forEach((a) => {
-          const s = getShift(a.shiftId || "");
-          if (s) {
-            const pDate = new Date(p.dateString || startDate);
-            const [sh, sm] = s.endTime.split(":").map(Number);
-            const [ph, pm] = s.pickupTime.split(":").map(Number);
-            const endDt = new Date(pDate);
-            endDt.setHours(sh, sm, 0, 0);
-            if (sh < ph) endDt.setDate(endDt.getDate() + 1);
-            if (
-              endDt <= currentShiftStart &&
-              (!lastEndTime || endDt > lastEndTime)
-            ) {
-              lastEndTime = endDt;
-            }
-          }
-        });
+
+    const assigns = assignmentsByStaff[staffId] || [];
+    assigns.forEach((a) => {
+      const s = getShift(a.shiftId);
+      if (s) {
+        const [sh, sm] = s.endTime.split(":").map(Number);
+        const [ph, pm] = s.pickupTime.split(":").map(Number);
+        const endDt = new Date(a.dateString);
+        endDt.setHours(sh, sm, 0, 0);
+        if (sh < ph) endDt.setDate(endDt.getDate() + 1);
+        if (
+          endDt <= currentShiftStart &&
+          (!lastEndTime || endDt > lastEndTime)
+        ) {
+          lastEndTime = endDt;
+        }
+      }
     });
+    
     if (!lastEndTime) return null;
-    const diffMs =
-      currentShiftStart.getTime() - (lastEndTime as Date).getTime();
+    const diffMs = currentShiftStart.getTime() - (lastEndTime as Date).getTime();
     return parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
   };
 
@@ -386,12 +426,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       };
 
       offStaff.forEach((s) => {
-        const leave = leaveRequests.find(
-          (l) =>
-            l.staffId === s.id &&
-            l.startDate <= prog.dateString! &&
-            l.endDate >= prog.dateString!,
-        );
+        const leave = hasLeaveOnDate(s.id, prog.dateString!);
         let count = 1;
         if (leave) {
           const start = new Date(leave.startDate);
@@ -404,12 +439,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           for (let i = index - 1; i >= 0; i--) {
             const prevProg = activePrograms[i];
             const worked = prevProg.assignments.some((a) => a.staffId === s.id);
-            const prevLeave = leaveRequests.find(
-              (l) =>
-                l.staffId === s.id &&
-                l.startDate <= prevProg.dateString! &&
-                l.endDate >= prevProg.dateString!,
-            );
+            const prevLeave = hasLeaveOnDate(s.id, prevProg.dateString!);
             if (!worked && !prevLeave) count++;
             else break;
           }
@@ -457,9 +487,9 @@ export const ProgramDisplay: React.FC<Props> = ({
 
       contentStartY += 10;
 
-      const shiftsToday = shifts.filter(
-        (s) => s.pickupDate === prog.dateString,
-      );
+      const shiftsToday = shifts
+        .filter((s) => s.pickupDate === prog.dateString)
+        .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       const tableData = shiftsToday.map((shift, idx) => {
         const assignments = prog.assignments.filter(
           (a) => a.shiftId === shift.id,
@@ -604,13 +634,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       );
       let excusedLeaves = 0;
       activePrograms.forEach((p) => {
-        const hasLeave = leaveRequests.some(
-          (l) =>
-            l.staffId === s.id &&
-            l.type !== "Day off" &&
-            l.startDate <= p.dateString! &&
-            l.endDate >= p.dateString!,
-        );
+        const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
         if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
           excusedLeaves++;
       });
@@ -683,13 +707,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       activePrograms.forEach((p) => {
         const d = new Date(p.dateString!);
         if (d >= overlapStart && d <= overlapEnd) {
-          const hasLeave = leaveRequests.some(
-            (l) =>
-              l.staffId === s.id &&
-              l.type !== "Day off" &&
-              l.startDate <= p.dateString! &&
-              l.endDate >= p.dateString!,
-          );
+          const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
           if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
             excusedLeaves++;
         }
@@ -769,13 +787,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       let workedCount = 0;
       let excusedLeaves = 0;
       activePrograms.forEach((p) => {
-        const hasLeave = leaveRequests.some(
-          (l) =>
-            l.staffId === s.id &&
-            l.type !== "Day off" &&
-            l.startDate <= p.dateString! &&
-            l.endDate >= p.dateString!,
-        );
+        const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
         if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
           excusedLeaves++;
         const assign = p.assignments.find((a) => a.staffId === s.id);
@@ -853,7 +865,9 @@ export const ProgramDisplay: React.FC<Props> = ({
     activePrograms.forEach((p) => {
       const d = new Date(p.dateString || startDate);
       const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
-      const shiftsToday = shifts.filter((s) => s.pickupDate === p.dateString);
+      const shiftsToday = shifts
+        .filter((s) => s.pickupDate === p.dateString)
+        .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       shiftsToday.forEach((s) => {
         const assignments = p.assignments.filter((a) => a.shiftId === s.id);
         const coversRole = (a: any, targetRole: string) => {
@@ -1079,12 +1093,62 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
+  const staffStats = React.useMemo(() => {
+    const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
+    
+    // Process leave requests into a faster lookup
+    const leaveMap: Record<string, any[]> = {};
+    leaveRequests.forEach(l => {
+      if (!leaveMap[l.staffId]) leaveMap[l.staffId] = [];
+      leaveMap[l.staffId].push(l);
+    });
+
+    const progAssignments: Record<string, string[]> = {};
+    activePrograms.forEach(p => {
+      progAssignments[p.dateString || ""] = p.assignments.map(a => a.staffId);
+    });
+
+    staff.forEach(s => {
+      let daysWorked = 0;
+      let excusedLeaves = 0;
+      
+      activePrograms.forEach(p => {
+        const pDate = p.dateString || "";
+        const worked = progAssignments[pDate].includes(s.id);
+        if (worked) daysWorked++;
+        
+        const leaves = leaveMap[s.id] || [];
+        const hasLeave = leaves.some(
+          (l) => l.type !== "Day off" && l.startDate <= pDate && l.endDate >= pDate
+        );
+        if (hasLeave && !worked) {
+            excusedLeaves++;
+        }
+      });
+      
+      let target = 5;
+      if (s.type === "Roster") {
+        const progStart = new Date(startDate);
+        const progEnd = new Date(endDate);
+        const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
+        const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
+        const overlapStart = workFrom > progStart ? workFrom : progStart;
+        const overlapEnd = workTo < progEnd ? workTo : progEnd;
+        if (overlapStart <= overlapEnd) {
+          target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        } else {
+          target = 0;
+        }
+      }
+      target -= excusedLeaves;
+      
+      stats[s.id] = { daysWorked, excusedLeaves, target };
+    });
+    return stats;
+  }, [activePrograms, staff, leaveRequests, startDate, endDate]);
+
   const getStaffWorkload = (staffId: string) => {
-    return activePrograms.reduce(
-      (acc, p) =>
-        acc + (p.assignments.some((a) => a.staffId === staffId) ? 1 : 0),
-      0,
-    );
+    return staffStats[staffId]?.daysWorked || 0;
   };
 
   const getStaffColor = (
@@ -1095,40 +1159,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (restHours !== null && restHours < minRestHours) {
       return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
-    let target = 5;
-
-    let excusedLeaves = 0;
-    activePrograms.forEach((p) => {
-      const hasLeave = leaveRequests.some(
-        (l) =>
-          l.staffId === s.id &&
-          l.type !== "Day off" &&
-          l.startDate <= p.dateString! &&
-          l.endDate >= p.dateString!,
-      );
-      if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
-        excusedLeaves++;
-    });
-
-    if (s.type === "Roster") {
-      const progStart = new Date(startDate);
-      const progEnd = new Date(endDate);
-      const workFrom = s.workFromDate ? new Date(s.workFromDate) : progStart;
-      const workTo = s.workToDate ? new Date(s.workToDate) : progEnd;
-      const overlapStart = workFrom > progStart ? workFrom : progStart;
-      const overlapEnd = workTo < progEnd ? workTo : progEnd;
-      if (overlapStart <= overlapEnd) {
-        target =
-          Math.floor(
-            (overlapEnd.getTime() - overlapStart.getTime()) /
-              (1000 * 60 * 60 * 24),
-          ) + 1;
-      } else {
-        target = 0;
-      }
-    }
-
-    target -= excusedLeaves;
+    const target = staffStats[s.id]?.target ?? 5;
 
     const diff = daysWorked - target;
     if (diff >= 2)
@@ -1191,13 +1222,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                     {s.initials} ({s.type === "Local" ? "L" : "R"})
                   </td>
                   {activePrograms.map((p, i) => {
-                    const hasLeave = leaveRequests.some(
-                      (l) =>
-                        l.staffId === s.id &&
-                        l.type !== "Day off" &&
-                        l.startDate <= p.dateString! &&
-                        l.endDate >= p.dateString!,
-                    );
+                    const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
                     if (
                       hasLeave &&
                       !p.assignments.some((a) => a.staffId === s.id)
@@ -1323,9 +1348,9 @@ export const ProgramDisplay: React.FC<Props> = ({
             {activePrograms.map((p, pIdx) => {
               const d = new Date(p.dateString || startDate);
               const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
-              const shiftsToday = shifts.filter(
-                (s) => s.pickupDate === p.dateString,
-              );
+              const shiftsToday = shifts
+                .filter((s) => s.pickupDate === p.dateString)
+                .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
               return shiftsToday.map((s, sIdx) => {
                 const assignments = p.assignments.filter(
                   (a) => a.shiftId === s.id,
@@ -1486,13 +1511,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
               let excusedLeaves = 0;
               activePrograms.forEach((p) => {
-                const hasLeave = leaveRequests.some(
-                  (l) =>
-                    l.staffId === s.id &&
-                    l.type !== "Day off" &&
-                    l.startDate <= p.dateString! &&
-                    l.endDate >= p.dateString!,
-                );
+                const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
                 if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
                   excusedLeaves++;
               });
@@ -1593,13 +1612,7 @@ export const ProgramDisplay: React.FC<Props> = ({
               activePrograms.forEach((p) => {
                 const d = new Date(p.dateString!);
                 if (d >= overlapStart && d <= overlapEnd) {
-                  const hasLeave = leaveRequests.some(
-                    (l) =>
-                      l.staffId === s.id &&
-                      l.type !== "Day off" &&
-                      l.startDate <= p.dateString! &&
-                      l.endDate >= p.dateString!,
-                  );
+                  const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
                   if (
                     hasLeave &&
                     !p.assignments.some((a) => a.staffId === s.id)
@@ -1856,12 +1869,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   };
 
                   offStaff.forEach((s) => {
-                    const leave = leaveRequests.find(
-                      (l) =>
-                        l.staffId === s.id &&
-                        l.startDate <= prog.dateString! &&
-                        l.endDate >= prog.dateString!,
-                    );
+                    const leave = hasLeaveOnDate(s.id, prog.dateString!);
                     let count = 1;
                     if (leave) {
                       const start = new Date(leave.startDate);
@@ -1877,12 +1885,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                         const worked = prevProg.assignments.some(
                           (a) => a.staffId === s.id,
                         );
-                        const prevLeave = leaveRequests.find(
-                          (l) =>
-                            l.staffId === s.id &&
-                            l.startDate <= prevProg.dateString! &&
-                            l.endDate >= prevProg.dateString!,
-                        );
+                        const prevLeave = hasLeaveOnDate(s.id, prevProg.dateString!);
                         if (!worked && !prevLeave) count++;
                         else break;
                       }
@@ -1948,12 +1951,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                     "STANDBY (RESERVE)": [],
                   };
                   refOffStaff.forEach((s) => {
-                    const leave = leaveRequests.find(
-                      (l) =>
-                        l.staffId === s.id &&
-                        l.startDate <= refProg.dateString! &&
-                        l.endDate >= refProg.dateString!,
-                    );
+                    const leave = hasLeaveOnDate(s.id, refProg.dateString!);
                     let isRosterOutOfContract = false;
                     if (s.type === "Roster") {
                       if (s.rosterPeriods && s.rosterPeriods.length > 0) {
@@ -2223,8 +2221,23 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                       ass.staffId === st.id,
                                                   );
                                                 if (nextAssignment) {
-                                                  nextDayShiftTime =
-                                                    tomorrowShift.pickupTime;
+                                                  try {
+                                                    const currentEnd = new Date(
+                                                      `${shift.endDate || prog.dateString}T${shift.endTime}:00`,
+                                                    );
+                                                    const nextStart = new Date(
+                                                      `${tomorrowShift.pickupDate || nextProg.dateString}T${tomorrowShift.pickupTime}:00`,
+                                                    );
+                                                    const diffHours =
+                                                      (nextStart.getTime() - currentEnd.getTime()) /
+                                                      (1000 * 60 * 60);
+
+                                                    if (diffHours < 12) {
+                                                      nextDayShiftTime = tomorrowShift.pickupTime;
+                                                    }
+                                                  } catch (e) {
+                                                    nextDayShiftTime = tomorrowShift.pickupTime;
+                                                  }
                                                   break;
                                                 }
                                               }
