@@ -916,24 +916,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                     : targetRole === "Lost and Found"
                       ? "LF"
                       : targetRole;
-          if (a.role === roleCode || a.role === targetRole) return true;
-
-          // Multi-role checks
-          if (
-            targetRole === "Load Control" &&
-            (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
-          )
-            return true;
-          if (
-            targetRole === "Shift Leader" &&
-            (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
-          )
-            return true;
-          if (targetRole === "Ramp" && st.isRamp) return true;
-          if (targetRole === "Operations" && st.isOps) return true;
-          if (targetRole === "Lost and Found" && st.isLostFound) return true;
-          if ((targetRole === "Labour" || targetRole === "LBR") && st.isLabour)
-            return true;
+          
+          if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
 
           return false;
         };
@@ -1406,26 +1390,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                             : targetRole === "Lost and Found"
                               ? "LF"
                               : targetRole;
-                  if (a.role === roleCode || a.role === targetRole) return true;
-                  if (
-                    targetRole === "Load Control" &&
-                    (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
-                  )
-                    return true;
-                  if (
-                    targetRole === "Shift Leader" &&
-                    (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
-                  )
-                    return true;
-                  if (targetRole === "Ramp" && st.isRamp) return true;
-                  if (targetRole === "Operations" && st.isOps) return true;
-                  if (targetRole === "Lost and Found" && st.isLostFound)
-                    return true;
-                  if (
-                    (targetRole === "Labour" || targetRole === "LBR") &&
-                    st.isLabour
-                  )
-                    return true;
+                  if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
+                  
                   return false;
                 };
                 const getRoleCell = (role: string, reqFlag: boolean) => {
