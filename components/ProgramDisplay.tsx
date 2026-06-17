@@ -177,6 +177,32 @@ export const ProgramDisplay: React.FC<Props> = ({
   const getFlight = (id: string) => flights.find((f) => f.id === id);
   const getShift = (id: string) => shifts.find((s) => s.id === id);
 
+  const sortAssignments = (assignments: any[]) => {
+    return [...assignments].sort((a, b) => {
+      const stA = getStaff(a.staffId);
+      const stB = getStaff(b.staffId);
+      const score = (assig: any, st: any) => {
+        if (!st) return 100;
+        if (
+          assig.role === "SL" ||
+          assig.role === "Shift Leader" ||
+          st.isShiftLeader ||
+          st.initials.toUpperCase() === "SK-ATZ"
+        )
+          return 1;
+        if (
+          assig.role === "LC" ||
+          assig.role === "Load Control" ||
+          st.isLoadControl
+        )
+          return 2;
+        if (st.isLabour) return 10;
+        return 5;
+      };
+      return score(a, stA) - score(b, stB);
+    });
+  };
+
   const getShiftHours = (shiftId: string) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
@@ -491,9 +517,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         .filter((s) => s.pickupDate === prog.dateString)
         .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       const tableData = shiftsToday.map((shift, idx) => {
-        const assignments = prog.assignments.filter(
+        const assignments = sortAssignments(prog.assignments.filter(
           (a) => a.shiftId === shift.id,
-        );
+        ));
         const nonLabourCount = assignments.filter(
           (a) => !getStaff(a.staffId)?.isLabour,
         ).length;
@@ -2041,9 +2067,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                           <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
                             {shiftsTodaySorted.map(
                               (shift, idx, shiftsToday) => {
-                                const assignments = prog.assignments.filter(
+                                const assignments = sortAssignments(prog.assignments.filter(
                                   (a) => a.shiftId === shift.id,
-                                );
+                                ));
                                 const flightStrs =
                                   (shift.flightIds || [])
                                     .map((fid) => getFlight(fid)?.flightNumber)
