@@ -708,14 +708,14 @@ export const extractDataFromContent = async (params: {
     );
   const prompt = `Extract ${params.targetType} from the provided document or text. 
 Target Start Date: ${params.startDate || "Current"}. 
-If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. For 'date', return a string like YYYY-MM-DD. For 'type', guess based on from/to (e.g. 'Arrival', 'Departure').
+If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. For 'date', return a string like YYYY-MM-DD. For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure'). If a time is clearly missing or shows '***', do not map it or leave it empty.
 Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shifts": [...] }. Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
 
   // Wrap extraction call with retry
   const response = await withRetry<GenerateContentResponse>(() =>
     ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.1-pro-preview",
       contents: { parts },
       config: { responseMimeType: "application/json" },
     }),
