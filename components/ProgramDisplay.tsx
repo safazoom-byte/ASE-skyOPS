@@ -916,26 +916,25 @@ export const ProgramDisplay: React.FC<Props> = ({
                     : targetRole === "Lost and Found"
                       ? "LF"
                       : targetRole;
-          
-          if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
 
-          const isGeneric = !a.role || a.role === "Labour" || a.role === "LBR";
-          if (isGeneric) {
-            if (
-              targetRole === "Load Control" &&
-              (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
-            )
-              return true;
-            if (
-              targetRole === "Shift Leader" &&
-              (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
-            )
-              return true;
-            if (targetRole === "Ramp" && st.isRamp) return true;
-            if (targetRole === "Operations" && st.isOps) return true;
-            if (targetRole === "Lost and Found" && st.isLostFound)
-              return true;
-          }
+          // If looking for a specialist role, strictly enforce the profile flag
+          if (roleCode === "LC" && !(st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return false;
+          if (roleCode === "SL" && !(st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return false;
+          if (roleCode === "RMP" && !st.isRamp) return false;
+          if (roleCode === "OPS" && !st.isOps) return false;
+          if (roleCode === "LF" && !st.isLostFound) return false;
+          if ((roleCode === "Labour" || roleCode === "LBR") && !st.isLabour) return false;
+
+          if (a.role === roleCode || a.role === targetRole) return true;
+
+          // Fallback if they are just on shift but not explicitly assigned to role, check if they can cover
+          if (roleCode === "LC" && (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return true;
+          if (roleCode === "SL" && (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return true;
+          if (roleCode === "RMP" && st.isRamp) return true;
+          if (roleCode === "OPS" && st.isOps) return true;
+          if (roleCode === "LF" && st.isLostFound) return true;
+          if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
+
           return false;
         };
         const getStaffForRole = (role: string) => {
@@ -1407,25 +1406,24 @@ export const ProgramDisplay: React.FC<Props> = ({
                             : targetRole === "Lost and Found"
                               ? "LF"
                               : targetRole;
-                  if (a.role === roleCode || a.role === targetRole || a.role.includes(roleCode)) return true;
+
+                  // If looking for a specialist role, strictly enforce the profile flag
+                  if (roleCode === "LC" && !(st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return false;
+                  if (roleCode === "SL" && !(st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return false;
+                  if (roleCode === "RMP" && !st.isRamp) return false;
+                  if (roleCode === "OPS" && !st.isOps) return false;
+                  if (roleCode === "LF" && !st.isLostFound) return false;
+                  if ((roleCode === "Labour" || roleCode === "LBR") && !st.isLabour) return false;
+
+                  if (a.role === roleCode || a.role === targetRole) return true;
                   
-                  const isGeneric = !a.role || a.role === "Labour" || a.role === "LBR";
-                  if (isGeneric) {
-                    if (
-                      targetRole === "Load Control" &&
-                      (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")
-                    )
-                      return true;
-                    if (
-                      targetRole === "Shift Leader" &&
-                      (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")
-                    )
-                      return true;
-                    if (targetRole === "Ramp" && st.isRamp) return true;
-                    if (targetRole === "Operations" && st.isOps) return true;
-                    if (targetRole === "Lost and Found" && st.isLostFound)
-                      return true;
-                  }
+                  // Fallback if they are just on shift but not explicitly assigned to role, check if they can cover
+                  if (roleCode === "LC" && (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return true;
+                  if (roleCode === "SL" && (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return true;
+                  if (roleCode === "RMP" && st.isRamp) return true;
+                  if (roleCode === "OPS" && st.isOps) return true;
+                  if (roleCode === "LF" && st.isLostFound) return true;
+                  if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
                   return false;
                 };
                 const getRoleCell = (role: string, reqFlag: boolean) => {

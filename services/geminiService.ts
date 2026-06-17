@@ -539,22 +539,26 @@ export const generateAIProgram = async (
             const fulfilledCount = shiftAssignments.filter((a) => {
               const st = data.staff.find((s) => s.id === a.staffId);
               if (!st) return false;
+              if (roleKey === "LC" && !(st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return false;
+              if (roleKey === "SL" && !(st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return false;
+              if (roleKey === "RMP" && !st.isRamp) return false;
+              if (roleKey === "OPS" && !st.isOps) return false;
+              if (roleKey === "LF" && !st.isLostFound) return false;
+              if (roleKey === "LBR" && !st.isLabour) return false;
+
               if (
                 a.role === roleKey ||
                 a.role === role ||
                 a.role.includes(roleKey)
               )
                 return true;
-              const isGeneric =
-                !a.role || a.role === "Labour" || a.role === "LBR";
-              if (isGeneric) {
-                if (roleKey === "LC" && st.isLoadControl) return true;
-                if (roleKey === "SL" && st.isShiftLeader) return true;
-                if (roleKey === "RMP" && st.isRamp) return true;
-                if (roleKey === "OPS" && st.isOps) return true;
-                if (roleKey === "LF" && st.isLostFound) return true;
-                if (roleKey === "LBR" && st.isLabour) return true;
-              }
+                
+              if (roleKey === "LC" && (st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return true;
+              if (roleKey === "SL" && (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ")) return true;
+              if (roleKey === "RMP" && st.isRamp) return true;
+              if (roleKey === "OPS" && st.isOps) return true;
+              if (roleKey === "LF" && st.isLostFound) return true;
+              if (roleKey === "LBR" && st.isLabour) return true;
               return false;
             }).length;
 
