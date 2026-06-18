@@ -138,11 +138,13 @@ export const FlightManager: React.FC<Props> = ({
         (a.sta || a.std || "").localeCompare(b.sta || b.std || ""),
     );
     sorted.forEach((f) => {
+      if (startDate && f.date < startDate) return;
+      if (endDate && f.date > endDate) return;
       if (!groups[f.date]) groups[f.date] = [];
       groups[f.date].push(f);
     });
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [flights]);
+  }, [flights, startDate, endDate]);
 
   return (
     <div className="space-y-6 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
@@ -295,8 +297,6 @@ export const FlightManager: React.FC<Props> = ({
         ) : (
           groupedFlights.map(([date, dayFlights]) => {
             const dayOffset = getDayOffset(date);
-            const isOutOfRange =
-              (startDate && date < startDate) || (endDate && date > endDate);
 
             return (
               <div
@@ -304,17 +304,11 @@ export const FlightManager: React.FC<Props> = ({
                 className="space-y-4 md:space-y-8 animate-in slide-in-from-bottom duration-700"
               >
                 <div
-                  className={`sticky top-20 md:top-24 z-20 flex items-center justify-between p-4 md:p-6 rounded-xl md:rounded-3xl shadow-xl backdrop-blur-xl border ${
-                    isOutOfRange
-                      ? "bg-amber-500/90 border-amber-400 text-white"
-                      : "bg-white/90 border-slate-100 text-slate-900"
-                  }`}
+                  className="sticky top-20 md:top-24 z-20 flex items-center justify-between p-4 md:p-6 rounded-xl md:rounded-3xl shadow-xl backdrop-blur-xl border bg-white/90 border-slate-100 text-slate-900"
                 >
                   <div className="flex items-center gap-3 md:gap-6">
                     <div
-                      className={`w-9 h-9 md:w-12 md:h-12 rounded-lg md:rounded-2xl flex items-center justify-center font-black italic text-xs md:text-sm ${
-                        isOutOfRange ? "bg-white/20" : "bg-slate-950 text-white"
-                      }`}
+                      className="w-9 h-9 md:w-12 md:h-12 rounded-lg md:rounded-2xl flex items-center justify-center font-black italic text-xs md:text-sm bg-slate-950 text-white"
                     >
                       D{dayOffset + 1}
                     </div>
@@ -323,7 +317,7 @@ export const FlightManager: React.FC<Props> = ({
                         {getDayLabel(date)}
                       </h4>
                       <p
-                        className={`text-[7px] md:text-[10px] font-black uppercase tracking-widest ${isOutOfRange ? "text-white/70" : "text-slate-400"}`}
+                        className="text-[7px] md:text-[10px] font-black uppercase tracking-widest text-slate-400"
                       >
                         {date}
                       </p>
