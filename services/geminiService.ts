@@ -709,7 +709,15 @@ export const extractDataFromContent = async (params: {
   const prompt = `Extract ${params.targetType} from the provided document or text. 
 Target Start Date: ${params.startDate || "Current"}. 
 If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. CRITICAL: For 'date', you MUST return a strict ISO string YYYY-MM-DD (e.g. '24APR2026' MUST become '2026-04-24'). For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure'). If a time is clearly missing or shows '***', do not map it or leave it empty.
-Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shifts": [...] }. Do not wrap in markdown or any other text.`;
+Return valid JSON ONLY in this format:
+{
+  "flights": [
+    { "flightNumber": "string", "from": "string", "to": "string", "sta": "HH:MM", "std": "HH:MM", "date": "YYYY-MM-DD", "type": "string" }
+  ],
+  "staff": [...],
+  "shifts": [...]
+}
+Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
 
   // Wrap extraction call with retry
