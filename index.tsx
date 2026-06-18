@@ -513,7 +513,7 @@ const App: React.FC = () => {
       });
     }
 
-    setNotification("AI Sync Complete: Registry Updated");
+    setNotification(`AI Sync Complete: ${data.flights?.length || 0} flights, ${data.staff?.length || 0} staff added/updated. (Check your date filters if they don't appear)`);
     setTimeout(() => setNotification(null), 3000);
   };
 

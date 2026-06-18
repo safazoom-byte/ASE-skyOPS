@@ -708,7 +708,7 @@ export const extractDataFromContent = async (params: {
     );
   const prompt = `Extract ${params.targetType} from the provided document or text. 
 Target Start Date: ${params.startDate || "Current"}. 
-If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. For 'date', return a string like YYYY-MM-DD. For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure'). If a time is clearly missing or shows '***', do not map it or leave it empty.
+If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. CRITICAL: For 'date', you MUST return a strict ISO string YYYY-MM-DD (e.g. '24APR2026' MUST become '2026-04-24'). For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure'). If a time is clearly missing or shows '***', do not map it or leave it empty.
 Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shifts": [...] }. Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
 
@@ -720,7 +720,35 @@ Return valid JSON ONLY in this format: { "flights": [...], "staff": [...], "shif
       config: { responseMimeType: "application/json" },
     }),
   );
-  return safeParseJson(response.text);
+  
+  const parsed = safeParseJson(response.text);
+  if (parsed && parsed.flights) {
+    parsed.flights = parsed.flights.map((f: any) => {
+      let dateField = f.date;
+      if (dateField && !/^\d{4}-\d{2}-\d{2}$/.test(dateField)) {
+        const match = dateField.toUpperCase().match(/(\d{1,2})([A-Z]{3})(\d{2,4})/);
+        if (match) {
+          const months: Record<string, string> = {
+            JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+            JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12'
+          };
+          let [_, day, monthStr, yearStr] = match;
+          day = day.padStart(2, '0');
+          const month = months[monthStr] || '01';
+          let year = yearStr;
+          if (year.length === 2) year = `20${year}`;
+          dateField = `${year}-${month}-${day}`;
+        } else {
+          const pd = new Date(dateField);
+          if (!isNaN(pd.getTime())) {
+             dateField = pd.toISOString().split("T")[0];
+          }
+        }
+      }
+      return { ...f, date: dateField };
+    });
+  }
+  return parsed;
 };
 
 export const modifyProgramWithAI = async (
