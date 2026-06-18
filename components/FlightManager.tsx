@@ -134,14 +134,15 @@ export const FlightManager: React.FC<Props> = ({
     const groups: Record<string, Flight[]> = {};
     const sorted = [...flights].sort(
       (a, b) =>
-        a.date.localeCompare(b.date) ||
+        (a.date || "").localeCompare(b.date || "") ||
         (a.sta || a.std || "").localeCompare(b.sta || b.std || ""),
     );
     sorted.forEach((f) => {
-      if (startDate && f.date < startDate) return;
-      if (endDate && f.date > endDate) return;
-      if (!groups[f.date]) groups[f.date] = [];
-      groups[f.date].push(f);
+      const date = f.date || "Unknown";
+      if (startDate && date < startDate && date !== "Unknown") return;
+      if (endDate && date > endDate && date !== "Unknown") return;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(f);
     });
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [flights, startDate, endDate]);
@@ -191,7 +192,7 @@ export const FlightManager: React.FC<Props> = ({
             <input
               type="date"
               className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-bold text-xs text-slate-900 outline-none"
-              value={newFlight.date}
+              value={newFlight.date || ""}
               onChange={(e) =>
                 setNewFlight({ ...newFlight, date: e.target.value })
               }
@@ -206,7 +207,7 @@ export const FlightManager: React.FC<Props> = ({
               type="text"
               className="w-full p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-xs text-slate-900 uppercase outline-none"
               placeholder="SM 123"
-              value={newFlight.flightNumber}
+              value={newFlight.flightNumber || ""}
               onChange={(e) =>
                 setNewFlight({ ...newFlight, flightNumber: e.target.value })
               }
@@ -223,7 +224,7 @@ export const FlightManager: React.FC<Props> = ({
                 maxLength={5}
                 placeholder="STA"
                 className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none"
-                value={newFlight.sta}
+                value={newFlight.sta || ""}
                 onChange={(e) =>
                   setNewFlight({
                     ...newFlight,
@@ -236,7 +237,7 @@ export const FlightManager: React.FC<Props> = ({
                 maxLength={5}
                 placeholder="STD"
                 className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none"
-                value={newFlight.std}
+                value={newFlight.std || ""}
                 onChange={(e) =>
                   setNewFlight({
                     ...newFlight,
@@ -256,7 +257,7 @@ export const FlightManager: React.FC<Props> = ({
                 maxLength={4}
                 placeholder="FRM"
                 className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 uppercase outline-none"
-                value={newFlight.from}
+                value={newFlight.from || ""}
                 onChange={(e) =>
                   setNewFlight({ ...newFlight, from: e.target.value })
                 }
@@ -267,7 +268,7 @@ export const FlightManager: React.FC<Props> = ({
                 maxLength={4}
                 placeholder="TO"
                 className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 uppercase outline-none"
-                value={newFlight.to}
+                value={newFlight.to || ""}
                 onChange={(e) =>
                   setNewFlight({ ...newFlight, to: e.target.value })
                 }
@@ -413,7 +414,7 @@ export const FlightManager: React.FC<Props> = ({
                   <input
                     type="date"
                     className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900 outline-none"
-                    value={inlineFormData.date}
+                    value={inlineFormData.date || ""}
                     onChange={(e) =>
                       setInlineFormData({
                         ...inlineFormData,
@@ -429,7 +430,7 @@ export const FlightManager: React.FC<Props> = ({
                   <input
                     type="text"
                     className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none"
-                    value={inlineFormData.flightNumber}
+                    value={inlineFormData.flightNumber || ""}
                     onChange={(e) =>
                       setInlineFormData({
                         ...inlineFormData,
