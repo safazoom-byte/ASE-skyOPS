@@ -73,6 +73,8 @@ export const StaffManager: React.FC<Props> = ({
     isLoadControl: false,
     isLostFound: false,
     isLabour: false,
+    isSecurity: false,
+    isDriver: false,
     workFromDate: "",
     workToDate: "",
   });
@@ -152,6 +154,8 @@ export const StaffManager: React.FC<Props> = ({
       isLoadControl: !!newStaff.isLoadControl,
       isLostFound: !!newStaff.isLostFound,
       isLabour: !!newStaff.isLabour,
+      isSecurity: !!newStaff.isSecurity,
+      isDriver: !!newStaff.isDriver,
       maxShiftsPerWeek: defaultMaxShifts,
       workFromDate: isRoster ? newStaff.workFromDate : undefined,
       workToDate: isRoster ? newStaff.workToDate : undefined,
@@ -176,6 +180,8 @@ export const StaffManager: React.FC<Props> = ({
       isLoadControl: false,
       isLostFound: false,
       isLabour: false,
+      isSecurity: false,
+      isDriver: false,
       workFromDate: "",
       workToDate: "",
     });
@@ -230,6 +236,8 @@ export const StaffManager: React.FC<Props> = ({
       "Shift Leader": "isShiftLeader",
       Operations: "isOps",
       Labour: "isLabour",
+      Security: "isSecurity",
+      Driver: "isDriver",
     };
     const field = skillMap[skill];
     if (!field) return;
@@ -253,6 +261,8 @@ export const StaffManager: React.FC<Props> = ({
       "Shift Leader": "isShiftLeader",
       Operations: "isOps",
       Labour: "isLabour",
+      Security: "isSecurity",
+      Driver: "isDriver",
     };
     const field = skillMap[skill];
     return !!member[field];
@@ -274,6 +284,8 @@ export const StaffManager: React.FC<Props> = ({
       "Shift Leader": s.isShiftLeader ? "Yes" : "No",
       Operations: s.isOps ? "Yes" : "No",
       Labour: s.isLabour ? "Yes" : "No",
+      Security: s.isSecurity ? "Yes" : "No",
+      Driver: s.isDriver ? "Yes" : "No",
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -424,9 +436,9 @@ export const StaffManager: React.FC<Props> = ({
               )}
 
               <div className="space-y-4 pt-6 border-t border-slate-50">
-                <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex items-center gap-2">
-                  {" "}
-                  Discipline Matrix
+                <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex flex-col gap-1">
+                  <span>Discipline Matrix</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">Note: Security role only performs security tasks and is assigned upon request.</span>
                 </p>
                 <div className="flex flex-wrap gap-2 md:gap-3">
                   {AVAILABLE_SKILLS.map((skill) => {
@@ -999,9 +1011,9 @@ export const StaffManager: React.FC<Props> = ({
               )}
 
               <div className="space-y-3">
-                <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase">
-                  {" "}
-                  Discipline Access
+                <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase flex flex-col gap-1">
+                  <span>Discipline Access</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">Note: Security role only performs security tasks and is assigned upon request.</span>
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_SKILLS.map((skill) => {

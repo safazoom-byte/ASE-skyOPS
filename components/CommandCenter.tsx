@@ -22,7 +22,7 @@ interface CommandCenterProps {
 export const CommandCenter: React.FC<CommandCenterProps> = ({
   currentUser,
 }) => {
-  const [activeTab, setActiveTab] = useState<"audit" | "users">("audit");
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system">("audit");
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -197,18 +197,24 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
           </div>
         </div>
 
-        <div className="flex bg-slate-900 p-1 rounded-xl relative z-10">
+        <div className="flex flex-wrap bg-slate-900 p-1 rounded-xl relative z-10 w-full md:w-auto mt-4 md:mt-0 justify-center">
           <button
             onClick={() => setActiveTab("audit")}
-            className={`px-6 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
-            <Activity size={14} className="inline mr-2" /> Black Box
+            <Activity size={14} className="inline mr-1 md:mr-2" /> Black Box
           </button>
           <button
             onClick={() => setActiveTab("users")}
-            className={`px-6 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
-            <Users size={14} className="inline mr-2" /> Access & Quotas
+            <Users size={14} className="inline mr-1 md:mr-2" /> Access & Quotas
+          </button>
+          <button
+            onClick={() => setActiveTab("system")}
+            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "system" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Settings size={14} className="inline mr-1 md:mr-2" /> System Settings
           </button>
         </div>
       </div>
@@ -297,7 +303,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             )}
           </div>
         </div>
-      ) : (
+      ) : activeTab === "users" ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
             <div>
@@ -514,6 +520,75 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
+            <h4 className="font-bold text-slate-800 mb-6">System Settings & Configurations</h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="border border-slate-200 p-6 rounded-2xl">
+                <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Company Logo (Left)</h5>
+                {localStorage.getItem("skyops_company_logo") && (
+                  <img src={localStorage.getItem("skyops_company_logo")!} alt="Company Logo" className="h-16 object-contain mb-4" />
+                )}
+                <input 
+                  type="file" 
+                  accept="image/png, image/jpeg"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        localStorage.setItem("skyops_company_logo", event.target?.result as string);
+                        // Force re-render hack
+                        window.dispatchEvent(new Event("storage"));
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="text-xs" 
+                />
+              </div>
+
+              <div className="border border-slate-200 p-6 rounded-2xl">
+                <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">SkyOPS Logo (Right)</h5>
+                {localStorage.getItem("skyops_skyops_logo") && (
+                  <img src={localStorage.getItem("skyops_skyops_logo")!} alt="SkyOPS Logo" className="h-16 object-contain mb-4" />
+                )}
+                <input 
+                  type="file" 
+                  accept="image/png, image/jpeg"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        localStorage.setItem("skyops_skyops_logo", event.target?.result as string);
+                        // Force re-render hack
+                        window.dispatchEvent(new Event("storage"));
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="text-xs" 
+                />
+              </div>
+            </div>
+            
+            <div className="mt-8 flex justify-end">
+              <button
+                onClick={() => {
+                  localStorage.removeItem("skyops_company_logo");
+                  localStorage.removeItem("skyops_skyops_logo");
+                  window.dispatchEvent(new Event("storage"));
+                }}
+                className="px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
+              >
+                Clear All Logos
+              </button>
+            </div>
           </div>
         </div>
       )}

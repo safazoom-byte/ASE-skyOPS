@@ -4,7 +4,9 @@ export type Skill =
   | "Lost and Found"
   | "Shift Leader"
   | "Operations"
-  | "Labour";
+  | "Labour"
+  | "Security"
+  | "Driver";
 export type ProficiencyLevel = "Yes" | "No";
 export type StaffCategory = "Local" | "Roster";
 export type WorkPattern = string;
@@ -43,6 +45,8 @@ export interface Staff {
   isLoadControl: boolean;
   isLostFound: boolean;
   isLabour: boolean;
+  isSecurity: boolean;
+  isDriver: boolean;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;
   workFromDate?: string;
@@ -99,6 +103,7 @@ export interface DailyProgram {
   dateString?: string;
   assignments: Assignment[];
   offDuty?: OffDutyRecord[];
+  notes?: Record<string, string>;
 }
 
 export interface ProgramVersion {

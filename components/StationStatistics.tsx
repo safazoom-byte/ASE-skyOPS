@@ -45,6 +45,9 @@ export const StationStatistics: React.FC<Props> = ({
     if (skill === "Ramp") return s.isRamp;
     if (skill === "Operations") return s.isOps;
     if (skill === "Lost and Found") return s.isLostFound;
+    if (skill === "Labour") return s.isLabour;
+    if (skill === "Security") return s.isSecurity;
+    if (skill === "Driver") return s.isDriver;
     return false;
   };
 
@@ -164,6 +167,8 @@ export const StationStatistics: React.FC<Props> = ({
         Operations: 0,
         "Lost and Found": 0,
         Labour: 0,
+        Security: 0,
+        Driver: 0,
       };
 
       AVAILABLE_SKILLS.forEach((skill) => {

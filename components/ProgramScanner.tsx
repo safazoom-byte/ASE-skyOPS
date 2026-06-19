@@ -125,6 +125,8 @@ const HEADER_ALIASES: Record<string, string[]> = {
     "lf skill",
   ],
   isLabour: ["labour", "lbr", "labor"],
+  isSecurity: ["security", "sec"],
+  isDriver: ["driver", "drv"],
   role_shiftLeader: [
     "sl count",
     "shift leader count",
@@ -348,6 +350,10 @@ export const ProgramScanner: React.FC<Props> = ({
             map.isLostFound !== -1 ? parseBoolean(row[map.isLostFound]) : false,
           isLabour:
             map.isLabour !== -1 ? parseBoolean(row[map.isLabour]) : false,
+          isSecurity:
+            map.isSecurity !== -1 ? parseBoolean(row[map.isSecurity]) : false,
+          isDriver:
+            map.isDriver !== -1 ? parseBoolean(row[map.isDriver]) : false,
         });
       }
 

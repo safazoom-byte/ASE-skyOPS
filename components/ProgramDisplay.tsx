@@ -12,6 +12,7 @@ import {
 } from "../types";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import {
   FileDown,
   CalendarDays,
@@ -67,6 +68,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   onRestoreVersion,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
+  const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<
@@ -1062,6 +1065,237 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
+  const generateStaffExcelReport = () => {
+    setIsGeneratingExcel(true);
+    try {
+      const exportData: any[] = [];
+      
+      activePrograms.forEach(prog => {
+        const d = new Date(prog.dateString || startDate);
+        const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
+        const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
+        
+        exportData.push({
+          "S/N": `${dayName} ${dateFormatted}`,
+          "Flight No/Day": "",
+          "From": "",
+          "STA": "",
+          "STD": "",
+          "To": "",
+          "Pick up Time": "",
+          "SDU Staff Assignment": ""
+        });
+        
+        const shiftsToday = shifts
+          .filter((s) => s.pickupDate === prog.dateString)
+          .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+          
+        shiftsToday.forEach((shift, idx) => {
+          const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
+          const staffInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
+          
+          const flightIds = shift.flightIds || [];
+          let fn = "", from = "", sta = "NS", std = "---", to = "";
+          
+          if (flightIds.length > 0) {
+            const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+            if (fObjs.length > 0) {
+              fn = fObjs.map(f => f.flightNumber).join("/");
+              from = fObjs.map(f => f.from).join("-");
+              to = fObjs.map(f => f.to).join("-");
+              sta = fObjs[0].sta || "NS";
+              std = fObjs[0].std || "---";
+            }
+          }
+          
+          exportData.push({
+            "S/N": (idx + 1).toString(),
+            "Flight No/Day": fn,
+            "From": from,
+            "STA": sta,
+            "STD": std,
+            "To": to,
+            "Pick up Time": shift.pickupTime,
+            "SDU Staff Assignment": staffInitials
+          });
+        });
+        exportData.push({}); // Empty row separator
+      });
+      
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      const colWidths = [
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 15 },
+        { wch: 50 },
+      ];
+      ws['!cols'] = colWidths;
+      
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Staff Program");
+      XLSX.writeFile(wb, `SkyOPS_Staff_Program_${startDate}.xlsx`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to export Excel report.");
+    } finally {
+      setIsGeneratingExcel(false);
+    }
+  };
+
+  const generateStaffPdfReport = () => {
+    setIsGeneratingStaffPdf(true);
+    try {
+      const doc = new jsPDF("l", "mm", "a4");
+      
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      const title = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
+      doc.text(title, 148, 10, { align: "center" });
+
+      try {
+        const cLogo = localStorage.getItem("skyops_company_logo");
+        const sLogo = localStorage.getItem("skyops_skyops_logo");
+        if (cLogo) doc.addImage(cLogo, "PNG", 5, 2, 15, 15);
+        if (sLogo) doc.addImage(sLogo, "PNG", 277, 2, 15, 15);
+      } catch (e) { }
+      
+      const tableRows: any[] = [];
+      
+      activePrograms.forEach(prog => {
+        const d = new Date(prog.dateString || startDate);
+        const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
+        const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
+        
+        tableRows.push([
+          { content: `${dayName} ${dateFormatted}`, colSpan: 9, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
+        ]);
+        
+        const shiftsToday = shifts
+          .filter((s) => s.pickupDate === prog.dateString)
+          .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+
+        // Group absence data
+        const offDuty = prog.offDuty || [];
+        const absenceTextLines: string[] = [];
+        
+        const categories = {
+          "Traffic Day OFF": [],
+          "SEC Day OFF": [],
+          "Worker Day OFF": [],
+          "Annual": [],
+          "Lieu": [],
+          "SSH Support": []
+        };
+        
+        offDuty.forEach(od => {
+          const st = getStaff(od.staffId);
+          if (st) {
+             let mappedCat = od.type as string;
+             if (mappedCat === "DAYS OFF") mappedCat = "Traffic Day OFF";
+             else if (mappedCat === "ANNUAL LEAVE") mappedCat = "Annual";
+             else if (mappedCat === "ROSTER LEAVE") mappedCat = "Lieu";
+             else mappedCat = "Worker Day OFF";
+             
+             (categories as any)[mappedCat] = ((categories as any)[mappedCat] || []).concat(st.initials);
+          }
+        });
+        
+        Object.entries(categories).forEach(([k, v]) => {
+           if (v.length > 0) {
+              const note = prog.notes?.[`ABSENCE_${k}`];
+              absenceTextLines.push(`${k}: ${v.join("-")}${note ? ` (${note})` : ''}`);
+           }
+        });
+        
+        const combinedAbsenceText = absenceTextLines.join("\n");
+          
+        if (shiftsToday.length === 0) {
+           tableRows.push([
+             { content: "No shifts", colSpan: 8, styles: { halign: "center" } },
+             { content: combinedAbsenceText, styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle" } }
+           ]);
+        } else {
+           shiftsToday.forEach((shift, idx) => {
+             const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
+             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join("\n");
+             
+             if (prog.notes?.[shift.id]) {
+                pureInitials += `\n[${prog.notes[shift.id]}]`;
+             }
+             
+             const flightIds = shift.flightIds || [];
+             let fn = "", from = "", sta = "NS", std = "---", to = "";
+             
+             if (flightIds.length > 0) {
+               const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+               if (fObjs.length > 0) {
+                 fn = fObjs.map(f => f.flightNumber).join("\n");
+                 from = fObjs.map(f => f.from).join("\n");
+                 to = fObjs.map(f => f.to).join("\n");
+                 sta = fObjs[0].sta || "NS";
+                 std = fObjs[0].std || "---";
+               }
+             }
+             
+             const rowData: any[] = [
+               (idx + 1).toString(),
+               fn,
+               from,
+               sta,
+               std,
+               to,
+               shift.pickupTime || "N.S",
+               pureInitials
+             ];
+             
+             if (idx === 0) {
+                rowData.push({
+                   content: combinedAbsenceText,
+                   rowSpan: shiftsToday.length,
+                   styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle", fontSize: 6 }
+                });
+             }
+             
+             tableRows.push(rowData);
+           });
+        }
+      });
+      
+      autoTable(doc, {
+        startY: 18,
+        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)", ""]],
+        body: tableRows,
+        theme: "grid",
+        margin: { top: 5, right: 5, bottom: 5, left: 5 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 7 },
+        styles: { fontSize: 6, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        columnStyles: {
+            0: { cellWidth: 8 },
+            1: { cellWidth: 20 },
+            2: { cellWidth: 15 },
+            3: { cellWidth: 15 },
+            4: { cellWidth: 15 },
+            5: { cellWidth: 15 },
+            6: { cellWidth: 20 },
+            7: { cellWidth: 'auto', fontStyle: 'bold' },
+            8: { cellWidth: 60 }
+        },
+      });
+      
+      doc.save(`SkyOPS_Staff_Program_${startDate}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to export PDF report.");
+    } finally {
+      setIsGeneratingStaffPdf(false);
+    }
+  };
+
   const handleDragStart = (
     e: React.DragEvent,
     staffId: string,
@@ -1081,6 +1315,22 @@ export const ProgramDisplay: React.FC<Props> = ({
     e.dataTransfer.dropEffect = "move";
   };
 
+  const handleUpdateNote = (
+    dateString: string,
+    targetId: string,
+    note: string
+  ) => {
+    if (!onUpdatePrograms) return;
+    const newPrograms = [...programs];
+    const prog = newPrograms.find((p) => p.dateString === dateString);
+    if (!prog) return;
+
+    if (!prog.notes) prog.notes = {};
+    prog.notes[targetId] = note;
+
+    onUpdatePrograms(newPrograms);
+  };
+
   const handleDrop = (
     e: React.DragEvent,
     targetShiftId: string,
@@ -1097,11 +1347,16 @@ export const ProgramDisplay: React.FC<Props> = ({
       const prog = newPrograms.find((p) => p.dateString === targetDate);
       if (!prog) return;
       if (currentShiftId !== "ABSENCE") {
-        const oldIdx = prog.assignments.findIndex(
-          (a) => a.staffId === staffId && a.shiftId === currentShiftId,
-        );
-        if (oldIdx !== -1) {
-          prog.assignments.splice(oldIdx, 1);
+        const staffObj = staff.find((s) => s.id === staffId);
+        const isDriver = staffObj?.isDriver;
+
+        if (!isDriver || targetShiftId === "ABSENCE") {
+          const oldIdx = prog.assignments.findIndex(
+            (a) => a.staffId === staffId && a.shiftId === currentShiftId,
+          );
+          if (oldIdx !== -1) {
+            prog.assignments.splice(oldIdx, 1);
+          }
         }
       }
       if (targetShiftId !== "ABSENCE") {
@@ -1719,17 +1974,17 @@ export const ProgramDisplay: React.FC<Props> = ({
             </p>
           </div>
         </div>
-        <div className="flex gap-4 relative z-10">
+        <div className="flex gap-4 relative z-10 flex-wrap justify-end mt-4 md:mt-0">
           <button
             onClick={() => setShowHistory(!showHistory)}
-            className={`px-6 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? "bg-emerald-500 text-white" : "bg-white text-slate-950 hover:bg-slate-100"}`}
+            className={`px-4 md:px-6 py-4 md:py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? "bg-emerald-500 text-white" : "bg-white text-slate-950 hover:bg-slate-100"}`}
           >
             <History size={18} />
             <span className="hidden md:inline">Time Machine</span>
           </button>
           <button
             onClick={saveVersion}
-            className="px-6 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95"
+            className="px-4 md:px-6 py-4 md:py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95"
           >
             <Save size={18} />
             <span className="hidden md:inline">Save Ver</span>
@@ -1737,14 +1992,39 @@ export const ProgramDisplay: React.FC<Props> = ({
           <button
             onClick={generateFullReport}
             disabled={isGeneratingPdf || activePrograms.length === 0}
-            className="px-8 py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50"
+            className="px-4 md:px-8 py-4 md:py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
+            title="Export Internal Full Report PDF"
           >
             {isGeneratingPdf ? (
               <Printer size={18} className="animate-spin" />
             ) : (
               <FileDown size={18} />
             )}
-            <span>Export PDF Report</span>
+            <span className="hidden md:inline">Internal PDF</span>
+          </button>
+          <button
+            onClick={generateStaffPdfReport}
+            disabled={isGeneratingStaffPdf || activePrograms.length === 0}
+            className="px-4 md:px-8 py-4 md:py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
+          >
+            {isGeneratingStaffPdf ? (
+              <Printer size={18} className="animate-spin" />
+            ) : (
+              <FileDown size={18} />
+            )}
+            <span>Staff PDF</span>
+          </button>
+          <button
+            onClick={generateStaffExcelReport}
+            disabled={isGeneratingExcel || activePrograms.length === 0}
+            className="px-4 md:px-8 py-4 md:py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
+          >
+            {isGeneratingExcel ? (
+              <Printer size={18} className="animate-spin" />
+            ) : (
+              <FileDown size={18} />
+            )}
+            <span>Staff EXCEL</span>
           </button>
         </div>
       </div>
@@ -2437,6 +2717,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               })}
                                           </div>
                                         )}
+                                        
+                                        <div className="mt-1">
+                                          <input 
+                                              type="text"
+                                              placeholder="Shift note..."
+                                              value={prog.notes?.[shift.id] || ''}
+                                              onChange={(e) => handleUpdateNote(prog.dateString!, shift.id, e.target.value)}
+                                              className="w-full text-[10px] p-1 bg-white border border-slate-200 rounded text-slate-700 outline-none focus:border-indigo-400 placeholder:text-slate-300 transition-colors"
+                                          />
+                                        </div>
                                       </div>
                                     </td>
                                   </tr>
@@ -2495,77 +2785,69 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     {cat}
                                   </td>
                                   <td className="px-4 py-3">
-                                    <div className="flex flex-wrap items-center">
-                                      {items.map((item, idx) => {
-                                        const {
-                                          staff: s,
-                                          count,
-                                          isRequestedDayOff,
-                                        } = item as any;
-                                        const daysWorked = getStaffWorkload(
-                                          s.id,
-                                        );
-                                        const colorClass = getStaffColor(
-                                          s,
-                                          daysWorked,
-                                          null,
-                                        );
-                                        const isLocked =
-                                          cat === "ROSTER LEAVE" ||
-                                          cat === "ANNUAL LEAVE" ||
-                                          isRequestedDayOff;
-                                        return (
-                                          <React.Fragment key={s.id}>
-                                            <div
-                                              draggable={!isLocked}
-                                              onDragStart={(e) => {
-                                                if (isLocked) {
-                                                  e.preventDefault();
-                                                  return;
-                                                }
-                                                handleDragStart(
-                                                  e,
-                                                  s.id,
-                                                  "ABSENCE",
-                                                  prog.dateString!,
-                                                  s.isShiftLeader ||
-                                                    s.initials.toUpperCase() ===
-                                                      "SK-ATZ"
-                                                    ? "SL"
-                                                    : s.isLoadControl ||
-                                                        s.initials.toUpperCase() ===
-                                                          "SK-ATZ"
-                                                      ? "LC"
-                                                      : s.isRamp
-                                                        ? "RMP"
-                                                        : s.isLostFound
-                                                          ? "LF"
-                                                          : s.isLabour
-                                                            ? "LBR"
-                                                            : "OPS",
-                                                );
-                                              }}
-                                              className={`text-[10px] font-bold uppercase transition-all flex items-center group ${isLocked ? "text-slate-400 cursor-not-allowed" : "cursor-move hover:scale-105 hover:text-indigo-600 text-slate-700"}`}
-                                            >
-                                              <span>{s.initials}</span>
-                                              {isLocked ? (
-                                                <Lock
-                                                  size={8}
-                                                  className="opacity-70 ml-0.5"
-                                                />
-                                              ) : null}
-                                            </div>
-                                            {idx < items.length - 1 && (
-                                              <span className="text-slate-400 font-bold mx-1">-</span>
-                                            )}
-                                          </React.Fragment>
-                                        );
-                                      })}
-                                      {items.length === 0 && (
-                                        <span className="text-slate-300 italic">
-                                          None
-                                        </span>
-                                      )}
+                                    <div className="flex flex-col gap-2">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        {items.map((item, idx) => {
+                                          const {
+                                            staff: s,
+                                            count,
+                                            isRequestedDayOff,
+                                          } = item as any;
+                                          const daysWorked = getStaffWorkload(
+                                            s.id,
+                                          );
+                                          const colorClass = getStaffColor(
+                                            s,
+                                            daysWorked,
+                                            null,
+                                          );
+                                          const isLocked =
+                                            cat === "ROSTER LEAVE" ||
+                                            cat === "ANNUAL LEAVE" ||
+                                            isRequestedDayOff;
+                                          return (
+                                            <React.Fragment key={s.id}>
+                                              <div
+                                                draggable={!isLocked}
+                                                onDragStart={(e) => {
+                                                  if (isLocked) {
+                                                    e.preventDefault();
+                                                    return;
+                                                  }
+                                                  handleDragStart(
+                                                    e,
+                                                    s.id,
+                                                    "ABSENCE",
+                                                    prog.dateString!,
+                                                    s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
+                                                    s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
+                                                    s.isRamp ? "RMP" :
+                                                    s.isLostFound ? "LF" :
+                                                    s.isLabour ? "LBR" :
+                                                    s.isSecurity ? "SEC" :
+                                                    s.isDriver ? "DRV" :
+                                                    "OPS"
+                                                  );
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
+                                              >
+                                                <span>{s.initials}</span>
+                                                {isLocked ? (
+                                                  <Lock
+                                                    size={8}
+                                                    className="opacity-70 ml-0.5"
+                                                  />
+                                                ) : null}
+                                              </div>
+                                            </React.Fragment>
+                                          );
+                                        })}
+                                        {items.length === 0 && (
+                                          <span className="text-[10px] text-slate-300 italic">
+                                            None
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </td>
                                 </tr>
