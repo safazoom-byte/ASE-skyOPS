@@ -527,68 +527,96 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
             <h4 className="font-bold text-slate-800 mb-6">System Settings & Configurations</h4>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="border border-slate-200 p-6 rounded-2xl">
-                <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Company Logo (Left)</h5>
-                {localStorage.getItem("skyops_company_logo") && (
-                  <img src={localStorage.getItem("skyops_company_logo")!} alt="Company Logo" className="h-16 object-contain mb-4" />
-                )}
-                <input 
-                  type="file" 
-                  accept="image/png, image/jpeg"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        localStorage.setItem("skyops_company_logo", event.target?.result as string);
-                        // Force re-render hack
-                        window.dispatchEvent(new Event("storage"));
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                  className="text-xs" 
-                />
-              </div>
+            {(() => {
+              const myProfile = users.find(u => u.id === currentUser.id) || currentUser;
+              return (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Company Logo (Left)</h5>
+                      {myProfile.companyLogo && (
+                        <img src={myProfile.companyLogo} alt="Company Logo" className="h-16 object-contain mb-4" />
+                      )}
+                      <input 
+                        type="file" 
+                        accept="image/png, image/jpeg"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = async (event) => {
+                              const base64 = event.target?.result as string;
+                              await handleUpdateUser({ ...myProfile, companyLogo: base64 });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="text-xs" 
+                      />
+                    </div>
 
-              <div className="border border-slate-200 p-6 rounded-2xl">
-                <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">SkyOPS Logo (Right)</h5>
-                {localStorage.getItem("skyops_skyops_logo") && (
-                  <img src={localStorage.getItem("skyops_skyops_logo")!} alt="SkyOPS Logo" className="h-16 object-contain mb-4" />
-                )}
-                <input 
-                  type="file" 
-                  accept="image/png, image/jpeg"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        localStorage.setItem("skyops_skyops_logo", event.target?.result as string);
-                        // Force re-render hack
-                        window.dispatchEvent(new Event("storage"));
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                  className="text-xs" 
-                />
-              </div>
-            </div>
-            
-            <div className="mt-8 flex justify-end">
-              <button
-                onClick={() => {
-                  localStorage.removeItem("skyops_company_logo");
-                  localStorage.removeItem("skyops_skyops_logo");
-                  window.dispatchEvent(new Event("storage"));
-                }}
-                className="px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
-              >
-                Clear All Logos
-              </button>
-            </div>
+                    <div className="border border-slate-200 p-6 rounded-2xl">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">SkyOPS Logo (Right)</h5>
+                      {myProfile.skyopsLogo && (
+                        <img src={myProfile.skyopsLogo} alt="SkyOPS Logo" className="h-16 object-contain mb-4" />
+                      )}
+                      <input 
+                        type="file" 
+                        accept="image/png, image/jpeg"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = async (event) => {
+                              const base64 = event.target?.result as string;
+                              await handleUpdateUser({ ...myProfile, skyopsLogo: base64 });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="text-xs" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Default Signatures</h5>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Prepared By</label>
+                        <input 
+                          type="text" 
+                          value={myProfile.preparedBy || ""}
+                          onChange={(e) => handleUpdateUser({ ...myProfile, preparedBy: e.target.value })}
+                          placeholder="e.g. Operation Control Center"
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1 mt-2">
+                        <label className="text-[10px] font-black uppercase text-slate-400">Revised By</label>
+                        <input 
+                          type="text" 
+                          value={myProfile.revisedBy || ""}
+                          onChange={(e) => handleUpdateUser({ ...myProfile, revisedBy: e.target.value })}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-8 flex justify-end">
+                    <button
+                      onClick={async () => {
+                        await handleUpdateUser({ ...myProfile, companyLogo: "", skyopsLogo: "" });
+                      }}
+                      className="px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
+                    >
+                      Clear All Logos
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

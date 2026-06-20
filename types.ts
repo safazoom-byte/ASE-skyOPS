@@ -134,6 +134,10 @@ export interface UserProfile {
   maxStaff: number;
   maxShifts: number;
   isActive: boolean;
+  companyLogo?: string;
+  skyopsLogo?: string;
+  preparedBy?: string;
+  revisedBy?: string;
 }
 
 export interface AuditLog {

@@ -30,6 +30,7 @@ import {
   Trash2,
   Eye,
   Lock,
+  Unlock,
   ShieldCheck,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
@@ -75,6 +76,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
+  const [unlockAbsences, setUnlockAbsences] = useState(false);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -226,12 +228,17 @@ export const ProgramDisplay: React.FC<Props> = ({
     }, 0);
   };
 
-  const activePrograms = programs
-    .filter((p) => {
-      if (!p.dateString) return false;
-      return p.dateString >= startDate && p.dateString <= endDate;
-    })
-    .sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+  const activePrograms = React.useMemo(() => {
+    const map = new Map<string, DailyProgram>();
+    programs.forEach((p) => {
+      if (p.dateString && p.dateString >= startDate && p.dateString <= endDate) {
+        map.set(p.dateString, p);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) =>
+      (a.dateString || "").localeCompare(b.dateString || "")
+    );
+  }, [programs, startDate, endDate]);
 
   const leaveMapByStaff = React.useMemo(() => {
     const map: Record<string, LeaveRequest[]> = {};
@@ -576,6 +583,10 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
+                return true;
+              if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
+                return true;
+              if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
                 return true;
               return false;
             }).length;
@@ -937,6 +948,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && st.isOps) return true;
           if (roleCode === "LF" && st.isLostFound) return true;
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
+          if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
+          if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
 
           return false;
         };
@@ -952,6 +965,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         const rmp = getStaffForRole("Ramp");
         const ops = getStaffForRole("Operations");
         const lf = getStaffForRole("Lost and Found");
+        const drv = getStaffForRole("Driver");
+        const sec = getStaffForRole("Security");
+        
         roleMatrixData.push([
           dateLabel,
           `${s.pickupTime}-${s.endTime}`,
@@ -960,6 +976,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           rmp,
           ops,
           lf,
+          drv,
+          sec,
         ]);
         roleMatrixMeta.push({
           slReq:
@@ -980,12 +998,20 @@ export const ProgramDisplay: React.FC<Props> = ({
             (s.roleCounts?.["Lost and Found"] ||
               (s.roleCounts as any)?.["LF"] ||
               0) > 0,
+          drvReq:
+            (s.roleCounts?.["Driver"] ||
+              (s.roleCounts as any)?.["DRV"] ||
+              0) > 0,
+          secReq:
+            (s.roleCounts?.["Security"] ||
+              (s.roleCounts as any)?.["SEC"] ||
+              0) > 0,
         });
       });
     });
     autoTable(doc, {
       startY: 20,
-      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF"]],
+      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF", "DRV", "SEC"]],
       body: roleMatrixData,
       theme: "grid",
       headStyles: { fillColor: [0, 0, 0] },
@@ -1147,9 +1173,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const generateStaffPdfReport = () => {
+  const generateStaffPdfReport = async () => {
     setIsGeneratingStaffPdf(true);
     try {
+      const profile = await db.getUserProfile();
+      const preparedBy = profile?.preparedBy || "";
+      const revisedBy = profile?.revisedBy || "";
+      
       const doc = new jsPDF("l", "mm", "a4");
       
       doc.setFontSize(10);
@@ -1158,10 +1188,8 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.text(title, 148, 10, { align: "center" });
 
       try {
-        const cLogo = localStorage.getItem("skyops_company_logo");
-        const sLogo = localStorage.getItem("skyops_skyops_logo");
-        if (cLogo) doc.addImage(cLogo, "PNG", 5, 2, 15, 15);
-        if (sLogo) doc.addImage(sLogo, "PNG", 277, 2, 15, 15);
+        if (profile?.companyLogo) doc.addImage(profile.companyLogo, "PNG", 5, 2, 15, 15);
+        if (profile?.skyopsLogo) doc.addImage(profile.skyopsLogo, "PNG", 277, 2, 15, 15);
       } catch (e) { }
       
       const tableRows: any[] = [];
@@ -1171,104 +1199,133 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
-        tableRows.push([
-          { content: `${dayName} ${dateFormatted}`, colSpan: 9, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
-        ]);
-        
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
-        const offDuty = prog.offDuty || [];
-        const absenceTextLines: string[] = [];
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
         
         const categories = {
-          "Traffic Day OFF": [],
-          "SEC Day OFF": [],
-          "Worker Day OFF": [],
-          "Annual": [],
-          "Lieu": [],
-          "SSH Support": []
+          "Day off": [] as string[],
+          "Annual": [] as string[],
+          "Lieu": [] as string[],
+          "Sick Leave": [] as string[],
+          "SSH Support": [] as string[]
         };
-        
-        offDuty.forEach(od => {
-          const st = getStaff(od.staffId);
-          if (st) {
-             let mappedCat = od.type as string;
-             if (mappedCat === "DAYS OFF") mappedCat = "Traffic Day OFF";
-             else if (mappedCat === "ANNUAL LEAVE") mappedCat = "Annual";
-             else if (mappedCat === "ROSTER LEAVE") mappedCat = "Lieu";
-             else mappedCat = "Worker Day OFF";
-             
-             (categories as any)[mappedCat] = ((categories as any)[mappedCat] || []).concat(st.initials);
+
+        offStaff.forEach((s) => {
+          const leave = leaveMapByStaff[s.id]?.find(
+            (l) => l.startDate <= prog.dateString! && l.endDate >= prog.dateString!
+          );
+          
+          let isRosterOutOfContract = false;
+          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+
+          let mappedCat = "";
+          if (leave) {
+            if (leave.type === "Annual leave") mappedCat = "Annual";
+            else if (leave.type === "Roster leave") mappedCat = "Lieu";
+            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
+            else mappedCat = "Day off";
+          } else if (isRosterOutOfContract) {
+            mappedCat = "Lieu";
+          } else {
+            if (s.type === "Local") mappedCat = "Day off";
+          }
+
+          if (mappedCat === "Day off") {
+             // Treat all as "Day off" without mentioning labour or worker
+             mappedCat = "Day off";
+          }
+
+          if (mappedCat && (categories as any)[mappedCat]) {
+            (categories as any)[mappedCat].push(s.initials);
           }
         });
-        
+
+        const absenceTextLines: string[] = [];
         Object.entries(categories).forEach(([k, v]) => {
            if (v.length > 0) {
               const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join("-")}${note ? ` (${note})` : ''}`);
+              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
            }
         });
         
-        const combinedAbsenceText = absenceTextLines.join("\n");
+        const combinedAbsenceText = absenceTextLines.join(" | ");
+        
+        let headerText = `${dayName} ${dateFormatted}`;
+        if (combinedAbsenceText) {
+            headerText += `   [ ${combinedAbsenceText} ]`;
+        }
+
+        tableRows.push([
+          { content: headerText, colSpan: 8, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
+        ]);
           
         if (shiftsToday.length === 0) {
            tableRows.push([
-             { content: "No shifts", colSpan: 8, styles: { halign: "center" } },
-             { content: combinedAbsenceText, styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle" } }
+             { content: "No shifts", colSpan: 8, styles: { halign: "center" } }
            ]);
         } else {
-           shiftsToday.forEach((shift, idx) => {
+             shiftsToday.forEach((shift, idx) => {
              const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join("\n");
+             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
              
              if (prog.notes?.[shift.id]) {
                 pureInitials += `\n[${prog.notes[shift.id]}]`;
              }
              
              const flightIds = shift.flightIds || [];
-             let fn = "", from = "", sta = "NS", std = "---", to = "";
-             
-             if (flightIds.length > 0) {
-               const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-               if (fObjs.length > 0) {
-                 fn = fObjs.map(f => f.flightNumber).join("\n");
-                 from = fObjs.map(f => f.from).join("\n");
-                 to = fObjs.map(f => f.to).join("\n");
-                 sta = fObjs[0].sta || "NS";
-                 std = fObjs[0].std || "---";
-               }
+             let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+             if (fObjs.length === 0) {
+                 fObjs = [{ flightNumber: "", from: "", to: "", sta: "NS", std: "---" } as Flight];
              }
              
-             const rowData: any[] = [
-               (idx + 1).toString(),
-               fn,
-               from,
-               sta,
-               std,
-               to,
-               shift.pickupTime || "N.S",
-               pureInitials
-             ];
+             const shiftColor = idx % 2 === 0 ? [255, 255, 255] : [245, 248, 255];
+             const shiftBorder = 0.6;
+             const flightBorder = 0.1;
              
-             if (idx === 0) {
-                rowData.push({
-                   content: combinedAbsenceText,
-                   rowSpan: shiftsToday.length,
-                   styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle", fontSize: 6 }
-                });
-             }
-             
-             tableRows.push(rowData);
+             fObjs.forEach((f, fIdx) => {
+                 const isFirstFlight = fIdx === 0;
+                 const isLastFlight = fIdx === fObjs.length - 1;
+                 
+                 const rowStyles = { 
+                    fillColor: shiftColor, 
+                    lineWidth: { top: flightBorder, bottom: isLastFlight ? shiftBorder : flightBorder, left: flightBorder, right: flightBorder },
+                    valign: "middle" as const
+                 };
+                 
+                 if (isFirstFlight) {
+                     tableRows.push([
+                         { content: (idx + 1).toString(), rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
+                         { content: f.flightNumber || "", styles: rowStyles },
+                         { content: f.from || "", styles: rowStyles },
+                         { content: f.sta || "NS", styles: rowStyles },
+                         { content: f.std || "---", styles: rowStyles },
+                         { content: f.to || "", styles: rowStyles },
+                         { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
+                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } }
+                     ]);
+                 } else {
+                     tableRows.push([
+                         { content: f.flightNumber || "", styles: rowStyles },
+                         { content: f.from || "", styles: rowStyles },
+                         { content: f.sta || "NS", styles: rowStyles },
+                         { content: f.std || "---", styles: rowStyles },
+                         { content: f.to || "", styles: rowStyles }
+                     ]);
+                 }
+             });
            });
         }
       });
       
       autoTable(doc, {
         startY: 18,
-        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)", ""]],
+        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)"]],
         body: tableRows,
         theme: "grid",
         margin: { top: 5, right: 5, bottom: 5, left: 5 },
@@ -1282,10 +1339,23 @@ export const ProgramDisplay: React.FC<Props> = ({
             4: { cellWidth: 15 },
             5: { cellWidth: 15 },
             6: { cellWidth: 20 },
-            7: { cellWidth: 'auto', fontStyle: 'bold' },
-            8: { cellWidth: 60 }
+            7: { cellWidth: 'auto' }
         },
       });
+      
+      const finalY = (doc as any).lastAutoTable.finalY || 100;
+      if (finalY > doc.internal.pageSize.getHeight() - 20) {
+          doc.addPage();
+          doc.setFontSize(7);
+          doc.setTextColor(0, 0, 0);
+          doc.text(`Prepared By : ${preparedBy}`, 14, 15);
+          doc.text(`Revised By : ${revisedBy}`, 14, 20);
+      } else {
+          doc.setFontSize(7);
+          doc.setTextColor(0, 0, 0);
+          doc.text(`Prepared By : ${preparedBy}`, 14, finalY + 10);
+          doc.text(`Revised By : ${revisedBy}`, 14, finalY + 15);
+      }
       
       doc.save(`SkyOPS_Staff_Program_${startDate}.pdf`);
     } catch (err) {
@@ -1346,11 +1416,14 @@ export const ProgramDisplay: React.FC<Props> = ({
       const newPrograms = [...programs];
       const prog = newPrograms.find((p) => p.dateString === targetDate);
       if (!prog) return;
-      if (currentShiftId !== "ABSENCE") {
+
+      const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
+
+      if (!currentShiftId.startsWith("ABSENCE")) {
         const staffObj = staff.find((s) => s.id === staffId);
         const isDriver = staffObj?.isDriver;
 
-        if (!isDriver || targetShiftId === "ABSENCE") {
+        if (!isDriver || isTargetAbsence) {
           const oldIdx = prog.assignments.findIndex(
             (a) => a.staffId === staffId && a.shiftId === currentShiftId,
           );
@@ -1358,8 +1431,19 @@ export const ProgramDisplay: React.FC<Props> = ({
             prog.assignments.splice(oldIdx, 1);
           }
         }
+      } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
+        // Dragging out of a leave category into either a working shift OR another leave category
+        const leavesToDelete = leaveRequests.filter(l => 
+          l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+        );
+        if (leavesToDelete.length > 0) {
+          Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
+            if (!isTargetAbsence || targetShiftId === "ABSENCE") window.location.reload();
+          });
+        }
       }
-      if (targetShiftId !== "ABSENCE") {
+      
+      if (!isTargetAbsence) {
         const exists = prog.assignments.some(
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
         );
@@ -1370,6 +1454,31 @@ export const ProgramDisplay: React.FC<Props> = ({
             shiftId: targetShiftId,
             flightId: "",
             role: role || "OPS",
+          });
+        }
+      } else if (targetShiftId !== "ABSENCE") {
+        // Handle dropping into a specific absence category
+        const cat = targetShiftId.replace("ABSENCE_", "");
+        let type: any = null;
+        if (cat === "ANNUAL LEAVE") type = "Annual leave";
+        if (cat === "SICK LEAVE") type = "Sick leave";
+        if (cat === "ROSTER LEAVE") type = "Roster leave";
+        if (cat === "DAYS OFF") type = "Day off";
+        
+        if (type) {
+          const req = {
+            id: Math.random().toString(36).substr(2, 9),
+            staffId,
+            type,
+            startDate: targetDate,
+            endDate: targetDate,
+            notes: "Assigned visually",
+            createdAt: new Date().toISOString()
+          };
+          db.upsertLeave(req as any).then(() => {
+            // Note: In a real app we'd want to refresh the global state or notify parent
+            // Since leaveRequests comes from props, just forcing a local reload for now or letting user switch tabs
+            window.location.reload();
           });
         }
       }
@@ -2745,9 +2854,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                         }
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                          <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
-                            Absence and Rest Registry
-                          </h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
+                              Absence and Rest Registry
+                            </h4>
+                            <button
+                              onClick={() => setUnlockAbsences(!unlockAbsences)}
+                              className={`p-1 rounded ${unlockAbsences ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-500"} hover:opacity-80 transition-all`}
+                              title={unlockAbsences ? "Lock absences" : "Unlock absences to reassign"}
+                            >
+                              {unlockAbsences ? <Unlock size={12} /> : <Lock size={12} />}
+                            </button>
+                          </div>
                           <span className="text-[9px] font-bold text-slate-400 italic">
                             Drag here to unassign
                           </span>
@@ -2775,6 +2893,13 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                  }}
+                                  onDrop={(e) => {
+                                    e.stopPropagation();
+                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
+                                  }}
                                   className={
                                     isCatModified
                                       ? "bg-indigo-50/70 border-l-4 border-indigo-400"
@@ -2802,9 +2927,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             null,
                                           );
                                           const isLocked =
-                                            cat === "ROSTER LEAVE" ||
-                                            cat === "ANNUAL LEAVE" ||
-                                            isRequestedDayOff;
+                                            !unlockAbsences && (
+                                              cat === "ROSTER LEAVE" ||
+                                              cat === "ANNUAL LEAVE" ||
+                                              isRequestedDayOff
+                                            );
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
@@ -2817,7 +2944,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   handleDragStart(
                                                     e,
                                                     s.id,
-                                                    "ABSENCE",
+                                                    `ABSENCE_${cat}`,
                                                     prog.dateString!,
                                                     s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
                                                     s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :

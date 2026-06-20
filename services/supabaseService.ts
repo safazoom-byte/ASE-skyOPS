@@ -465,6 +465,10 @@ export const db = {
             maxStaff: data.max_staff ?? 50,
             maxShifts: data.max_shifts ?? 20,
             isActive: data.is_active ?? true,
+            companyLogo: data.company_logo ?? "",
+            skyopsLogo: data.skyops_logo ?? "",
+            preparedBy: data.prepared_by ?? "",
+            revisedBy: data.revised_by ?? "",
           };
         } else {
           // Check if a profile was pre-created by email
@@ -493,6 +497,10 @@ export const db = {
               maxStaff: emailData.max_staff ?? 50,
               maxShifts: emailData.max_shifts ?? 20,
               isActive: emailData.is_active ?? true,
+              companyLogo: emailData.company_logo ?? "",
+              skyopsLogo: emailData.skyops_logo ?? "",
+              preparedBy: emailData.prepared_by ?? "",
+              revisedBy: emailData.revised_by ?? "",
             };
           }
         }
@@ -514,6 +522,10 @@ export const db = {
         maxStaff: 50,
         maxShifts: 20,
         isActive: true,
+        companyLogo: "",
+        skyopsLogo: "",
+        preparedBy: "Operation Control Center",
+        revisedBy: "",
       };
       localProfiles.push(profile);
       localStorage.setItem(
@@ -533,6 +545,10 @@ export const db = {
             max_staff: profile.maxStaff,
             max_shifts: profile.maxShifts,
             is_active: profile.isActive,
+            company_logo: profile.companyLogo,
+            skyops_logo: profile.skyopsLogo,
+            prepared_by: profile.preparedBy,
+            revised_by: profile.revisedBy,
           });
         } catch (e) {
           console.warn("Could not insert profile to DB");
@@ -565,6 +581,10 @@ export const db = {
             maxStaff: d.max_staff,
             maxShifts: d.max_shifts,
             isActive: d.is_active,
+            companyLogo: d.company_logo ?? "",
+            skyopsLogo: d.skyops_logo ?? "",
+            preparedBy: d.prepared_by ?? "",
+            revisedBy: d.revised_by ?? "",
           }));
 
           // Merge local profiles that aren't in the DB yet
@@ -608,6 +628,10 @@ export const db = {
           max_staff: profile.maxStaff,
           max_shifts: profile.maxShifts,
           is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
         });
       } catch (e) {
         console.warn("Could not update profile in DB");
@@ -650,6 +674,10 @@ export const db = {
           max_staff: profile.maxStaff,
           max_shifts: profile.maxShifts,
           is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
         });
         if (error) console.error("Supabase insert error:", error);
       } catch (e) {

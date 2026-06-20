@@ -350,6 +350,10 @@ export const ShiftManager: React.FC<Props> = ({
         return <Search size={16} />;
       case "Labour":
         return <Users size={16} />;
+      case "Driver":
+        return <Truck size={16} />;
+      case "Security":
+        return <Shield size={16} />;
       default:
         return <Clock size={16} />;
     }
@@ -369,6 +373,10 @@ export const ShiftManager: React.FC<Props> = ({
         return "LF";
       case "Labour":
         return "LBR";
+      case "Driver":
+        return "DRV";
+      case "Security":
+        return "SEC";
       default:
         return "";
     }
