@@ -15,6 +15,25 @@ import {
 import { UserProfile, AuditLog } from "../types";
 import { db } from "../services/supabaseService";
 
+const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
+  const [val, setVal] = useState(value);
+  useEffect(() => { setVal(value); }, [value]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] font-black uppercase text-slate-400">{label}</label>
+      <input
+        type="text"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => onChange(val)}
+        placeholder={placeholder}
+        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm transition-all focus:ring-2 focus:ring-blue-500 outline-none"
+      />
+    </div>
+  );
+};
+
 interface CommandCenterProps {
   currentUser: UserProfile;
 }
@@ -527,8 +546,43 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
             <h4 className="font-bold text-slate-800 mb-6">System Settings & Configurations</h4>
             
-            {(() => {
+             {(() => {
               const myProfile = users.find(u => u.id === currentUser.id) || currentUser;
+              
+              const handleImageUpload = (file: File, field: 'companyLogo' | 'skyopsLogo') => {
+                 const reader = new FileReader();
+                 reader.onload = (e) => {
+                     const img = new Image();
+                     img.onload = async () => {
+                         const canvas = document.createElement('canvas');
+                         let width = img.width;
+                         let height = img.height;
+                         const MAX_WIDTH = 300;
+                         const MAX_HEIGHT = 300;
+                         
+                         if (width > height) {
+                             if (width > MAX_WIDTH) {
+                                 height *= MAX_WIDTH / width;
+                                 width = MAX_WIDTH;
+                             }
+                         } else {
+                             if (height > MAX_HEIGHT) {
+                                 width *= MAX_HEIGHT / height;
+                                 height = MAX_HEIGHT;
+                             }
+                         }
+                         canvas.width = width;
+                         canvas.height = height;
+                         const ctx = canvas.getContext('2d');
+                         ctx?.drawImage(img, 0, 0, width, height);
+                         const resizedBase64 = canvas.toDataURL('image/png', 0.8);
+                         await handleUpdateUser({ ...myProfile, [field]: resizedBase64 });
+                     };
+                     img.src = e.target?.result as string;
+                 };
+                 reader.readAsDataURL(file);
+              };
+
               return (
                 <div className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -542,14 +596,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         accept="image/png, image/jpeg"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = async (event) => {
-                              const base64 = event.target?.result as string;
-                              await handleUpdateUser({ ...myProfile, companyLogo: base64 });
-                            };
-                            reader.readAsDataURL(file);
-                          }
+                          if (file) handleImageUpload(file, 'companyLogo');
                         }}
                         className="text-xs" 
                       />
@@ -565,14 +612,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         accept="image/png, image/jpeg"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = async (event) => {
-                              const base64 = event.target?.result as string;
-                              await handleUpdateUser({ ...myProfile, skyopsLogo: base64 });
-                            };
-                            reader.readAsDataURL(file);
-                          }
+                          if (file) handleImageUpload(file, 'skyopsLogo');
                         }}
                         className="text-xs" 
                       />
@@ -582,25 +622,26 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
                       <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Default Signatures</h5>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-black uppercase text-slate-400">Prepared By</label>
-                        <input 
-                          type="text" 
-                          value={myProfile.preparedBy || ""}
-                          onChange={(e) => handleUpdateUser({ ...myProfile, preparedBy: e.target.value })}
-                          placeholder="e.g. Operation Control Center"
-                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1 mt-2">
-                        <label className="text-[10px] font-black uppercase text-slate-400">Revised By</label>
-                        <input 
-                          type="text" 
-                          value={myProfile.revisedBy || ""}
-                          onChange={(e) => handleUpdateUser({ ...myProfile, revisedBy: e.target.value })}
-                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
-                        />
-                      </div>
+                      <SignatureInput 
+                         label="Prepared By" 
+                         value={myProfile.preparedBy || ""} 
+                         placeholder="e.g. Operation Control Center"
+                         onChange={(val: string) => {
+                             if (val !== myProfile.preparedBy) {
+                                 handleUpdateUser({ ...myProfile, preparedBy: val });
+                             }
+                         }}
+                      />
+                      <div className="mt-2" />
+                      <SignatureInput 
+                         label="Revised By" 
+                         value={myProfile.revisedBy || ""} 
+                         onChange={(val: string) => {
+                             if (val !== myProfile.revisedBy) {
+                                 handleUpdateUser({ ...myProfile, revisedBy: val });
+                             }
+                         }}
+                      />
                     </div>
                   </div>
                   

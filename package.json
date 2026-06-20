@@ -12,6 +12,9 @@
   "dependencies": {
     "@google/genai": "*",
     "@supabase/supabase-js": "2.48.1",
+    "@types/file-saver": "^2.0.7",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "jspdf": "2.5.1",
     "jspdf-autotable": "3.8.2",
     "lucide-react": "0.475.0",

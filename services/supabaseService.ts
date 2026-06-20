@@ -528,14 +528,16 @@ export const db = {
         revisedBy: "",
       };
       localProfiles.push(profile);
-      localStorage.setItem(
-        "skyops_user_profiles",
-        JSON.stringify(localProfiles),
-      );
+      try {
+        localStorage.setItem(
+          "skyops_user_profiles",
+          JSON.stringify(localProfiles),
+        );
+      } catch (e) {}
 
       if (supabase) {
         try {
-          await supabase.from("user_profiles").insert({
+          const { error } = await supabase.from("user_profiles").insert({
             id: profile.id,
             email: profile.email,
             role: profile.role,
@@ -550,8 +552,9 @@ export const db = {
             prepared_by: profile.preparedBy,
             revised_by: profile.revisedBy,
           });
+          if (error) console.error("Could not insert profile to DB:", error);
         } catch (e) {
-          console.warn("Could not insert profile to DB");
+          console.warn("Could not insert profile to DB", e);
         }
       }
     }
@@ -614,11 +617,16 @@ export const db = {
     } else {
       localProfiles.push(profile);
     }
-    localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
+    
+    try {
+        localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
+    } catch (e) {
+        console.warn("Could not save to localStorage (quota exceeded?), still trying DB...");
+    }
 
     if (supabase) {
       try {
-        await supabase.from("user_profiles").upsert({
+        const { error } = await supabase.from("user_profiles").upsert({
           id: profile.id,
           email: profile.email,
           role: profile.role,
@@ -633,8 +641,9 @@ export const db = {
           prepared_by: profile.preparedBy,
           revised_by: profile.revisedBy,
         });
+        if (error) console.error("Could not update profile in DB:", error);
       } catch (e) {
-        console.warn("Could not update profile in DB");
+        console.warn("Could not update profile in DB", e);
       }
     }
   },

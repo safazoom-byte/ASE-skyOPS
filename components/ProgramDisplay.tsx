@@ -1093,80 +1093,187 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
-  const generateStaffExcelReport = () => {
+  const generateStaffExcelReport = async () => {
     setIsGeneratingExcel(true);
     try {
-      const exportData: any[] = [];
+      const ExcelJS = await import("exceljs");
+      const { saveAs } = await import("file-saver");
       
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Staff Program", {
+        pageSetup: {
+          paperSize: 9, 
+          orientation: 'landscape',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          margins: { left: 0.2, right: 0.2, top: 0.5, bottom: 0.5, header: 0, footer: 0 }
+        }
+      });
+      
+      const profile = await db.getUserProfile();
+      
+      sheet.columns = [
+        { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 },
+        { width: 10 }, { width: 10 }, { width: 15 }, { width: 60 }
+      ];
+
+      const row1 = sheet.addRow([]);
+      row1.height = 45;
+      
+      sheet.mergeCells('B1:G1');
+      const titleCell = sheet.getCell('B1');
+      titleCell.value = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
+      titleCell.font = { name: 'Arial', size: 15, bold: true };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      if (profile?.companyLogo) {
+        const base64Data = profile.companyLogo.split(';base64,')[1];
+        const extMatch = profile.companyLogo.match(/image\/(jpeg|png)/);
+        const extension = extMatch ? extMatch[1] : 'png';
+        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
+        sheet.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      }
+      
+      if (profile?.skyopsLogo) {
+        const base64Data = profile.skyopsLogo.split(';base64,')[1];
+        const extMatch = profile.skyopsLogo.match(/image\/(jpeg|png)/);
+        const extension = extMatch ? extMatch[1] : 'png';
+        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
+        sheet.addImage(imgId, { tl: { col: 7.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      }
+
+      const headers = ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
+      const headerRow = sheet.addRow(headers);
+      headerRow.height = 25;
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+        cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      });
+
       activePrograms.forEach(prog => {
         const d = new Date(prog.dateString || startDate);
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
-        exportData.push({
-          "S/N": `${dayName} ${dateFormatted}`,
-          "Flight No/Day": "",
-          "From": "",
-          "STA": "",
-          "STD": "",
-          "To": "",
-          "Pick up Time": "",
-          "SDU Staff Assignment": ""
-        });
+        const dayRow = sheet.addRow([`${dayName} ${dateFormatted}`, "", "", "", "", "", "", ""]);
+        sheet.mergeCells(`A${dayRow.number}:G${dayRow.number}`);
+        const dayHeaderCell = sheet.getCell(`A${dayRow.number}`);
+        dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+        dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         
+        let absText = "";
+        const dayOffStaff = staff.filter(s => hasLeaveOnDate(s.id, prog.dateString!));
+        const dayOffText = dayOffStaff.map(s => s.initials).join(" - ");
+        const annStaff = staff.filter(s => {
+          const l = hasLeaveOnDate(s.id, prog.dateString!, true);
+          return l && l.type === "Annual leave";
+        });
+        const annText = annStaff.map(s => s.initials).join(" - ");
+        if (dayOffText) absText += `[ Day off: ${dayOffText} `;
+        if (annText) absText += `| Annual: ${annText} `;
+        if (absText) absText += `]`;
+        
+        const dayOffCell = sheet.getCell(`H${dayRow.number}`);
+        dayOffCell.value = absText;
+        dayOffCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+        dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+        dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
         shiftsToday.forEach((shift, idx) => {
           const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-          const staffInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
+          
+          let staffTokens: {text: string, type: string}[] = [];
+          assignments.forEach(a => {
+             const s = getStaff(a.staffId);
+             if (s) {
+                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
+                 staffTokens.push({ text: s.initials, type });
+             }
+          });
           
           const flightIds = shift.flightIds || [];
-          let fn = "", from = "", sta = "NS", std = "---", to = "";
+          let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+          if (fObjs.length === 0) fObjs = [{} as Flight];
           
-          if (flightIds.length > 0) {
-            const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-            if (fObjs.length > 0) {
-              fn = fObjs.map(f => f.flightNumber).join("/");
-              from = fObjs.map(f => f.from).join("-");
-              to = fObjs.map(f => f.to).join("-");
-              sta = fObjs[0].sta || "NS";
-              std = fObjs[0].std || "---";
-            }
+          const startRowNo = sheet.rowCount + 1;
+          
+          fObjs.forEach((f, fIndex) => {
+             const rt = sheet.addRow([
+                fIndex === 0 ? (idx + 1).toString() : "",
+                f.flightNumber ? f.flightNumber.replace("/", " / ") : "",
+                f.from || "",
+                f.sta || "NS",
+                f.std || "---",
+                f.to || "",
+                fIndex === 0 ? (shift.pickupTime || "N.S") : "",
+                "" // staff will be added later
+             ]);
+             
+             rt.eachCell((cell) => {
+                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                 cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+             });
+             
+             if (fIndex === 0) {
+                 const pickupCell = sheet.getCell(`G${rt.number}`);
+                 pickupCell.font = { bold: true, size: 10 };
+                 pickupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+             }
+          });
+          
+          const endRowNo = sheet.rowCount;
+          
+          if (fObjs.length > 1) {
+              sheet.mergeCells(`A${startRowNo}:A${endRowNo}`);
+              sheet.mergeCells(`G${startRowNo}:G${endRowNo}`);
+              sheet.mergeCells(`H${startRowNo}:H${endRowNo}`);
           }
           
-          exportData.push({
-            "S/N": (idx + 1).toString(),
-            "Flight No/Day": fn,
-            "From": from,
-            "STA": sta,
-            "STD": std,
-            "To": to,
-            "Pick up Time": shift.pickupTime,
-            "SDU Staff Assignment": staffInitials
+          const staffCell = sheet.getCell(`H${startRowNo}`);
+          const richText: any[] = [];
+          
+          staffTokens.forEach((t, i) => {
+              let color = 'FF000000';
+              if (t.type === 'driver') color = 'FF15803D';
+              if (t.type === 'labour') color = 'FFB91C1C';
+              if (t.type === 'sec') color = 'FF7E22CE';
+              
+              if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
+              richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
           });
+          
+          const shiftNote = prog.notes?.[shift.id] || shift.description || "";
+          if (shiftNote) {
+              if (richText.length > 0) richText.push({ text: "\n" });
+              richText.push({ text: shiftNote, font: { color: { argb: 'FF666666' }, italic: true } });
+          }
+          
+          if (richText.length > 0) {
+              staffCell.value = { richText };
+          }
+          staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         });
-        exportData.push({}); // Empty row separator
       });
       
-      const ws = XLSX.utils.json_to_sheet(exportData);
+      sheet.addRow([]);
+      const fRow1 = sheet.addRow(["Prepared By: " + (profile?.preparedBy || "")]);
+      const fRow2 = sheet.addRow(["Revised By: " + (profile?.revisedBy || "")]);
       
-      const colWidths = [
-        { wch: 20 },
-        { wch: 15 },
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 15 },
-        { wch: 50 },
-      ];
-      ws['!cols'] = colWidths;
-      
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Staff Program");
-      XLSX.writeFile(wb, `SkyOPS_Staff_Program_${startDate}.xlsx`);
+      fRow1.getCell(1).font = { bold: true, size: 10 };
+      fRow2.getCell(1).font = { bold: true, size: 10 };
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `SkyOPS_Staff_Program_${startDate}.xlsx`);
     } catch (err) {
       console.error(err);
       alert("Failed to export Excel report.");
@@ -1282,7 +1389,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                  return { text: s.initials, type };
              }).filter(Boolean) as {text: string, type: string}[];
              
-             let pureInitials = staffTokens.map(t => t.text).join(" - ");
+             let pureInitials = staffTokens.map(t => t.text).join("-");
              
              const shiftNote = prog.notes?.[shift.id] || shift.description || "";
              if (shiftNote) {
@@ -1318,7 +1425,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                          { content: f.sta || "NS", styles: rowStyles },
                          { content: f.std || "---", styles: rowStyles },
                          { content: f.to || "", styles: rowStyles },
-                         { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
+                         { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", fontSize: 9, fillColor: [248, 250, 252], lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
                          { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: staffTokens, customNote: shiftNote } as any
                      ]);
                  } else {
@@ -1341,8 +1448,8 @@ export const ProgramDisplay: React.FC<Props> = ({
         body: tableRows,
         theme: "grid",
         margin: { top: 2, right: 3, bottom: 2, left: 3 },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 11 },
-        styles: { fontSize: 11, cellPadding: 1.5, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 9 },
+        styles: { fontSize: 9, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
         columnStyles: {
             0: { cellWidth: 15 },
             1: { cellWidth: 45 },
@@ -1405,9 +1512,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                         const token = customInitials.find(t => t.text === word);
                         if (token) {
                             switch(token.type) {
-                                case 'driver': color = [16, 185, 129]; break;
-                                case 'labour': color = [245, 158, 11]; break;
-                                case 'sec': color = [168, 85, 247]; break;
+                                case 'driver': color = [21, 128, 61]; break; // Dark Green (green-700)
+                                case 'labour': color = [185, 28, 28]; break; // Dark Red (red-700)
+                                case 'sec': color = [126, 34, 206]; break; // Dark Purple (purple-700)
                                 default: color = [0, 0, 0]; break;
                             }
                             doc.setFont("helvetica", "bold");
