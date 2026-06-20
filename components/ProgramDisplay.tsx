@@ -1167,17 +1167,52 @@ export const ProgramDisplay: React.FC<Props> = ({
         dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         
-        let absText = "";
-        const dayOffStaff = staff.filter(s => hasLeaveOnDate(s.id, prog.dateString!));
-        const dayOffText = dayOffStaff.map(s => s.initials).join(" - ");
-        const annStaff = staff.filter(s => {
-          const l = hasLeaveOnDate(s.id, prog.dateString!, true);
-          return l && l.type === "Annual leave";
+        const categories = {
+          "Day off": [] as string[],
+          "Annual": [] as string[],
+          "Lieu": [] as string[],
+          "Sick Leave": [] as string[]
+        };
+
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+
+        offStaff.forEach(s => {
+          const leave = hasLeaveOnDate(s.id, prog.dateString!);
+          let isRosterOutOfContract = false;
+          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          
+          let mappedCat = "";
+          if (leave) {
+            if (leave.type === "Annual leave") mappedCat = "Annual";
+            else if (leave.type === "Roster leave") mappedCat = "Lieu";
+            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
+            else mappedCat = "Day off";
+          } else if (isRosterOutOfContract) {
+            mappedCat = "Lieu";
+          } else {
+            if (s.type === "Local") mappedCat = "Day off";
+          }
+
+          if (mappedCat === "Day off") {
+             mappedCat = "Day off";
+          }
+
+          if (mappedCat && (categories as any)[mappedCat]) {
+            (categories as any)[mappedCat].push(s.initials);
+          }
         });
-        const annText = annStaff.map(s => s.initials).join(" - ");
-        if (dayOffText) absText += `[ Day off: ${dayOffText} `;
-        if (annText) absText += `| Annual: ${annText} `;
-        if (absText) absText += `]`;
+
+        const absenceTextLines: string[] = [];
+        Object.entries(categories).forEach(([k, v]) => {
+           if (v.length > 0) {
+              const note = prog.notes?.[`ABSENCE_${k}`];
+              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
+           }
+        });
+        
+        const absText = absenceTextLines.length > 0 ? `[ ${absenceTextLines.join(" | ")} ]` : "";
         
         const dayOffCell = sheet.getCell(`H${dayRow.number}`);
         dayOffCell.value = absText;
@@ -1255,7 +1290,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           const shiftNote = prog.notes?.[shift.id] || shift.description || "";
           if (shiftNote) {
               if (richText.length > 0) richText.push({ text: "\n" });
-              richText.push({ text: shiftNote, font: { color: { argb: 'FF666666' }, italic: true } });
+              richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
           }
           
           if (richText.length > 0) {
@@ -1396,7 +1431,7 @@ export const ProgramDisplay: React.FC<Props> = ({
              const shiftNote = prog.notes?.[shift.id] || shift.description || "";
              if (shiftNote) {
                  if (pureInitials) pureInitials += `\n`;
-                 pureInitials += `(${shiftNote})`;
+                 pureInitials += `${shiftNote}`;
              }
              
              const flightIds = shift.flightIds || [];
@@ -1495,8 +1530,17 @@ export const ProgramDisplay: React.FC<Props> = ({
                     cursorY += (lineHeight / 2);
                 }
                 
+                let reachedNoteRegion = false;
+                
                 for (let i = 0; i < lines.length; i++) {
                     let line = lines[i];
+                    
+                    const normalizedLine = line.replace(/[\s\(\)]/g, '');
+                    const normalizedNote = customNote ? customNote.replace(/[\s\(\)]/g, '') : '';
+                    if (normalizedLine.length > 0 && normalizedNote && normalizedNote.includes(normalizedLine)) {
+                        reachedNoteRegion = true;
+                    }
+
                     const textWidth = doc.getTextWidth(line);
                     let startX = data.cell.x + leftPadding;
                     if (data.cell.styles.halign === 'center') {
@@ -1510,29 +1554,24 @@ export const ProgramDisplay: React.FC<Props> = ({
                         if (!word) continue;
                         
                         let color = [0, 0, 0];
+                        let isBold = true;
                         
-                        const token = customInitials.find(t => t.text === word);
-                        if (token) {
-                            switch(token.type) {
-                                case 'driver': color = [21, 128, 61]; break; // Dark Green (green-700)
-                                case 'labour': color = [185, 28, 28]; break; // Dark Red (red-700)
-                                case 'sec': color = [126, 34, 206]; break; // Dark Purple (purple-700)
-                                default: color = [0, 0, 0]; break;
-                            }
-                            doc.setFont("helvetica", "bold");
+                        if (reachedNoteRegion) {
+                            color = [255, 0, 0];
+                            isBold = true;
                         } else {
-                            if (customNote && customNote.includes(word) && word.trim() !== "-" && word.trim() !== "") {
-                                color = [255, 0, 0];
-                                doc.setFont("helvetica", "italic");
-                            } else {
-                                doc.setFont("helvetica", "bold");
-                                if (line.trim().startsWith("(")) {
-                                    color = [255, 0, 0];
-                                    doc.setFont("helvetica", "italic");
+                            const token = customInitials.find(t => t.text === word);
+                            if (token) {
+                                switch(token.type) {
+                                    case 'driver': color = [21, 128, 61]; break; // Dark Green
+                                    case 'labour': color = [185, 28, 28]; break; // Dark Red
+                                    case 'sec': color = [126, 34, 206]; break; // Dark Purple
+                                    default: color = [0, 0, 0]; break;
                                 }
                             }
                         }
                         
+                        doc.setFont("helvetica", isBold ? "bold" : "normal");
                         doc.setTextColor(color[0], color[1], color[2]);
                         doc.text(word, cursorX, cursorY, { baseline: 'middle' });
                         cursorX += doc.getTextWidth(word);
@@ -1591,12 +1630,18 @@ export const ProgramDisplay: React.FC<Props> = ({
     note: string
   ) => {
     if (!onUpdatePrograms) return;
-    const newPrograms = [...programs];
-    const prog = newPrograms.find((p) => p.dateString === dateString);
-    if (!prog) return;
-
-    if (!prog.notes) prog.notes = {};
-    prog.notes[targetId] = note;
+    const newPrograms = programs.map((p) => {
+      if (p.dateString === dateString) {
+        return {
+          ...p,
+          notes: {
+            ...(p.notes || {}),
+            [targetId]: note,
+          },
+        };
+      }
+      return p;
+    });
 
     onUpdatePrograms(newPrograms);
   };
@@ -3058,7 +3103,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               {prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
                                           </button>
                                           {prog.notes?.[shift.id] && (
-                                              <div className="text-[10px] text-slate-700 p-1.5 bg-yellow-50 border border-yellow-100 rounded break-words whitespace-pre-wrap">
+                                              <div className="text-[10px] text-red-600 font-bold p-1.5 bg-red-50 border border-red-100 rounded break-words whitespace-pre-wrap">
                                                   <strong>Note: </strong> {prog.notes[shift.id]}
                                               </div>
                                           )}

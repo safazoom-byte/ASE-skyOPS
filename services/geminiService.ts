@@ -726,7 +726,7 @@ Provide the result purely as a JSON object containing { "added": [], "updated": 
 
   const response = await withRetry<GenerateContentResponse>(() =>
     ai.models.generateContent({
-      model: "gemini-2.5-pro",
+      model: "gemini-2.5-flash",
       contents: parts,
       config: {
         responseMimeType: "application/json",
