@@ -1166,6 +1166,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'left' };
         
         const categories = {
           "Day off": [] as string[],
@@ -1219,6 +1220,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         dayOffCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
         dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        dayOffCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
 
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
@@ -1350,9 +1352,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
-        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
-        
         const categories = {
           "Day off": [] as string[],
           "Annual": [] as string[],
@@ -1360,6 +1359,9 @@ export const ProgramDisplay: React.FC<Props> = ({
           "Sick Leave": [] as string[],
           "SSH Support": [] as string[]
         };
+
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
