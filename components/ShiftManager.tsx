@@ -48,6 +48,9 @@ interface Props {
   onUpdate: (s: ShiftConfig) => void;
   onDelete: (id: string) => void;
   onOpenScanner?: () => void;
+  onAddFlight?: (f: Flight) => void;
+  onUpdateFlight?: (f: Flight) => void;
+  onDeleteFlight?: (id: string) => void;
 }
 
 export const ShiftManager: React.FC<Props> = ({
@@ -61,6 +64,9 @@ export const ShiftManager: React.FC<Props> = ({
   onUpdate,
   onDelete,
   onOpenScanner,
+  onAddFlight,
+  onUpdateFlight,
+  onDeleteFlight,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
@@ -96,6 +102,41 @@ export const ShiftManager: React.FC<Props> = ({
   }
 
   const [showBulkModal, setShowBulkModal] = useState(false);
+
+  const [flightModal, setFlightModal] = useState<{
+    shiftId: string;
+    flightId?: string;
+    isNew?: boolean;
+  } | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, sourceShiftId: string, flightId: string) => {
+    e.dataTransfer.setData("application/json", JSON.stringify({ sourceShiftId, flightId }));
+  };
+
+  const handleDrop = (e: React.DragEvent, targetShiftId: string) => {
+    e.preventDefault();
+    try {
+      const dataStr = e.dataTransfer.getData("application/json");
+      if (!dataStr) return;
+      const { sourceShiftId, flightId } = JSON.parse(dataStr);
+      if (sourceShiftId === targetShiftId) return;
+
+      const sourceShift = shifts.find(s => s.id === sourceShiftId);
+      const targetShift = shifts.find(s => s.id === targetShiftId);
+      if (!sourceShift || !targetShift) return;
+
+      const newSourceFlights = (sourceShift.flightIds || []).filter(f => f !== flightId);
+      const newTargetFlights = [...(targetShift.flightIds || []), flightId];
+      // make it unique
+      const uniqueTargetFlights = Array.from(new Set(newTargetFlights));
+      onUpdate({ ...sourceShift, flightIds: newSourceFlights });
+      onUpdate({ ...targetShift, flightIds: uniqueTargetFlights });
+    } catch(err) {}
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
 
   // Weekly State
   const [bulkStartDate, setBulkStartDate] = useState(
@@ -1286,25 +1327,40 @@ export const ShiftManager: React.FC<Props> = ({
                                       ))}
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2">
-                                    <div className="flex flex-wrap gap-0.5 max-w-[120px]">
+                                  <td 
+                                    className="px-4 py-2"
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) => handleDrop(e, s.id)}
+                                  >
+                                    <div className="flex flex-wrap items-center gap-1 max-w-[150px] min-h-[30px] p-1 bg-slate-50 border border-transparent hover:border-slate-200 rounded-md transition-colors w-full">
                                       {s.flightIds && s.flightIds.length > 0 ? (
                                         s.flightIds.map((fid) => {
                                           const flight = getFlightById(fid);
                                           return flight ? (
                                             <span
                                               key={fid}
-                                              className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1 rounded"
+                                              draggable
+                                              onDragStart={(e) => handleDragStart(e, s.id, fid)}
+                                              onClick={() => setFlightModal({ shiftId: s.id, flightId: fid, isNew: false })}
+                                              className="text-[9px] font-bold text-blue-600 bg-blue-100/50 hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform"
+                                              title="Click to edit/split/delete, drag to move"
                                             >
                                               {flight.flightNumber}
                                             </span>
                                           ) : null;
                                         })
                                       ) : (
-                                        <span className="text-[10px] text-slate-300">
-                                          -
+                                        <span className="text-[10px] text-slate-300 pointer-events-none select-none">
+                                          Drag flights here
                                         </span>
                                       )}
+                                      <button 
+                                        onClick={() => setFlightModal({ shiftId: s.id, isNew: true })}
+                                        className="w-5 h-5 flex items-center justify-center rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors shrink-0"
+                                        title="Add Flight"
+                                      >
+                                        <Plus size={12} />
+                                      </button>
                                     </div>
                                   </td>
                                   <td className="px-4 py-2 text-center">
@@ -1331,6 +1387,201 @@ export const ShiftManager: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {/* FLIGHT MODAL (IN-SHIFT) */}
+      {flightModal && (
+        <div className="fixed inset-0 z-[1700] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <h3 className="font-black text-slate-800 flex items-center gap-2">
+                <Plane size={16} className="text-blue-500" />
+                {flightModal.isNew ? "Add Flight to Shift" : "Manage Flight"}
+              </h3>
+              <button
+                onClick={() => setFlightModal(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-400"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[70vh]">
+              {(() => {
+                const shift = shifts.find(s => s.id === flightModal.shiftId);
+                const exFlight = flightModal.flightId ? flights.find(f => f.id === flightModal.flightId) : null;
+                const [fData, setFData] = useState<Partial<Flight>>(exFlight || {
+                  flightNumber: "",
+                  from: "",
+                  to: "",
+                  sta: "",
+                  std: "",
+                  type: "Arrival",
+                  date: shift?.pickupDate || new Date().toISOString().split("T")[0],
+                  day: shift?.day || 0,
+                  priority: "Standard"
+                });
+
+                // Reset internal state if flightId changes
+                useEffect(() => {
+                  setFData(exFlight || {
+                    flightNumber: "", from: "", to: "", sta: "", std: "", type: "Arrival",
+                    date: shift?.pickupDate || new Date().toISOString().split("T")[0],
+                    day: shift?.day || 0, priority: "Standard"
+                  });
+                }, [flightModal.flightId, exFlight, shift]);
+
+                const handleSave = () => {
+                  if (!fData.flightNumber || !fData.from || !fData.to) return alert("Fill required fields");
+                  
+                  if (flightModal.isNew && onAddFlight) {
+                    const newId = Math.random().toString(36).substr(2, 9);
+                    const newFlight = { ...fData, id: newId } as Flight;
+                    onAddFlight(newFlight);
+                    if (shift) {
+                      onUpdate({ ...shift, flightIds: [...(shift.flightIds || []), newId] });
+                    }
+                  } else if (onUpdateFlight && exFlight) {
+                    onUpdateFlight({ ...exFlight, ...fData } as Flight);
+                  }
+                  setFlightModal(null);
+                };
+
+                const handleDelete = () => {
+                  if (!confirm("Remove flight from system entirely?")) return;
+                  if (shift && exFlight) {
+                    onUpdate({ ...shift, flightIds: (shift.flightIds || []).filter(id => id !== exFlight.id) });
+                    if (onDeleteFlight) onDeleteFlight(exFlight.id);
+                  }
+                  setFlightModal(null);
+                };
+
+                const handleRemoveFromShift = () => {
+                  if (shift && exFlight) {
+                    onUpdate({ ...shift, flightIds: (shift.flightIds || []).filter(id => id !== exFlight.id) });
+                  }
+                  setFlightModal(null);
+                };
+
+                const handleSplit = () => {
+                  if (!exFlight || !shift || exFlight.type !== "Turnaround") return;
+                  const fArr: Flight = { ...exFlight, id: Math.random().toString(36).substr(2,9), type: "Arrival", std: "" };
+                  const fDep: Flight = { ...exFlight, id: Math.random().toString(36).substr(2,9), type: "Departure", sta: "" };
+                  if (onAddFlight) {
+                    onAddFlight(fArr);
+                    onAddFlight(fDep);
+                  }
+                  if (onDeleteFlight) onDeleteFlight(exFlight.id);
+                  const baseIds = (shift.flightIds || []).filter(id => id !== exFlight.id);
+                  onUpdate({ ...shift, flightIds: [...baseIds, fArr.id, fDep.id] });
+                  setFlightModal(null);
+                };
+                
+                const otherShiftFlights = (shift?.flightIds || [])
+                   .filter(id => id !== flightModal.flightId)
+                   .map(id => flights.find(f => f.id === id))
+                   .filter(Boolean) as Flight[];
+
+                const handleMerge = (otherId: string) => {
+                  if (!exFlight || !shift) return;
+                  const other = flights.find(f => f.id === otherId);
+                  if (!other) return;
+                  
+                  const fTurn: Flight = {
+                    ...exFlight,
+                    flightNumber: `${exFlight.flightNumber}/${other.flightNumber}`,
+                    from: exFlight.type === "Arrival" ? exFlight.from : other.from,
+                    to: exFlight.type === "Departure" ? exFlight.to : other.to,
+                    sta: exFlight.type === "Arrival" ? exFlight.sta : other.sta,
+                    std: exFlight.type === "Departure" ? exFlight.std : other.std,
+                    type: "Turnaround"
+                  };
+                  if (onUpdateFlight) onUpdateFlight(fTurn);
+                  if (onDeleteFlight) onDeleteFlight(otherId);
+                  
+                  const newIds = (shift.flightIds || []).filter(id => id !== otherId);
+                  onUpdate({ ...shift, flightIds: newIds });
+                  setFlightModal(null);
+                };
+
+                return (
+                  <div className="space-y-4 text-sm">
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">Flight Num</label>
+                        <input className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.flightNumber} onChange={e => setFData({...fData, flightNumber: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">Type</label>
+                        <select className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.type} onChange={e => setFData({...fData, type: e.target.value as any})}>
+                          <option value="Arrival">Arrival</option>
+                          <option value="Departure">Departure</option>
+                          <option value="Turnaround">Turnaround</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">From</label>
+                        <input className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.from} onChange={e => setFData({...fData, from: e.target.value.toUpperCase()})} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">To</label>
+                        <input className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.to} onChange={e => setFData({...fData, to: e.target.value.toUpperCase()})} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">STA</label>
+                        <input type="time" className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.sta} onChange={e => setFData({...fData, sta: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">STD</label>
+                        <input type="time" className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.std} onChange={e => setFData({...fData, std: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">Date</label>
+                        <input type="date" className="w-full bg-slate-50 border border-slate-200 rounded p-2" value={fData.date} onChange={e => setFData({...fData, date: e.target.value})} />
+                      </div>
+                    </div>
+
+                    <button onClick={handleSave} className="w-full py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700">
+                      {flightModal.isNew ? "Create Flight" : "Save Changes"}
+                    </button>
+
+                    {!flightModal.isNew && exFlight && (
+                      <div className="pt-4 mt-4 border-t border-slate-100 flex flex-wrap gap-2">
+                        <button onClick={handleRemoveFromShift} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 text-[11px]">
+                          Unlink from Shift
+                        </button>
+                        <button onClick={handleDelete} className="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold hover:bg-rose-100 text-[11px]">
+                          Delete Flight
+                        </button>
+                      </div>
+                    )}
+                    
+                    {!flightModal.isNew && exFlight?.type === "Turnaround" && (
+                      <div className="pt-2 mt-2 border-t border-slate-100 shrink-0">
+                         <button onClick={handleSplit} className="w-full py-2 border border-blue-200 text-blue-600 rounded-xl font-bold hover:bg-blue-50 text-[11px]">
+                           Split to Arrival / Departure
+                         </button>
+                      </div>
+                    )}
+
+                    {!flightModal.isNew && exFlight && otherShiftFlights.length > 0 && (
+                      <div className="pt-4 mt-4 border-t border-slate-100">
+                         <p className="text-[10px] uppercase font-black text-slate-400 mb-2">Merge with...</p>
+                         <div className="flex flex-col gap-1">
+                           {otherShiftFlights.map(other => (
+                             <button key={other.id} onClick={() => handleMerge(other.id)} className="text-left px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 flex justify-between items-center text-xs">
+                               <span className="font-bold text-slate-700">{other.flightNumber} ({other.type})</span>
+                               <span className="text-[10px] text-slate-400">{other.sta || '-'}/{other.std || '-'}</span>
+                             </button>
+                           ))}
+                         </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (

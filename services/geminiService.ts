@@ -7,6 +7,7 @@ import {
   IncomingDuty,
   ShiftConfig,
   Skill,
+  Flight,
 } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
 
@@ -685,6 +686,64 @@ export const generateAIProgram = async (
           ]
         : [],
     isCompliant: boundedHealth === 100,
+  };
+};
+
+export const compareFlightsWithAI = async (
+  media: ExtractionMedia[],
+  currentFlights: Flight[],
+  dateRangeStr: string
+): Promise<{ added: Flight[], updated: Flight[], deletedIds: string[] }> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const flightsStr = JSON.stringify(currentFlights, null, 2);
+  
+  const prompt = `You are an aviation scheduling assistant.
+The user has uploaded a flight schedule (in the attached media) for the period: ${dateRangeStr}.
+I am providing you the CURRENT flights we have in our database for this period:
+${flightsStr}
+
+YOUR TASK:
+1. Extract ALL flights from the uploaded schedule image/file.
+2. Compare the extracted flights with the CURRENT flights.
+3. Identify:
+   - "added": Flights in the new schedule that are NOT in the CURRENT list.
+   - "updated": Flights that exist in BOTH but have changes (e.g. STA/STD time changes).
+   - "deletedIds": IDs of flights that are in the CURRENT list but are MISSING from the new schedule.
+
+RULES:
+- When matching, use "flightNumber" and "date" as primary keys. Sometimes flight numbers have slight formatting differences.
+- Generate a new random 9-character ID for any "added" flights.
+- Ensure the types are correct (Flight). "added" and "updated" items must follow the properties of the Flight interface.
+
+Provide the result purely as a JSON object containing { "added": [], "updated": [], "deletedIds": [] }. Return ONLY JSON.`;
+
+  const parts: any[] = [{ text: prompt }];
+  if (media.length > 0) {
+    media.forEach((m) =>
+      parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } })
+    );
+  }
+
+  const response = await withRetry<GenerateContentResponse>(() =>
+    ai.models.generateContent({
+      model: "gemini-2.5-pro",
+      contents: parts,
+      config: {
+        responseMimeType: "application/json",
+      },
+    })
+  );
+
+  const text = response.text || "";
+  const result = safeParseJson(text);
+  if (!result || typeof result !== "object") {
+    throw new Error("Failed to parse Gemini comparison response.");
+  }
+
+  return {
+    added: Array.isArray(result.added) ? result.added : [],
+    updated: Array.isArray(result.updated) ? result.updated : [],
+    deletedIds: Array.isArray(result.deletedIds) ? result.deletedIds : []
   };
 };
 

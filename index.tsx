@@ -1468,6 +1468,21 @@ const App: React.FC = () => {
                 return updated;
               });
             }}
+            onAddFlight={(f) => {
+              if (userProfile && !userProfile.isActive) return;
+              setFlights((p) => [...p, f]);
+              db.upsertFlight(f);
+            }}
+            onUpdateFlight={(f) => {
+              if (userProfile && !userProfile.isActive) return;
+              setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
+              db.upsertFlight(f);
+            }}
+            onDeleteFlight={(id) => {
+              if (userProfile && !userProfile.isActive) return;
+              setFlights((p) => p.filter((f) => f.id !== id));
+              db.deleteFlight(id);
+            }}
           />
         )}
         {activeTab === "program" && (

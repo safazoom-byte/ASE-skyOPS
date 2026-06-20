@@ -32,6 +32,7 @@ import {
   Lock,
   Unlock,
   ShieldCheck,
+  MessageSquare,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -79,6 +80,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
   const [unlockAbsences, setUnlockAbsences] = useState(false);
+  const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -1520,12 +1522,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                             doc.setFont("helvetica", "bold");
                         } else {
                             if (customNote && customNote.includes(word) && word.trim() !== "-" && word.trim() !== "") {
-                                color = [100, 100, 100];
+                                color = [255, 0, 0];
                                 doc.setFont("helvetica", "italic");
                             } else {
                                 doc.setFont("helvetica", "bold");
                                 if (line.trim().startsWith("(")) {
-                                    color = [100, 100, 100];
+                                    color = [255, 0, 0];
                                     doc.setFont("helvetica", "italic");
                                 }
                             }
@@ -3047,14 +3049,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           </div>
                                         )}
                                         
-                                        <div className="mt-1">
-                                          <input 
-                                              type="text"
-                                              placeholder="Shift note..."
-                                              value={prog.notes?.[shift.id] || ''}
-                                              onChange={(e) => handleUpdateNote(prog.dateString!, shift.id, e.target.value)}
-                                              className="w-full text-[10px] p-1 bg-white border border-slate-200 rounded text-slate-700 outline-none focus:border-indigo-400 placeholder:text-slate-300 transition-colors"
-                                          />
+                                        <div className="mt-1 flex flex-col gap-1">
+                                          <button 
+                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
+                                              className="w-full flex items-center justify-center gap-1.5 text-[10px] p-1.5 bg-slate-50 border border-slate-200 border-dashed rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-colors font-semibold"
+                                          >
+                                              <MessageSquare size={12} />
+                                              {prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
+                                          </button>
+                                          {prog.notes?.[shift.id] && (
+                                              <div className="text-[10px] text-slate-700 p-1.5 bg-yellow-50 border border-yellow-100 rounded break-words whitespace-pre-wrap">
+                                                  <strong>Note: </strong> {prog.notes[shift.id]}
+                                              </div>
+                                          )}
                                         </div>
                                       </div>
                                     </td>
@@ -3208,6 +3215,45 @@ export const ProgramDisplay: React.FC<Props> = ({
                 })}
             </>
           )}
+        </div>
+      )}
+
+      {noteModal && (
+        <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+            <div className="bg-indigo-600 p-4 flex items-center justify-between">
+              <h3 className="font-black italic uppercase tracking-widest text-white leading-none flex items-center gap-2">
+                <MessageSquare size={16} />
+                Shift Note
+              </h3>
+            </div>
+            <div className="p-5">
+              <textarea
+                autoFocus
+                className="w-full text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 placeholder:text-slate-300 transition-all resize-none h-32"
+                placeholder="Enter shift note here..."
+                value={noteModal.currentNote}
+                onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
+              />
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 justify-end">
+              <button
+                onClick={() => setNoteModal(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl font-bold transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleUpdateNote(noteModal.dateString, noteModal.shiftId, noteModal.currentNote);
+                  setNoteModal(null);
+                }}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
