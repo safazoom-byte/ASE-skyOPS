@@ -1496,6 +1496,9 @@ const App: React.FC = () => {
               setNotification(`Restored version: ${v.name}`);
               if (supabase) db.savePrograms(v.programs);
             }}
+            onUpdateLeaves={(l: LeaveRequest[]) => {
+              setLeaveRequests(l);
+            }}
           />
         )}
 

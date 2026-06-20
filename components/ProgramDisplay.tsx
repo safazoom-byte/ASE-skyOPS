@@ -51,6 +51,7 @@ interface Props {
   minRestHours: number;
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
+  onUpdateLeaves?: (l: LeaveRequest[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -67,6 +68,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   minRestHours,
   onUpdatePrograms,
   onRestoreVersion,
+  onUpdateLeaves,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -1180,16 +1182,16 @@ export const ProgramDisplay: React.FC<Props> = ({
       const preparedBy = profile?.preparedBy || "";
       const revisedBy = profile?.revisedBy || "";
       
-      const doc = new jsPDF("l", "mm", "a4");
+      const doc = new jsPDF("l", "mm", "a3"); // Changed from a4 to a3
       
-      doc.setFontSize(10);
+      doc.setFontSize(14); // Increased font size
       doc.setFont("helvetica", "bold");
       const title = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
-      doc.text(title, 148, 10, { align: "center" });
+      doc.text(title, 210, 10, { align: "center" }); // Centered for A3 (420 width / 2)
 
       try {
         if (profile?.companyLogo) doc.addImage(profile.companyLogo, "PNG", 5, 2, 15, 15);
-        if (profile?.skyopsLogo) doc.addImage(profile.skyopsLogo, "PNG", 277, 2, 15, 15);
+        if (profile?.skyopsLogo) doc.addImage(profile.skyopsLogo, "PNG", 400, 2, 15, 15);
       } catch (e) { }
       
       const tableRows: any[] = [];
@@ -1257,12 +1259,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         const combinedAbsenceText = absenceTextLines.join(" | ");
         
         let headerText = `${dayName} ${dateFormatted}`;
-        if (combinedAbsenceText) {
-            headerText += `   [ ${combinedAbsenceText} ]`;
-        }
 
         tableRows.push([
-          { content: headerText, colSpan: 8, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
+          { content: headerText, colSpan: 3, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } },
+          { content: combinedAbsenceText ? `[ ${combinedAbsenceText} ]` : "", colSpan: 5, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "right" } }
         ]);
           
         if (shiftsToday.length === 0) {
@@ -1272,10 +1272,22 @@ export const ProgramDisplay: React.FC<Props> = ({
         } else {
              shiftsToday.forEach((shift, idx) => {
              const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
+             const staffTokens = assignments.map(a => {
+                 const s = getStaff(a.staffId);
+                 if (!s) return null;
+                 let type = "traffic";
+                 if (s.isSecurity) type = "sec";
+                 else if (s.isLabour) type = "labour";
+                 else if (s.isDriver) type = "driver";
+                 return { text: s.initials, type };
+             }).filter(Boolean) as {text: string, type: string}[];
              
-             if (prog.notes?.[shift.id]) {
-                pureInitials += `\n[${prog.notes[shift.id]}]`;
+             let pureInitials = staffTokens.map(t => t.text).join(" - ");
+             
+             const shiftNote = prog.notes?.[shift.id] || shift.description || "";
+             if (shiftNote) {
+                 if (pureInitials) pureInitials += `\n`;
+                 pureInitials += `(${shiftNote})`;
              }
              
              const flightIds = shift.flightIds || [];
@@ -1307,7 +1319,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                          { content: f.std || "---", styles: rowStyles },
                          { content: f.to || "", styles: rowStyles },
                          { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
-                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } }
+                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: staffTokens, customNote: shiftNote } as any
                      ]);
                  } else {
                      tableRows.push([
@@ -1328,33 +1340,112 @@ export const ProgramDisplay: React.FC<Props> = ({
         head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)"]],
         body: tableRows,
         theme: "grid",
-        margin: { top: 5, right: 5, bottom: 5, left: 5 },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 7 },
-        styles: { fontSize: 6, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        margin: { top: 2, right: 3, bottom: 2, left: 3 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 11 },
+        styles: { fontSize: 11, cellPadding: 1.5, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
         columnStyles: {
-            0: { cellWidth: 8 },
-            1: { cellWidth: 20 },
-            2: { cellWidth: 15 },
-            3: { cellWidth: 15 },
-            4: { cellWidth: 15 },
-            5: { cellWidth: 15 },
-            6: { cellWidth: 20 },
+            0: { cellWidth: 15 },
+            1: { cellWidth: 45 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 20 },
+            4: { cellWidth: 20 },
+            5: { cellWidth: 20 },
+            6: { cellWidth: 35 },
             7: { cellWidth: 'auto' }
         },
+        willDrawCell: (data) => {
+            if (data.column.index === 7 && data.cell.section === 'body') {
+                if (!data.cell.raw || typeof data.cell.raw !== 'object' || !(data.cell.raw as any).customInitials) return;
+                // Save lines generated by autoTable's height calculation
+                (data.cell.raw as any)._lines = [...data.cell.text];
+                // Clear text so we draw it manually in didDrawCell
+                data.cell.text = [];
+            }
+        },
+        didDrawCell: (data) => {
+            if (data.column.index === 7 && data.cell.section === 'body') {
+                const raw = data.cell.raw as any;
+                if (!raw || !raw._lines) return;
+                
+                const lines = raw._lines as string[];
+                const customInitials = raw.customInitials as { text: string, type: string }[] || [];
+                const customNote = raw.customNote as string;
+                
+                doc.setFontSize(data.cell.styles.fontSize);
+                const lineHeight = doc.getLineHeight() * ((data.cell.styles as any).lineHeightFactor || 1.15);
+                const contentHeight = lines.length * lineHeight;
+                
+                // padding properties are part of the cell object in jspdf-autotable
+                const topPadding = typeof data.cell.padding === 'function' ? data.cell.padding('top') : (data.cell.padding as any).top || 0;
+                const leftPadding = typeof data.cell.padding === 'function' ? data.cell.padding('left') : (data.cell.padding as any).left || 0;
+                
+                let cursorY = data.cell.y + topPadding;
+                if (data.cell.styles.valign === 'middle') {
+                    cursorY = data.cell.y + (data.cell.height / 2) - (contentHeight / 2) + (lineHeight / 2);
+                } else {
+                    cursorY += (lineHeight / 2);
+                }
+                
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i];
+                    const textWidth = doc.getTextWidth(line);
+                    let startX = data.cell.x + leftPadding;
+                    if (data.cell.styles.halign === 'center') {
+                        startX = data.cell.x + (data.cell.width / 2) - (textWidth / 2);
+                    }
+                    
+                    let cursorX = startX;
+                    const words = line.split(/(\s+|-|\(|\))/g);
+                    
+                    for (const word of words) {
+                        if (!word) continue;
+                        
+                        let color = [0, 0, 0];
+                        
+                        const token = customInitials.find(t => t.text === word);
+                        if (token) {
+                            switch(token.type) {
+                                case 'driver': color = [16, 185, 129]; break;
+                                case 'labour': color = [245, 158, 11]; break;
+                                case 'sec': color = [168, 85, 247]; break;
+                                default: color = [0, 0, 0]; break;
+                            }
+                            doc.setFont("helvetica", "bold");
+                        } else {
+                            if (customNote && customNote.includes(word) && word.trim() !== "-" && word.trim() !== "") {
+                                color = [100, 100, 100];
+                                doc.setFont("helvetica", "italic");
+                            } else {
+                                doc.setFont("helvetica", "bold");
+                                if (line.trim().startsWith("(")) {
+                                    color = [100, 100, 100];
+                                    doc.setFont("helvetica", "italic");
+                                }
+                            }
+                        }
+                        
+                        doc.setTextColor(color[0], color[1], color[2]);
+                        doc.text(word, cursorX, cursorY, { baseline: 'middle' });
+                        cursorX += doc.getTextWidth(word);
+                    }
+                    cursorY += lineHeight;
+                }
+            }
+        }
       });
       
       const finalY = (doc as any).lastAutoTable.finalY || 100;
-      if (finalY > doc.internal.pageSize.getHeight() - 20) {
+      if (finalY > doc.internal.pageSize.getHeight() - 12) {
           doc.addPage();
-          doc.setFontSize(7);
+          doc.setFontSize(8);
           doc.setTextColor(0, 0, 0);
           doc.text(`Prepared By : ${preparedBy}`, 14, 15);
-          doc.text(`Revised By : ${revisedBy}`, 14, 20);
+          doc.text(`Revised By : ${revisedBy}`, 14, 22);
       } else {
-          doc.setFontSize(7);
+          doc.setFontSize(8);
           doc.setTextColor(0, 0, 0);
-          doc.text(`Prepared By : ${preparedBy}`, 14, finalY + 10);
-          doc.text(`Revised By : ${revisedBy}`, 14, finalY + 15);
+          doc.text(`Prepared By : ${preparedBy}`, 14, finalY + 6);
+          doc.text(`Revised By : ${revisedBy}`, 14, finalY + 12);
       }
       
       doc.save(`SkyOPS_Staff_Program_${startDate}.pdf`);
@@ -1423,6 +1514,19 @@ export const ProgramDisplay: React.FC<Props> = ({
         const staffObj = staff.find((s) => s.id === staffId);
         const isDriver = staffObj?.isDriver;
 
+        // If dropped onto the same shift it was already in, move it to the front
+        if (currentShiftId === targetShiftId) {
+          const existingIdx = prog.assignments.findIndex(
+            (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+          );
+          if (existingIdx !== -1) {
+            const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+            prog.assignments[existingIdx].manualSortIndex = minSort - 1;
+            onUpdatePrograms(newPrograms);
+          }
+          return;
+        }
+
         if (!isDriver || isTargetAbsence) {
           const oldIdx = prog.assignments.findIndex(
             (a) => a.staffId === staffId && a.shiftId === currentShiftId,
@@ -1438,7 +1542,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         );
         if (leavesToDelete.length > 0) {
           Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
-            if (!isTargetAbsence || targetShiftId === "ABSENCE") window.location.reload();
+             if (onUpdateLeaves) {
+                 const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
+                 onUpdateLeaves(remaining);
+             }
           });
         }
       }
@@ -1448,12 +1555,14 @@ export const ProgramDisplay: React.FC<Props> = ({
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
         );
         if (!exists) {
+          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
           prog.assignments.push({
             id: Math.random().toString(36).substr(2, 9),
             staffId,
             shiftId: targetShiftId,
             flightId: "",
             role: role || "OPS",
+            manualSortIndex: maxSort + 1
           });
         }
       } else if (targetShiftId !== "ABSENCE") {
@@ -1466,8 +1575,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         if (cat === "DAYS OFF") type = "Day off";
         
         if (type) {
+          const newLeaveId = Math.random().toString(36).substr(2, 9);
           const req = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: newLeaveId,
             staffId,
             type,
             startDate: targetDate,
@@ -1476,9 +1586,11 @@ export const ProgramDisplay: React.FC<Props> = ({
             createdAt: new Date().toISOString()
           };
           db.upsertLeave(req as any).then(() => {
-            // Note: In a real app we'd want to refresh the global state or notify parent
-            // Since leaveRequests comes from props, just forcing a local reload for now or letting user switch tabs
-            window.location.reload();
+            if (onUpdateLeaves) {
+                // Remove previous overlapping leaves from same day to prevent duplicates
+                const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
+                onUpdateLeaves([...prevLeaves, req as any]);
+            }
           });
         }
       }
@@ -1554,6 +1666,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (restHours !== null && restHours < minRestHours) {
       return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
+
     const target = staffStats[s.id]?.target ?? 5;
 
     const diff = daysWorked - target;

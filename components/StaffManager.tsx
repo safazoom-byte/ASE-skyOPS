@@ -242,14 +242,34 @@ export const StaffManager: React.FC<Props> = ({
     const field = skillMap[skill];
     if (!field) return;
 
+    const exclusiveSkills: (keyof Staff)[] = ["isDriver", "isLabour", "isSecurity"];
+    const allSkills = Object.values(skillMap);
+
+    const updateState = (currentState: any) => {
+      const newValue = !currentState[field];
+      const nextState = { ...currentState, [field]: newValue };
+
+      if (newValue) {
+         if (exclusiveSkills.includes(field)) {
+             // If turning ON an exclusive skill, turn OFF all other skills
+             allSkills.forEach(s => {
+                 if (s !== field) nextState[s] = false;
+             });
+         } else {
+             // If turning ON a normal skill, turn OFF all exclusive skills
+             exclusiveSkills.forEach(s => {
+                 nextState[s] = false;
+             });
+         }
+      }
+      return nextState;
+    };
+
     if (isEdit) {
       if (!editingStaff) return;
-      setEditingStaff({ ...editingStaff, [field]: !editingStaff[field] });
+      setEditingStaff(updateState(editingStaff));
     } else {
-      setNewStaff({
-        ...newStaff,
-        [field]: !newStaff[field as keyof Partial<Staff>],
-      });
+      setNewStaff(updateState(newStaff));
     }
   };
 
