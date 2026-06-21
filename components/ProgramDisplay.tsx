@@ -557,7 +557,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         ));
         const nonLabourCount = assignments.filter((a) => {
           const st = getStaff(a.staffId);
-          return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+          return st && !st.isLabour && !st.isSecurity;
         }).length;
         const flightStrs =
           (shift.flightIds || [])
@@ -604,8 +604,6 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
-                return true;
-              if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
                 return true;
               if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
                 return true;
@@ -969,7 +967,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && st.isOps) return true;
           if (roleCode === "LF" && st.isLostFound) return true;
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
-          if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
           if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
 
           return false;
@@ -986,7 +983,6 @@ export const ProgramDisplay: React.FC<Props> = ({
         const rmp = getStaffForRole("Ramp");
         const ops = getStaffForRole("Operations");
         const lf = getStaffForRole("Lost and Found");
-        const drv = getStaffForRole("Driver");
         const sec = getStaffForRole("Security");
         
         roleMatrixData.push([
@@ -997,7 +993,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           rmp,
           ops,
           lf,
-          drv,
           sec,
         ]);
         roleMatrixMeta.push({
@@ -1018,10 +1013,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           lfReq:
             (s.roleCounts?.["Lost and Found"] ||
               (s.roleCounts as any)?.["LF"] ||
-              0) > 0,
-          drvReq:
-            (s.roleCounts?.["Driver"] ||
-              (s.roleCounts as any)?.["DRV"] ||
               0) > 0,
           secReq:
             (s.roleCounts?.["Security"] ||
@@ -1262,7 +1253,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           assignments.forEach(a => {
              const s = getStaff(a.staffId);
              if (s) {
-                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
+                 const type = s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
                  staffTokens.push({ text: s.initials, type });
              }
           });
@@ -1310,7 +1301,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           staffTokens.forEach((t, i) => {
               let color = 'FF000000';
-              if (t.type === 'driver') color = 'FF15803D';
               if (t.type === 'labour') color = 'FFB91C1C';
               if (t.type === 'sec') color = 'FF7E22CE';
               
@@ -1453,7 +1443,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                  let type = "traffic";
                  if (s.isSecurity) type = "sec";
                  else if (s.isLabour) type = "labour";
-                 else if (s.isDriver) type = "driver";
                  return { text: s.initials, type };
              }).filter(Boolean) as {text: string, type: string}[];
              
@@ -1594,7 +1583,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                             const token = customInitials.find(t => t.text === word);
                             if (token) {
                                 switch(token.type) {
-                                    case 'driver': color = [21, 128, 61]; break; // Dark Green
                                     case 'labour': color = [185, 28, 28]; break; // Dark Red
                                     case 'sec': color = [126, 34, 206]; break; // Dark Purple
                                     default: color = [0, 0, 0]; break;
@@ -1636,27 +1624,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const [shiftEditModal, setShiftEditModal] = React.useState<{dateString: string, shiftId: string} | null>(null);
-
-  const handleDragStart = (
-    e: React.DragEvent,
-    staffId: string,
-    currentShiftId: string,
-    date: string,
-    role: string,
-  ) => {
-    e.dataTransfer.setData(
-      "text/plain",
-      JSON.stringify({ staffId, currentShiftId, date, role }),
-    );
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  };
-
   const handleUpdateNote = (
     dateString: string,
     targetId: string,
@@ -1679,227 +1646,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     onUpdatePrograms(newPrograms);
   };
 
-  const executeMove = (
-    staffId: string,
-    currentShiftId: string,
-    date: string,
-    role: string,
-    targetShiftId: string,
-    targetDate: string,
-  ) => {
-    // Phase 1: Purely compute all new states synchronously based on the *current* closures
-    const newPrograms = programs.map((p) => ({
-      ...p,
-      assignments: Array.isArray(p.assignments)
-        ? p.assignments.map((a) => ({ ...a }))
-        : [],
-    }));
-
-    let newLeaveRequests = leaveRequests ? [...leaveRequests] : [];
-    let newManualSettings = manualAssignments ? [...manualAssignments] : [];
-
-    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
-    const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
-    if (progIndex === -1 || sourceProgIndex === -1) return;
-
-    const prog = newPrograms[progIndex];
-    const sourceProg = newPrograms[sourceProgIndex];
-    const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
-    const st = staff.find((s) => s.id === staffId);
-    if (!st) return;
-
-    // Track DB operations we'll fire later
-    const ops = {
-      deleteLeaves: [] as string[],
-      upsertLeaves: [] as any[],
-    };
-
-    // --- REMOVAL FROM SOURCE ---
-    if (!currentShiftId.startsWith("ABSENCE")) {
-      if (currentShiftId === targetShiftId && date === targetDate) {
-        // Rearranging the sorting - re-enabled securely
-        const existingIdx = prog.assignments.findIndex(
-          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-        );
-        if (existingIdx !== -1) {
-          const minSort = Math.min(
-            0,
-            ...prog.assignments.map((a) => a.manualSortIndex || 0),
-          );
-          prog.assignments[existingIdx] = {
-            ...prog.assignments[existingIdx],
-            manualSortIndex: minSort - 1,
-          };
-          onUpdatePrograms(newPrograms);
-        }
-        return;
-      }
-
-      // Remove from ALL shifts on the source day if dragged away.
-      // This strictly guarantees that dragging a staff out of the schedule clears any and all duplicated assignments.
-      const removeIdxs = sourceProg.assignments
-        .map((a, idx) => (a.staffId === staffId ? idx : -1))
-        .filter((idx) => idx !== -1)
-        .reverse();
-
-      removeIdxs.forEach((idx) => {
-        sourceProg.assignments.splice(idx, 1);
-      });
-
-      // Remove from manual settings
-      newManualSettings = newManualSettings.filter(
-        (ma) => !(ma.staffId === staffId && (ma.shiftId === currentShiftId || currentShiftId === "OFFDUTY")),
-      );
-    } else if (
-      currentShiftId.startsWith("ABSENCE_") &&
-      (targetShiftId !== currentShiftId || date !== targetDate)
-    ) {
-      // Removing from leave
-      const leavesToDelete = newLeaveRequests.filter(
-        (l) =>
-          l.staffId === staffId && l.startDate <= date && l.endDate >= date,
-      );
-      if (leavesToDelete.length > 0) {
-        leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
-        newLeaveRequests = newLeaveRequests.filter(
-          (l) => !leavesToDelete.includes(l),
-        );
-      }
-    }
-
-    // --- INSERTION INTO TARGET ---
-    if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
-      // Clean up any stray leaves for this specific day just in case they were on leave
-      const leavesToDelete = newLeaveRequests.filter(
-        (l) => l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
-      );
-      leavesToDelete.forEach(l => ops.deleteLeaves.push(l.id));
-      newLeaveRequests = newLeaveRequests.filter(l => !leavesToDelete.includes(l));
-
-      // **CRITICAL FIX**: Prevent duplicates by ensuring staff is only in ONE shift per day!
-      // Remove from any other shifts on the target day.
-      const duplicateIdxs = prog.assignments
-        .map((a, idx) => (a.staffId === staffId && a.shiftId !== targetShiftId ? idx : -1))
-        .filter((idx) => idx !== -1)
-        .reverse(); // Reverse so we can splice safely
-      
-      duplicateIdxs.forEach((idx) => {
-        prog.assignments.splice(idx, 1);
-      });
-
-      const exists = prog.assignments.some(
-        (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-      );
-      if (!exists) {
-        const maxSort = Math.max(
-            0,
-            ...prog.assignments.map((a) => a.manualSortIndex || 0),
-        );
-        prog.assignments.push({
-          id: Math.random().toString(36).substring(2, 11),
-          staffId,
-          shiftId: targetShiftId,
-          flightId: "",
-          role: role || "OPS",
-          manualSortIndex: maxSort + 1,
-        });
-
-        newManualSettings.push({
-          staffId,
-          shiftId: targetShiftId,
-          roles: [role || "OPS"],
-        });
-      }
-    } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
-      const cat = targetShiftId.replace("ABSENCE_", "");
-      let type: any = null;
-      if (cat === "ANNUAL LEAVE") type = "Annual leave";
-      else if (cat === "SICK LEAVE") type = "Sick leave";
-      else if (cat === "ROSTER LEAVE") type = "Roster leave";
-      else if (cat === "DAYS OFF") type = "Day off";
-      else if (cat === "STANDBY (RESERVE)") type = "Standby (Reserve)";
-
-      if (type === "Roster leave" && st.type === "Local") {
-        return; // Locals do not get roster leave
-      }
-
-      if (type) {
-        // Remove existing leaves on target day to avoid overlaps
-        const overlapping = newLeaveRequests.filter(
-          (l) =>
-            l.staffId === staffId &&
-            l.startDate <= targetDate &&
-            l.endDate >= targetDate,
-        );
-        overlapping.forEach((l) => ops.deleteLeaves.push(l.id));
-        newLeaveRequests = newLeaveRequests.filter(
-          (l) => !overlapping.includes(l),
-        );
-
-        const newLeaveId = Math.random().toString(36).substring(2, 11);
-        const req: any = {
-          id: newLeaveId,
-          staffId,
-          type,
-          startDate: targetDate,
-          endDate: targetDate,
-          status: "approved",
-          notes: "Assigned visually",
-          createdAt: new Date().toISOString(),
-        };
-
-        newLeaveRequests.push(req);
-        ops.upsertLeaves.push(req);
-      }
-    }
-
-    // --- PHASE 3: DISPATCH STATE OUT ---
-    if (onUpdateLeaves) {
-      onUpdateLeaves(newLeaveRequests);
-    }
-    if (onUpdateManualAssignments) {
-        onUpdateManualAssignments(newManualSettings);
-    }
-    onUpdatePrograms(newPrograms);
-
-    // --- PHASE 4: FIRE DB ASYNC ---
-    if (ops.deleteLeaves.length > 0) {
-      Promise.all(ops.deleteLeaves.map((id) => db.deleteLeave(id))).catch(
-        console.error,
-      );
-    }
-    if (ops.upsertLeaves.length > 0) {
-      // Assuming upsertLeaves exists, if not we map to upsertLeave
-      Promise.all(ops.upsertLeaves.map((req) => db.upsertLeave(req))).catch(
-        console.error,
-      );
-    }
-  };
-
-  const handleDrop = (
-    e: React.DragEvent,
-    targetShiftId: string,
-    targetDate: string,
-  ) => {
-    e.preventDefault();
-    const data = e.dataTransfer.getData("text/plain");
-    if (!data) return;
-
-    try {
-      const { staffId, currentShiftId, date, role } = JSON.parse(data);
-      executeMove(staffId, currentShiftId, date, role, targetShiftId, targetDate);
-    } catch (err) {
-      console.error("Drop failed", err);
-    }
-  };
-
-  const handleTargetContainerTap = (targetShiftId: string, targetDate: string) => {
-    if (!targetShiftId.startsWith("ABSENCE") && targetShiftId !== "OFFDUTY") {
-      setShiftEditModal({ dateString: targetDate, shiftId: targetShiftId });
-    }
-  };
-
-  // Removed manual modal state to rely purely on drag-and-drop
   const staffStats = React.useMemo(() => {
     const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
     
@@ -2889,7 +2635,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     .join(" / ") || "NIL";
                                 const nonLabourCount = assignments.filter((a) => {
                                   const st = getStaff(a.staffId);
-                                  return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+                                  return st && !st.isLabour && !st.isSecurity;
                                 }).length;
                                 const isFull = nonLabourCount >= shift.maxStaff;
                                 const isOver = nonLabourCount > shift.maxStaff;
@@ -2935,11 +2681,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 return (
                                   <tr
                                     key={shift.id}
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) =>
-                                      handleDrop(e, shift.id, prog.dateString!)
-                                    }
-                                    onClick={() => handleTargetContainerTap(shift.id, prog.dateString!)}
                                     className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""}`}
                                   >
                                     <td
@@ -3086,17 +2827,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             return (
                                               <div
                                                 key={a.id}
-                                                draggable={true}
-                                                onDragStart={(e) => {
-                                                  handleDragStart(
-                                                    e,
-                                                    st.id,
-                                                    shift.id,
-                                                    prog.dateString!,
-                                                    a.role,
-                                                  );
-                                                }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2 cursor-move hover:scale-105" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2" : ""}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {rest !== null &&
@@ -3239,14 +2970,6 @@ export const ProgramDisplay: React.FC<Props> = ({
 
                       <div
                         className={`border-t-4 border-slate-100 transition-colors`}
-                        onDragOver={handleDragOver}
-                        onDrop={(e) =>
-                          handleDrop(e, "OFFDUTY", prog.dateString!)
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleTargetContainerTap("OFFDUTY", prog.dateString!);
-                        }}
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                           <div className="flex items-center gap-2">
@@ -3281,15 +3004,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
-                                  onDragOver={handleDragOver}
-                                  onDrop={(e) => {
-                                    e.stopPropagation();
-                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTargetContainerTap(`ABSENCE_${cat}`, prog.dateString!);
-                                  }}
                                   className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
@@ -3315,24 +3029,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
-                                                draggable={true}
-                                                onDragStart={(e) => {
-                                                  handleDragStart(
-                                                    e,
-                                                    s.id,
-                                                    `ABSENCE_${cat}`,
-                                                    prog.dateString!,
-                                                    s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
-                                                    s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
-                                                    s.isRamp ? "RMP" :
-                                                    s.isLostFound ? "LF" :
-                                                    s.isLabour ? "LBR" :
-                                                    s.isSecurity ? "SEC" :
-                                                    s.isDriver ? "DRV" :
-                                                    "OPS"
-                                                  );
-                                                }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group cursor-move hover:scale-105 ${colorClass}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase flex items-center gap-1 group ${colorClass}`}
                                               >
                                                 <span>{s.initials}</span>
                                               </div>
@@ -3360,122 +3057,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           )}
         </div>
       )}
-
-      {shiftEditModal && (() => {
-        const progIdx = programs.findIndex(p => p.dateString === shiftEditModal.dateString);
-        if (progIdx === -1) return null;
-        const prog = programs[progIdx];
-        const shift = shifts.find(s => s.id === shiftEditModal.shiftId);
-        if (!shift) return null;
-
-        const currentAssignments = prog.assignments.filter(a => a.shiftId === shift.id);
-        const nonLabourWorkerCount = currentAssignments.filter(a => {
-           const st = staff.find(s => s.id === a.staffId);
-           return st && !st.isLabour && !st.isDriver && !st.isSecurity;
-        }).length;
-        const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = staff.filter(s => {
-           return !workingIds.has(s.id);
-        });
-
-        const addStaff = (staffId: string) => {
-          const exists = prog.assignments.some(a => a.staffId === staffId && a.shiftId === shift.id);
-          if (exists) return; // Prevent duplicate in the SAME shift
-
-          // Safely map programs to guarantee re-render
-          const newPrograms = programs.map((p, idx) => {
-              if (idx === progIdx) {
-                  return {
-                      ...p,
-                      assignments: Array.isArray(p.assignments) ? p.assignments.map(a => ({...a})) : []
-                  };
-              }
-              return p;
-          });
-          const newProg = newPrograms[progIdx];
-          newProg.assignments.push({
-            id: Math.random().toString(36).substr(2, 9),
-            staffId,
-            shiftId: shift.id,
-            flightId: "",
-            role: "OPS",
-          });
-          onUpdatePrograms(newPrograms);
-        };
-
-        const removeStaff = (staffId: string) => {
-          const newPrograms = [...programs];
-          const newProg = { ...newPrograms[progIdx] };
-          newProg.assignments = newProg.assignments.filter(
-            a => !(a.staffId === staffId && a.shiftId === shift.id)
-          );
-          newPrograms[progIdx] = newProg;
-          onUpdatePrograms(newPrograms);
-        };
-
-        return (
-          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh] animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
-              <div className="bg-indigo-600 p-4 flex items-center justify-between">
-                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
-                  Shift at {shift.pickupTime} <span className="text-indigo-200">({nonLabourWorkerCount}/{shift.maxStaff})</span>
-                </h3>
-                <button
-                  onClick={() => setShiftEditModal(null)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="p-4 overflow-y-auto">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Currently Assigned</h4>
-                {currentAssignments.length === 0 ? (
-                  <p className="text-sm text-slate-400 italic mb-4">No staff assigned.</p>
-                ) : (
-                  <div className="space-y-2 mb-4">
-                    {currentAssignments.map(a => {
-                      const st = staff.find(s => s.id === a.staffId);
-                      if (!st) return null;
-                      return (
-                        <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
-                          <span className="font-bold text-sm text-slate-700">{st.name}</span>
-                          <button
-                            onClick={() => removeStaff(st.id)}
-                            className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pt-4 border-t border-slate-100">Add Staff</h4>
-                <select
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      addStaff(e.target.value);
-                      e.target.value = "";
-                    }
-                  }}
-                  defaultValue=""
-                >
-                  <option value="" disabled>Select available staff...</option>
-                  {offStaff.map(st => (
-                    <option key={st.id} value={st.id}>
-                      {st.name} ({st.initials})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-
 
       {noteModal && (
         <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">

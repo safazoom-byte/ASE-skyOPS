@@ -34,5 +34,4 @@ export const AVAILABLE_SKILLS: Skill[] = [
   "Lost and Found",
   "Labour",
   "Security",
-  "Driver",
 ];

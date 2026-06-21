@@ -74,7 +74,6 @@ export const StaffManager: React.FC<Props> = ({
     isLostFound: false,
     isLabour: false,
     isSecurity: false,
-    isDriver: false,
     workFromDate: "",
     workToDate: "",
   });
@@ -155,7 +154,6 @@ export const StaffManager: React.FC<Props> = ({
       isLostFound: !!newStaff.isLostFound,
       isLabour: !!newStaff.isLabour,
       isSecurity: !!newStaff.isSecurity,
-      isDriver: !!newStaff.isDriver,
       maxShiftsPerWeek: defaultMaxShifts,
       workFromDate: isRoster ? newStaff.workFromDate : undefined,
       workToDate: isRoster ? newStaff.workToDate : undefined,
@@ -181,7 +179,6 @@ export const StaffManager: React.FC<Props> = ({
       isLostFound: false,
       isLabour: false,
       isSecurity: false,
-      isDriver: false,
       workFromDate: "",
       workToDate: "",
     });
@@ -237,12 +234,11 @@ export const StaffManager: React.FC<Props> = ({
       Operations: "isOps",
       Labour: "isLabour",
       Security: "isSecurity",
-      Driver: "isDriver",
     };
     const field = skillMap[skill];
     if (!field) return;
 
-    const exclusiveSkills: (keyof Staff)[] = ["isDriver", "isLabour", "isSecurity"];
+    const exclusiveSkills: (keyof Staff)[] = ["isLabour", "isSecurity"];
     const allSkills = Object.values(skillMap);
 
     const updateState = (currentState: any) => {
@@ -282,7 +278,6 @@ export const StaffManager: React.FC<Props> = ({
       Operations: "isOps",
       Labour: "isLabour",
       Security: "isSecurity",
-      Driver: "isDriver",
     };
     const field = skillMap[skill];
     return !!member[field];
@@ -305,7 +300,6 @@ export const StaffManager: React.FC<Props> = ({
       Operations: s.isOps ? "Yes" : "No",
       Labour: s.isLabour ? "Yes" : "No",
       Security: s.isSecurity ? "Yes" : "No",
-      Driver: s.isDriver ? "Yes" : "No",
     }));
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
