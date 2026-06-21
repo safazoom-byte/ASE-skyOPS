@@ -1673,32 +1673,37 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetDate: string,
   ) => {
     if (date !== targetDate) return;
-    const newPrograms = [...programs];
+    
+    // Completely recreate the array structure to guarantee React picks up changes
+    const newPrograms = programs.map(p => ({
+        ...p,
+        assignments: Array.isArray(p.assignments) ? p.assignments.map(a => ({...a})) : []
+    }));
+    
     const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
     if (progIndex === -1) return;
     
-    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
-    newPrograms[progIndex] = prog;
-
+    const prog = newPrograms[progIndex];
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
 
     if (!currentShiftId.startsWith("ABSENCE")) {
       const staffObj = staff.find((s) => s.id === staffId);
       const isDriver = staffObj?.isDriver;
 
-      // If dropped onto the same shift it was already in, move it to the front
       if (currentShiftId === targetShiftId) {
+        // Just rearrange the sorting
         const existingIdx = prog.assignments.findIndex(
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
         );
         if (existingIdx !== -1) {
           const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
-          prog.assignments[existingIdx].manualSortIndex = minSort - 1;
+          prog.assignments[existingIdx] = { ...prog.assignments[existingIdx], manualSortIndex: minSort - 1 };
           onUpdatePrograms(newPrograms);
         }
         return;
       }
 
+      // Remove from current shift
       const oldIdx = prog.assignments.findIndex(
         (a) => a.staffId === staffId && a.shiftId === currentShiftId,
       );
@@ -1706,13 +1711,20 @@ export const ProgramDisplay: React.FC<Props> = ({
         prog.assignments.splice(oldIdx, 1);
       }
     } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
-      // Dragging out of a leave category into either a working shift OR another leave category
+      // Removing from leave
       const leavesToDelete = leaveRequests.filter(l => 
         l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
       );
       if (leavesToDelete.length > 0) {
         Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
            if (onUpdateLeaves) {
+               const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
+               onUpdateLeaves(remaining);
+           }
+        }).catch(err => {
+            console.error("Failed to delete leaves", err);
+            // Even if it fails, delete it locally so ui updates
+            if (onUpdateLeaves) {
                const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
                onUpdateLeaves(remaining);
            }
@@ -1736,7 +1748,6 @@ export const ProgramDisplay: React.FC<Props> = ({
         });
       }
     } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
-      // Handle dropping into a specific absence category
       const cat = targetShiftId.replace("ABSENCE_", "");
       let type: any = null;
       if (cat === "ANNUAL LEAVE") type = "Annual leave";
@@ -1746,7 +1757,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       
       const st = staff.find(s => s.id === staffId);
       if (type === "Roster leave" && st?.type === "Local") {
-        return;
+        return; // Locals do not get roster leave
       }
       
       if (type) {
@@ -1762,13 +1773,19 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
         db.upsertLeave(req as any).then(() => {
           if (onUpdateLeaves) {
-              // Remove previous overlapping leaves from same day to prevent duplicates
               const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
               onUpdateLeaves([...prevLeaves, req as any]);
           }
+        }).catch(err => {
+            console.error("Failed to upsert leave", err);
+            if (onUpdateLeaves) {
+              const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
+              onUpdateLeaves([...prevLeaves, req as any]);
+            }
         });
       }
     }
+    
     onUpdatePrograms(newPrograms);
   };
 
@@ -2991,28 +3008,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             return (
                                               <div
                                                 key={a.id}
-                                                draggable={
-                                                  !(
-                                                    manualAssignments &&
-                                                    manualAssignments.some(
-                                                      (ma) =>
-                                                        ma.staffId === st.id &&
-                                                        ma.shiftId === shift.id,
-                                                    )
-                                                  )
-                                                }
+                                                draggable={true}
                                                 onDragStart={(e) => {
-                                                  if (
-                                                    manualAssignments &&
-                                                    manualAssignments.some(
-                                                      (ma) =>
-                                                        ma.staffId === st.id &&
-                                                        ma.shiftId === shift.id,
-                                                    )
-                                                  ) {
-                                                    e.preventDefault();
-                                                    return;
-                                                  }
                                                   handleDragStart(
                                                     e,
                                                     st.id,
@@ -3022,17 +3019,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   );
                                                 }}
                                                 onClick={(e) => {
-                                                  if (
-                                                    manualAssignments &&
-                                                    manualAssignments.some(
-                                                      (ma) =>
-                                                        ma.staffId === st.id &&
-                                                        ma.shiftId === shift.id,
-                                                    )
-                                                  ) return;
                                                   handleStaffItemTap(e, st.id, shift.id, prog.dateString!, a.role);
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2 cursor-move hover:scale-105" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {manualAssignments &&
@@ -3361,12 +3350,27 @@ export const ProgramDisplay: React.FC<Props> = ({
            return st && !st.isLabour && !st.isDriver && !st.isSecurity;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = staff.filter(s => !workingIds.has(s.id));
+        const offStaff = staff.filter(s => {
+           if (s.isDriver) return true; // Drivers can be assigned to multiple shifts
+           return !workingIds.has(s.id);
+        });
 
         const addStaff = (staffId: string) => {
-          const newPrograms = [...programs];
-          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
-          const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
+          const exists = prog.assignments.some(a => a.staffId === staffId && a.shiftId === shift.id);
+          if (exists) return; // Prevent duplicate in the SAME shift
+
+          // Safely map programs to guarantee re-render
+          const newPrograms = programs.map((p, idx) => {
+              if (idx === progIdx) {
+                  return {
+                      ...p,
+                      assignments: Array.isArray(p.assignments) ? p.assignments.map(a => ({...a})) : []
+                  };
+              }
+              return p;
+          });
+          const newProg = newPrograms[progIdx];
+          const maxSort = Math.max(0, ...newProg.assignments.map(a => a.manualSortIndex || 0));
           newProg.assignments.push({
             id: Math.random().toString(36).substr(2, 9),
             staffId,
@@ -3375,7 +3379,6 @@ export const ProgramDisplay: React.FC<Props> = ({
             role: "OPS",
             manualSortIndex: maxSort + 1
           });
-          newPrograms[progIdx] = newProg;
           onUpdatePrograms(newPrograms);
         };
 
