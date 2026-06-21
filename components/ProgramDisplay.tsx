@@ -1217,10 +1217,20 @@ export const ProgramDisplay: React.FC<Props> = ({
         
         const dayOffCell = sheet.getCell(`H${dayRow.number}`);
         dayOffCell.value = absText;
-        dayOffCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+        dayOffCell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
         dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         dayOffCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+
+        // Auto-fit height estimation due to Excel merged cells limitation preventing auto-fit
+        if (absText.length > 0) {
+           const approxCharsPerLine = 60; // since col width is 60
+           const lines = Math.ceil(absText.length / approxCharsPerLine);
+           const requiredHeight = Math.max(20, lines * 15);
+           dayRow.height = requiredHeight;
+        } else {
+           dayRow.height = 20;
+        }
 
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)

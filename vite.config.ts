@@ -22,20 +22,7 @@ export default defineConfig(({ mode }) => {
       target: "esnext",
       outDir: "dist",
       sourcemap: false,
-      minify: "esbuild",
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            "vendor-react": ["react", "react-dom"],
-            "vendor-utils": [
-              "xlsx",
-              "jspdf",
-              "jspdf-autotable",
-              "lucide-react",
-            ],
-          },
-        },
-      },
+      minify: "esbuild"
     },
     server: {
       port: 3000,
