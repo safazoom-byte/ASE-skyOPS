@@ -3024,17 +3024,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                 className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2 cursor-move hover:scale-105" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
-                                                {manualAssignments &&
-                                                manualAssignments.some(
-                                                  (ma) =>
-                                                    ma.staffId === st.id &&
-                                                    ma.shiftId === shift.id,
-                                                ) ? (
-                                                  <Lock
-                                                    size={8}
-                                                    className="text-slate-500 opacity-70 -ml-0.5"
-                                                  />
-                                                ) : null}
                                                 {rest !== null &&
                                                   rest < minRestHours && (
                                                     <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">
