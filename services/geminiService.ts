@@ -506,11 +506,11 @@ export const generateAIProgram = async (
           const shiftEnd = getExactShiftEnd(shift);
           const st = data.staff.find((s) => s.id === ma.staffId);
           if (st) {
-            // Only add if not already added to this shift
-            const alreadyAssigned = program.assignments.some(
-              (a) => a.staffId === ma.staffId && a.shiftId === ma.shiftId,
+            // Prevent duplicates on the SAME DAY
+            const alreadyAssignedToday = program.assignments.some(
+              (a) => a.staffId === ma.staffId,
             );
-            if (!alreadyAssigned) {
+            if (!alreadyAssignedToday) {
               program.assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
                 staffId: ma.staffId,

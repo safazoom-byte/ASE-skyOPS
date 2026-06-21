@@ -1735,19 +1735,16 @@ export const ProgramDisplay: React.FC<Props> = ({
         return;
       }
 
-      // Remove from current shift
-      const oldIdx = sourceProg.assignments.findIndex(
-        (a) => a.staffId === staffId && a.shiftId === currentShiftId,
-      );
-      if (oldIdx !== -1) {
-        sourceProg.assignments.splice(oldIdx, 1);
-      } else {
-        // Fallback: If for some reason shiftId mismatch, delete the staff from ANY shift if we are dragging them away
-        const anyIdx = sourceProg.assignments.findIndex((a) => a.staffId === staffId);
-        if (anyIdx !== -1) {
-           sourceProg.assignments.splice(anyIdx, 1);
-        }
-      }
+      // Remove from ALL shifts on the source day if dragged away.
+      // This strictly guarantees that dragging a staff out of the schedule clears any and all duplicated assignments.
+      const removeIdxs = sourceProg.assignments
+        .map((a, idx) => (a.staffId === staffId ? idx : -1))
+        .filter((idx) => idx !== -1)
+        .reverse();
+
+      removeIdxs.forEach((idx) => {
+        sourceProg.assignments.splice(idx, 1);
+      });
 
       // Remove from manual settings
       newManualSettings = newManualSettings.filter(
@@ -1778,6 +1775,17 @@ export const ProgramDisplay: React.FC<Props> = ({
       );
       leavesToDelete.forEach(l => ops.deleteLeaves.push(l.id));
       newLeaveRequests = newLeaveRequests.filter(l => !leavesToDelete.includes(l));
+
+      // **CRITICAL FIX**: Prevent duplicates by ensuring staff is only in ONE shift per day!
+      // Remove from any other shifts on the target day.
+      const duplicateIdxs = prog.assignments
+        .map((a, idx) => (a.staffId === staffId && a.shiftId !== targetShiftId ? idx : -1))
+        .filter((idx) => idx !== -1)
+        .reverse(); // Reverse so we can splice safely
+      
+      duplicateIdxs.forEach((idx) => {
+        prog.assignments.splice(idx, 1);
+      });
 
       const exists = prog.assignments.some(
         (a) => a.staffId === staffId && a.shiftId === targetShiftId,
@@ -1891,18 +1899,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const [staffActionModal, setStaffActionModal] = React.useState<{
-    staffId: string;
-    currentShiftId: string;
-    date: string;
-    role: string;
-  } | null>(null);
-
-  const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
-    e.stopPropagation();
-    setStaffActionModal({ staffId, currentShiftId, date, role });
-  };
-
+  // Removed manual modal state to rely purely on drag-and-drop
   const staffStats = React.useMemo(() => {
     const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
     
@@ -2943,7 +2940,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                       handleDrop(e, shift.id, prog.dateString!)
                                     }
                                     onClick={() => handleTargetContainerTap(shift.id, prog.dateString!)}
-                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
+                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""}`}
                                   >
                                     <td
                                       className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? "text-rose-500" : "text-slate-400"}`}
@@ -3099,10 +3096,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     a.role,
                                                   );
                                                 }}
-                                                onClick={(e) => {
-                                                  handleStaffItemTap(e, st.id, shift.id, prog.dateString!, a.role);
-                                                }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2 cursor-move hover:scale-105" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2 cursor-move hover:scale-105" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {rest !== null &&
@@ -3244,14 +3238,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
-                        className={`border-t-4 border-slate-100 transition-colors ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                        className={`border-t-4 border-slate-100 transition-colors`}
                         onDragOver={handleDragOver}
                         onDrop={(e) =>
-                          handleDrop(e, "ABSENCE", prog.dateString!)
+                          handleDrop(e, "OFFDUTY", prog.dateString!)
                         }
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleTargetContainerTap("ABSENCE", prog.dateString!);
+                          handleTargetContainerTap("OFFDUTY", prog.dateString!);
                         }}
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
@@ -3296,7 +3290,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     e.stopPropagation();
                                     handleTargetContainerTap(`ABSENCE_${cat}`, prog.dateString!);
                                   }}
-                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
+                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
                                     {cat}
@@ -3338,18 +3332,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     "OPS"
                                                   );
                                                 }}
-                                                onClick={(e) => {
-                                                  handleStaffItemTap(e, s.id, `ABSENCE_${cat}`, prog.dateString!, s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
-                                                    s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
-                                                    s.isRamp ? "RMP" :
-                                                    s.isLostFound ? "LF" :
-                                                    s.isLabour ? "LBR" :
-                                                    s.isSecurity ? "SEC" :
-                                                    s.isDriver ? "DRV" :
-                                                    "OPS"
-                                                  );
-                                                }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group cursor-move hover:scale-105 ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group cursor-move hover:scale-105 ${colorClass}`}
                                               >
                                                 <span>{s.initials}</span>
                                               </div>
@@ -3492,77 +3475,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         );
       })()}
 
-      {staffActionModal && (() => {
-        const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
-        const st = staff.find(s => s.id === staffActionModal.staffId);
-        if (progIdx === -1 || !st) return null;
-        
-        return (
-          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
-              <div className="bg-indigo-600 p-4 flex items-center justify-between">
-                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
-                  Move Staff
-                </h3>
-                <button
-                  onClick={() => setStaffActionModal(null)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="p-4">
-                <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg">
-                    {st.initials}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-800 text-sm">{st.name}</h4>
-                    <p className="text-xs text-slate-500 font-medium">
-                      Current: {staffActionModal.currentShiftId.startsWith("ABSENCE_") 
-                        ? staffActionModal.currentShiftId.replace("ABSENCE_", "") 
-                        : (shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime ? `Shift at ${shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime}` : staffActionModal.currentShiftId)}
-                    </p>
-                  </div>
-                </div>
 
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Move To</label>
-                <select
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 mb-4"
-                  onChange={(e) => {
-                    executeMove(
-                      staffActionModal.staffId,
-                      staffActionModal.currentShiftId,
-                      staffActionModal.date,
-                      staffActionModal.role,
-                      e.target.value,
-                      staffActionModal.date
-                    );
-                    setStaffActionModal(null);
-                  }}
-                  defaultValue=""
-                >
-                  <option value="" disabled>Select destination...</option>
-                  <optgroup label="Shifts">
-                    {shifts.filter(s => s.pickupDate === staffActionModal.date)
-                      .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime))
-                      .map(s => (
-                      <option key={s.id} value={s.id} disabled={s.id === staffActionModal.currentShiftId}>Shift at {s.pickupTime}</option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Absences & Off-Duty">
-                    <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Days Off (Unassigned)</option>
-                    <option value="ABSENCE_ANNUAL LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ANNUAL LEAVE"}>Annual Leave</option>
-                    <option value="ABSENCE_SICK LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_SICK LEAVE"}>Sick Leave</option>
-                    <option value="ABSENCE_ROSTER LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ROSTER LEAVE" || st.type === "Local"}>Roster Leave</option>
-                    <option value="ABSENCE_STANDBY (RESERVE)" disabled={staffActionModal.currentShiftId === "ABSENCE_STANDBY (RESERVE)"}>Standby (Reserve)</option>
-                  </optgroup>
-                </select>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {noteModal && (
         <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
