@@ -1,4 +1,3 @@
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import {
   DailyProgram,
   ProgramData,
@@ -133,6 +132,19 @@ const safeParseJson = (text: string | undefined): any => {
     } catch (err2) {}
     return null;
   }
+};
+
+const aiFetch = async (model: string, contents: any, config?: any) => {
+  const result = await fetch("/api/gemini/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, contents, config }),
+  });
+  if (!result.ok) {
+    const errorData = await result.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch from AI service");
+  }
+  return await result.json();
 };
 
 export const calculateCredits = (
@@ -694,7 +706,6 @@ export const compareFlightsWithAI = async (
   currentFlights: Flight[],
   dateRangeStr: string
 ): Promise<{ added: Flight[], updated: Flight[], deletedIds: string[] }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const flightsStr = JSON.stringify(currentFlights, null, 2);
   
   const prompt = `You are an aviation scheduling assistant.
@@ -724,14 +735,12 @@ Provide the result purely as a JSON object containing { "added": [], "updated": 
     );
   }
 
-  const response = await withRetry<GenerateContentResponse>(() =>
-    ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: parts,
-      config: {
-        responseMimeType: "application/json",
-      },
-    })
+  const response = await withRetry<{ text: string }>(() =>
+    aiFetch(
+      "gemini-2.5-flash",
+      { parts },
+      { responseMimeType: "application/json" }
+    )
   );
 
   const text = response.text || "";
@@ -753,12 +762,6 @@ export const extractDataFromContent = async (params: {
   startDate?: string;
   targetType: string;
 }): Promise<any> => {
-  if (!process.env.API_KEY) {
-    throw new Error(
-      "Missing Gemini API Key. Please set VITE_API_KEY in your Vercel environment variables.",
-    );
-  }
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [];
   if (params.textData) parts.push({ text: `DATA:\n${params.textData}` });
   if (params.media)
@@ -780,12 +783,12 @@ Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
 
   // Wrap extraction call with retry
-  const response = await withRetry<GenerateContentResponse>(() =>
-    ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: { parts },
-      config: { responseMimeType: "application/json" },
-    }),
+  const response = await withRetry<{ text: string }>(() =>
+    aiFetch(
+      "gemini-2.5-flash",
+      { parts },
+      { responseMimeType: "application/json" }
+    ),
   );
   
   const parsed = safeParseJson(response.text);
@@ -823,7 +826,6 @@ export const modifyProgramWithAI = async (
   data: ProgramData,
   media: ExtractionMedia[] = [],
 ): Promise<any> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `TASK: Modify roster. Instruction: ${instruction}. Current: ${JSON.stringify(data.programs)}. Return { "programs": [], "explanation": "" }`;
   const parts: any[] = [{ text: prompt }];
   if (media.length > 0)
@@ -832,12 +834,12 @@ export const modifyProgramWithAI = async (
     );
 
   // Wrap modification call with retry
-  const response = await withRetry<GenerateContentResponse>(() =>
-    ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: { parts },
-      config: { responseMimeType: "application/json" },
-    }),
+  const response = await withRetry<{ text: string }>(() =>
+    aiFetch(
+      "gemini-3.1-pro-preview",
+      { parts },
+      { responseMimeType: "application/json" }
+    ),
   );
   return safeParseJson(response.text);
 };
@@ -848,16 +850,15 @@ export const repairProgramWithAI = async (
   data: ProgramData,
   constraints: { minRestHours: number },
 ): Promise<{ programs: DailyProgram[] }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `FIX ROSTER. Violations: ${auditReport}. Rules: 5/2 local rule, 12h rest, roster contract dates. Return: { "programs": [] }`;
 
   // Wrap repair call with retry
-  const response = await withRetry<GenerateContentResponse>(() =>
-    ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    }),
+  const response = await withRetry<{ text: string }>(() =>
+    aiFetch(
+      "gemini-3.1-pro-preview",
+      prompt,
+      { responseMimeType: "application/json" }
+    ),
   );
   return {
     programs: safeParseJson(response.text)?.programs || currentPrograms,

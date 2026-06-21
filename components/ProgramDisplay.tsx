@@ -33,6 +33,7 @@ import {
   Unlock,
   ShieldCheck,
   MessageSquare,
+  X,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -539,9 +540,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         const assignments = sortAssignments(prog.assignments.filter(
           (a) => a.shiftId === shift.id,
         ));
-        const nonLabourCount = assignments.filter(
-          (a) => !getStaff(a.staffId)?.isLabour,
-        ).length;
+        const nonLabourCount = assignments.filter((a) => {
+          const st = getStaff(a.staffId);
+          return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+        }).length;
         const flightStrs =
           (shift.flightIds || [])
             .map((fid) => {
@@ -1619,12 +1621,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const [selectedStaffInfo, setSelectedStaffInfo] = React.useState<{
-    staffId: string;
-    currentShiftId: string;
-    date: string;
-    role: string;
-  } | null>(null);
+  const [shiftEditModal, setShiftEditModal] = React.useState<{dateString: string, shiftId: string} | null>(null);
 
   const handleDragStart = (
     e: React.DragEvent,
@@ -1634,7 +1631,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     role: string,
   ) => {
     e.dataTransfer.setData(
-      "application/json",
+      "text/plain",
       JSON.stringify({ staffId, currentShiftId, date, role }),
     );
     e.dataTransfer.effectAllowed = "move";
@@ -1677,8 +1674,11 @@ export const ProgramDisplay: React.FC<Props> = ({
   ) => {
     if (date !== targetDate) return;
     const newPrograms = [...programs];
-    const prog = newPrograms.find((p) => p.dateString === targetDate);
-    if (!prog) return;
+    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
+    if (progIndex === -1) return;
+    
+    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
+    newPrograms[progIndex] = prog;
 
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
 
@@ -1699,13 +1699,11 @@ export const ProgramDisplay: React.FC<Props> = ({
         return;
       }
 
-      if (!isDriver || isTargetAbsence) {
-        const oldIdx = prog.assignments.findIndex(
-          (a) => a.staffId === staffId && a.shiftId === currentShiftId,
-        );
-        if (oldIdx !== -1) {
-          prog.assignments.splice(oldIdx, 1);
-        }
+      const oldIdx = prog.assignments.findIndex(
+        (a) => a.staffId === staffId && a.shiftId === currentShiftId,
+      );
+      if (oldIdx !== -1) {
+        prog.assignments.splice(oldIdx, 1);
       }
     } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
       // Dragging out of a leave category into either a working shift OR another leave category
@@ -1722,7 +1720,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
     }
     
-    if (!isTargetAbsence) {
+    if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
       const exists = prog.assignments.some(
         (a) => a.staffId === staffId && a.shiftId === targetShiftId,
       );
@@ -1737,7 +1735,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           manualSortIndex: maxSort + 1
         });
       }
-    } else if (targetShiftId !== "ABSENCE") {
+    } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
       // Handle dropping into a specific absence category
       const cat = targetShiftId.replace("ABSENCE_", "");
       let type: any = null;
@@ -1745,6 +1743,11 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (cat === "SICK LEAVE") type = "Sick leave";
       if (cat === "ROSTER LEAVE") type = "Roster leave";
       if (cat === "DAYS OFF") type = "Day off";
+      
+      const st = staff.find(s => s.id === staffId);
+      if (type === "Roster leave" && st?.type === "Local") {
+        return;
+      }
       
       if (type) {
         const newLeaveId = Math.random().toString(36).substr(2, 9);
@@ -1767,7 +1770,6 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
     }
     onUpdatePrograms(newPrograms);
-    setSelectedStaffInfo(null);
   };
 
   const handleDrop = (
@@ -1776,7 +1778,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetDate: string,
   ) => {
     e.preventDefault();
-    const data = e.dataTransfer.getData("application/json");
+    const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
 
     try {
@@ -1788,28 +1790,21 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const handleTargetContainerTap = (targetShiftId: string, targetDate: string) => {
-    if (!selectedStaffInfo) return;
-    executeMove(
-      selectedStaffInfo.staffId,
-      selectedStaffInfo.currentShiftId,
-      selectedStaffInfo.date,
-      selectedStaffInfo.role,
-      targetShiftId,
-      targetDate
-    );
+    if (!targetShiftId.startsWith("ABSENCE") && targetShiftId !== "OFFDUTY") {
+      setShiftEditModal({ dateString: targetDate, shiftId: targetShiftId });
+    }
   };
+
+  const [staffActionModal, setStaffActionModal] = React.useState<{
+    staffId: string;
+    currentShiftId: string;
+    date: string;
+    role: string;
+  } | null>(null);
 
   const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
     e.stopPropagation();
-    if (
-      selectedStaffInfo?.staffId === staffId &&
-      selectedStaffInfo?.currentShiftId === currentShiftId &&
-      selectedStaffInfo?.date === date
-    ) {
-      setSelectedStaffInfo(null);
-    } else {
-      setSelectedStaffInfo({ staffId, currentShiftId, date, role });
-    }
+    setStaffActionModal({ staffId, currentShiftId, date, role });
   };
 
   const staffStats = React.useMemo(() => {
@@ -2797,9 +2792,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     .map((fid) => getFlight(fid)?.flightNumber)
                                     .filter(Boolean)
                                     .join(" / ") || "NIL";
-                                const nonLabourCount = assignments.filter(
-                                  (a) => !getStaff(a.staffId)?.isLabour,
-                                ).length;
+                                const nonLabourCount = assignments.filter((a) => {
+                                  const st = getStaff(a.staffId);
+                                  return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+                                }).length;
                                 const isFull = nonLabourCount >= shift.maxStaff;
                                 const isOver = nonLabourCount > shift.maxStaff;
 
@@ -2849,7 +2845,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                       handleDrop(e, shift.id, prog.dateString!)
                                     }
                                     onClick={() => handleTargetContainerTap(shift.id, prog.dateString!)}
-                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""} ${selectedStaffInfo?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
+                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
                                   >
                                     <td
                                       className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? "text-rose-500" : "text-slate-400"}`}
@@ -3036,7 +3032,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   ) return;
                                                   handleStaffItemTap(e, st.id, shift.id, prog.dateString!, a.role);
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${selectedStaffInfo?.staffId === st.id && selectedStaffInfo?.currentShiftId === shift.id && selectedStaffInfo?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {manualAssignments &&
@@ -3189,7 +3185,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
-                        className={`border-t-4 border-slate-100 transition-colors ${selectedStaffInfo?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                        className={`border-t-4 border-slate-100 transition-colors ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
                         onDragOver={handleDragOver}
                         onDrop={(e) =>
                           handleDrop(e, "ABSENCE", prog.dateString!)
@@ -3253,7 +3249,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     e.stopPropagation();
                                     handleTargetContainerTap(`ABSENCE_${cat}`, prog.dateString!);
                                   }}
-                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""} ${selectedStaffInfo?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
+                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
                                     {cat}
@@ -3317,7 +3313,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     "OPS"
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${selectedStaffInfo?.staffId === s.id && selectedStaffInfo?.currentShiftId === ("ABSENCE_" + cat) && selectedStaffInfo?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{s.initials}</span>
                                                 {isLocked ? (
@@ -3351,6 +3347,183 @@ export const ProgramDisplay: React.FC<Props> = ({
           )}
         </div>
       )}
+
+      {shiftEditModal && (() => {
+        const progIdx = programs.findIndex(p => p.dateString === shiftEditModal.dateString);
+        if (progIdx === -1) return null;
+        const prog = programs[progIdx];
+        const shift = shifts.find(s => s.id === shiftEditModal.shiftId);
+        if (!shift) return null;
+
+        const currentAssignments = prog.assignments.filter(a => a.shiftId === shift.id);
+        const nonLabourWorkerCount = currentAssignments.filter(a => {
+           const st = staff.find(s => s.id === a.staffId);
+           return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+        }).length;
+        const workingIds = new Set(prog.assignments.map(a => a.staffId));
+        const offStaff = staff.filter(s => !workingIds.has(s.id));
+
+        const addStaff = (staffId: string) => {
+          const newPrograms = [...programs];
+          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
+          newProg.assignments.push({
+            id: Math.random().toString(36).substr(2, 9),
+            staffId,
+            shiftId: shift.id,
+            flightId: "",
+            role: "OPS",
+            manualSortIndex: maxSort + 1
+          });
+          newPrograms[progIdx] = newProg;
+          onUpdatePrograms(newPrograms);
+        };
+
+        const removeStaff = (staffId: string) => {
+          const newPrograms = [...programs];
+          const newProg = { ...newPrograms[progIdx] };
+          newProg.assignments = newProg.assignments.filter(
+            a => !(a.staffId === staffId && a.shiftId === shift.id)
+          );
+          newPrograms[progIdx] = newProg;
+          onUpdatePrograms(newPrograms);
+        };
+
+        return (
+          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh] animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+              <div className="bg-indigo-600 p-4 flex items-center justify-between">
+                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
+                  Shift at {shift.pickupTime} <span className="text-indigo-200">({nonLabourWorkerCount}/{shift.maxStaff})</span>
+                </h3>
+                <button
+                  onClick={() => setShiftEditModal(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Currently Assigned</h4>
+                {currentAssignments.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic mb-4">No staff assigned.</p>
+                ) : (
+                  <div className="space-y-2 mb-4">
+                    {currentAssignments.map(a => {
+                      const st = staff.find(s => s.id === a.staffId);
+                      if (!st) return null;
+                      return (
+                        <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                          <span className="font-bold text-sm text-slate-700">{st.name}</span>
+                          <button
+                            onClick={() => removeStaff(st.id)}
+                            className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pt-4 border-t border-slate-100">Add Staff</h4>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addStaff(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select available staff...</option>
+                  {offStaff.map(st => (
+                    <option key={st.id} value={st.id}>
+                      {st.name} ({st.initials})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {staffActionModal && (() => {
+        const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
+        const st = staff.find(s => s.id === staffActionModal.staffId);
+        if (progIdx === -1 || !st) return null;
+        
+        return (
+          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+              <div className="bg-indigo-600 p-4 flex items-center justify-between">
+                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
+                  Move Staff
+                </h3>
+                <button
+                  onClick={() => setStaffActionModal(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg">
+                    {st.initials}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-sm">{st.name}</h4>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Current: {staffActionModal.currentShiftId.startsWith("ABSENCE_") 
+                        ? staffActionModal.currentShiftId.replace("ABSENCE_", "") 
+                        : (shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime ? `Shift at ${shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime}` : staffActionModal.currentShiftId)}
+                    </p>
+                  </div>
+                </div>
+
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Move To</label>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 mb-4"
+                  onChange={(e) => {
+                    executeMove(
+                      staffActionModal.staffId,
+                      staffActionModal.currentShiftId,
+                      staffActionModal.date,
+                      staffActionModal.role,
+                      e.target.value,
+                      staffActionModal.date
+                    );
+                    setStaffActionModal(null);
+                  }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select destination...</option>
+                  <optgroup label="Shifts">
+                    {shifts.filter(s => s.pickupDate === staffActionModal.date)
+                      .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime))
+                      .map(s => (
+                      <option key={s.id} value={s.id} disabled={s.id === staffActionModal.currentShiftId}>Shift at {s.pickupTime}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Absences">
+                    <option value="ABSENCE_ANNUAL LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ANNUAL LEAVE"}>Annual Leave</option>
+                    <option value="ABSENCE_SICK LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_SICK LEAVE"}>Sick Leave</option>
+                    <option value="ABSENCE_ROSTER LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ROSTER LEAVE" || st.type === "Local"}>Roster Leave</option>
+                    <option value="ABSENCE_STANDBY (RESERVE)" disabled={staffActionModal.currentShiftId === "ABSENCE_STANDBY (RESERVE)"}>Standby (Reserve)</option>
+                  </optgroup>
+                  <optgroup label="Action">
+                    <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Remove from Shift / Send Off-Duty</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {noteModal && (
         <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
