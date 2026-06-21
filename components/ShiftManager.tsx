@@ -111,8 +111,32 @@ export const ShiftManager: React.FC<Props> = ({
     isNew?: boolean;
   } | null>(null);
 
+  const [selectedFlightInfo, setSelectedFlightInfo] = useState<{
+    sourceShiftId: string;
+    flightId: string;
+  } | null>(null);
+
   const handleDragStart = (e: React.DragEvent, sourceShiftId: string, flightId: string) => {
     e.dataTransfer.setData("application/json", JSON.stringify({ sourceShiftId, flightId }));
+  };
+
+  const executeFlightMove = (sourceShiftId: string, flightId: string, targetShiftId: string) => {
+    if (sourceShiftId === targetShiftId) {
+      setSelectedFlightInfo(null);
+      return;
+    }
+
+    const sourceShift = shifts.find(s => s.id === sourceShiftId);
+    const targetShift = shifts.find(s => s.id === targetShiftId);
+    if (!sourceShift || !targetShift) return;
+
+    const newSourceFlights = (sourceShift.flightIds || []).filter(f => f !== flightId);
+    const newTargetFlights = [...(targetShift.flightIds || []), flightId];
+    // make it unique
+    const uniqueTargetFlights = Array.from(new Set(newTargetFlights));
+    onUpdate({ ...sourceShift, flightIds: newSourceFlights });
+    onUpdate({ ...targetShift, flightIds: uniqueTargetFlights });
+    setSelectedFlightInfo(null);
   };
 
   const handleDrop = (e: React.DragEvent, targetShiftId: string) => {
@@ -121,19 +145,22 @@ export const ShiftManager: React.FC<Props> = ({
       const dataStr = e.dataTransfer.getData("application/json");
       if (!dataStr) return;
       const { sourceShiftId, flightId } = JSON.parse(dataStr);
-      if (sourceShiftId === targetShiftId) return;
-
-      const sourceShift = shifts.find(s => s.id === sourceShiftId);
-      const targetShift = shifts.find(s => s.id === targetShiftId);
-      if (!sourceShift || !targetShift) return;
-
-      const newSourceFlights = (sourceShift.flightIds || []).filter(f => f !== flightId);
-      const newTargetFlights = [...(targetShift.flightIds || []), flightId];
-      // make it unique
-      const uniqueTargetFlights = Array.from(new Set(newTargetFlights));
-      onUpdate({ ...sourceShift, flightIds: newSourceFlights });
-      onUpdate({ ...targetShift, flightIds: uniqueTargetFlights });
+      executeFlightMove(sourceShiftId, flightId, targetShiftId);
     } catch(err) {}
+  };
+
+  const handleTargetContainerTap = (targetShiftId: string) => {
+    if (!selectedFlightInfo) return;
+    executeFlightMove(selectedFlightInfo.sourceShiftId, selectedFlightInfo.flightId, targetShiftId);
+  };
+
+  const handleFlightTap = (e: React.MouseEvent, sourceShiftId: string, flightId: string) => {
+    e.stopPropagation();
+    if (selectedFlightInfo?.flightId === flightId && selectedFlightInfo?.sourceShiftId === sourceShiftId) {
+      setSelectedFlightInfo(null);
+    } else {
+      setSelectedFlightInfo({ sourceShiftId, flightId });
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
