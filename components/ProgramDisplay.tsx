@@ -54,6 +54,7 @@ interface Props {
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
   onUpdateLeaves?: (l: LeaveRequest[]) => void;
+  onUpdateManualAssignments?: (m: ManualAssignment[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -71,6 +72,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   onUpdatePrograms,
   onRestoreVersion,
   onUpdateLeaves,
+  onUpdateManualAssignments,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -80,7 +82,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
-  const [unlockAbsences, setUnlockAbsences] = useState(false);
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
@@ -1681,16 +1682,18 @@ export const ProgramDisplay: React.FC<Props> = ({
     }));
     
     const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
-    if (progIndex === -1) return;
+    const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
+    if (progIndex === -1 || sourceProgIndex === -1) return;
     
     const prog = newPrograms[progIndex];
+    const sourceProg = newPrograms[sourceProgIndex];
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
 
     if (!currentShiftId.startsWith("ABSENCE")) {
       const staffObj = staff.find((s) => s.id === staffId);
       const isDriver = staffObj?.isDriver;
 
-      if (currentShiftId === targetShiftId) {
+      if (currentShiftId === targetShiftId && date === targetDate) {
         // Just rearrange the sorting
         const existingIdx = prog.assignments.findIndex(
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
@@ -1704,16 +1707,16 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
 
       // Remove from current shift
-      const oldIdx = prog.assignments.findIndex(
+      const oldIdx = sourceProg.assignments.findIndex(
         (a) => a.staffId === staffId && a.shiftId === currentShiftId,
       );
       if (oldIdx !== -1) {
-        prog.assignments.splice(oldIdx, 1);
+        sourceProg.assignments.splice(oldIdx, 1);
       }
-    } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
+    } else if (currentShiftId.startsWith("ABSENCE_") && (targetShiftId !== currentShiftId || date !== targetDate)) {
       // Removing from leave
       const leavesToDelete = leaveRequests.filter(l => 
-        l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+        l.staffId === staffId && l.startDate <= date && l.endDate >= date
       );
       if (leavesToDelete.length > 0) {
         Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
@@ -1730,6 +1733,13 @@ export const ProgramDisplay: React.FC<Props> = ({
            }
         });
       }
+    }
+    
+    if (onUpdateManualAssignments && manualAssignments) {
+        const remaining = manualAssignments.filter(ma => !(ma.staffId === staffId && ma.shiftId === currentShiftId));
+        if (remaining.length !== manualAssignments.length) {
+            onUpdateManualAssignments(remaining);
+        }
     }
     
     if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
@@ -3178,16 +3188,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                             <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
                               Absence and Rest Registry
                             </h4>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setUnlockAbsences(!unlockAbsences);
-                              }}
-                              className={`p-1 rounded ${unlockAbsences ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-500"} hover:opacity-80 transition-all`}
-                              title={unlockAbsences ? "Lock absences" : "Unlock absences to reassign"}
-                            >
-                              {unlockAbsences ? <Unlock size={12} /> : <Lock size={12} />}
-                            </button>
                           </div>
                           <span className="text-[9px] font-bold text-slate-400 italic">
                             Drag or tap here to unassign
@@ -3249,21 +3249,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             daysWorked,
                                             null,
                                           );
-                                          const isLocked =
-                                            !unlockAbsences && (
-                                              cat === "ROSTER LEAVE" ||
-                                              cat === "ANNUAL LEAVE" ||
-                                              isRequestedDayOff
-                                            );
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
-                                                draggable={!isLocked}
+                                                draggable={true}
                                                 onDragStart={(e) => {
-                                                  if (isLocked) {
-                                                    e.preventDefault();
-                                                    return;
-                                                  }
                                                   handleDragStart(
                                                     e,
                                                     s.id,
@@ -3280,7 +3270,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   );
                                                 }}
                                                 onClick={(e) => {
-                                                  if (isLocked) return;
                                                   handleStaffItemTap(e, s.id, `ABSENCE_${cat}`, prog.dateString!, s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
                                                     s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
                                                     s.isRamp ? "RMP" :
@@ -3291,15 +3280,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     "OPS"
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group cursor-move hover:scale-105 ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""}`}
                                               >
                                                 <span>{s.initials}</span>
-                                                {isLocked ? (
-                                                  <Lock
-                                                    size={8}
-                                                    className="opacity-70 ml-0.5"
-                                                  />
-                                                ) : null}
                                               </div>
                                             </React.Fragment>
                                           );

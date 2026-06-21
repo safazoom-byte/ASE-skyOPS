@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
       target: "esnext",
       outDir: "dist",
       sourcemap: false,
-      minify: "esbuild"
+      minify: false
     },
     server: {
       port: 3000,

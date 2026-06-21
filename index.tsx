@@ -1503,6 +1503,7 @@ const App: React.FC = () => {
               setPrograms(updated);
               if (supabase) await db.savePrograms(updated);
             }}
+            onUpdateManualAssignments={setManualAssignments}
             onRestoreVersion={(v) => {
               setPrograms(v.programs);
               setStartDate(v.periodStart);
