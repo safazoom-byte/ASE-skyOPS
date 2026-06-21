@@ -190,6 +190,12 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const sortAssignments = (assignments: any[]) => {
     return [...assignments].sort((a, b) => {
+      if (a.manualSortIndex !== undefined && b.manualSortIndex !== undefined) {
+        return a.manualSortIndex - b.manualSortIndex;
+      }
+      if (a.manualSortIndex !== undefined) return -1;
+      if (b.manualSortIndex !== undefined) return 1;
+
       const stA = getStaff(a.staffId);
       const stB = getStaff(b.staffId);
       const score = (assig: any, st: any) => {
@@ -210,7 +216,15 @@ export const ProgramDisplay: React.FC<Props> = ({
         if (st.isLabour) return 10;
         return 5;
       };
-      return score(a, stA) - score(b, stB);
+      
+      const scoreDiff = score(a, stA) - score(b, stB);
+      if (scoreDiff !== 0) return scoreDiff;
+      
+      // Secondary sort alphabetically if scores match
+      if (stA && stB) {
+        return stA.initials.localeCompare(stB.initials);
+      }
+      return 0;
     });
   };
 
@@ -1673,34 +1687,49 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetShiftId: string,
     targetDate: string,
   ) => {
-    if (date !== targetDate) return;
-    
-    // Completely recreate the array structure to guarantee React picks up changes
-    const newPrograms = programs.map(p => ({
-        ...p,
-        assignments: Array.isArray(p.assignments) ? p.assignments.map(a => ({...a})) : []
+    // Phase 1: Purely compute all new states synchronously based on the *current* closures
+    const newPrograms = programs.map((p) => ({
+      ...p,
+      assignments: Array.isArray(p.assignments)
+        ? p.assignments.map((a) => ({ ...a }))
+        : [],
     }));
-    
+
+    let newLeaveRequests = leaveRequests ? [...leaveRequests] : [];
+    let newManualSettings = manualAssignments ? [...manualAssignments] : [];
+
     const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
     const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
     if (progIndex === -1 || sourceProgIndex === -1) return;
-    
+
     const prog = newPrograms[progIndex];
     const sourceProg = newPrograms[sourceProgIndex];
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
+    const st = staff.find((s) => s.id === staffId);
+    if (!st) return;
 
+    // Track DB operations we'll fire later
+    const ops = {
+      deleteLeaves: [] as string[],
+      upsertLeaves: [] as any[],
+    };
+
+    // --- REMOVAL FROM SOURCE ---
     if (!currentShiftId.startsWith("ABSENCE")) {
-      const staffObj = staff.find((s) => s.id === staffId);
-      const isDriver = staffObj?.isDriver;
-
       if (currentShiftId === targetShiftId && date === targetDate) {
-        // Just rearrange the sorting
+        // Rearranging the sorting - re-enabled securely
         const existingIdx = prog.assignments.findIndex(
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
         );
         if (existingIdx !== -1) {
-          const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
-          prog.assignments[existingIdx] = { ...prog.assignments[existingIdx], manualSortIndex: minSort - 1 };
+          const minSort = Math.min(
+            0,
+            ...prog.assignments.map((a) => a.manualSortIndex || 0),
+          );
+          prog.assignments[existingIdx] = {
+            ...prog.assignments[existingIdx],
+            manualSortIndex: minSort - 1,
+          };
           onUpdatePrograms(newPrograms);
         }
         return;
@@ -1712,91 +1741,131 @@ export const ProgramDisplay: React.FC<Props> = ({
       );
       if (oldIdx !== -1) {
         sourceProg.assignments.splice(oldIdx, 1);
+      } else {
+        // Fallback: If for some reason shiftId mismatch, delete the staff from ANY shift if we are dragging them away
+        const anyIdx = sourceProg.assignments.findIndex((a) => a.staffId === staffId);
+        if (anyIdx !== -1) {
+           sourceProg.assignments.splice(anyIdx, 1);
+        }
       }
-    } else if (currentShiftId.startsWith("ABSENCE_") && (targetShiftId !== currentShiftId || date !== targetDate)) {
+
+      // Remove from manual settings
+      newManualSettings = newManualSettings.filter(
+        (ma) => !(ma.staffId === staffId && (ma.shiftId === currentShiftId || currentShiftId === "OFFDUTY")),
+      );
+    } else if (
+      currentShiftId.startsWith("ABSENCE_") &&
+      (targetShiftId !== currentShiftId || date !== targetDate)
+    ) {
       // Removing from leave
-      const leavesToDelete = leaveRequests.filter(l => 
-        l.staffId === staffId && l.startDate <= date && l.endDate >= date
+      const leavesToDelete = newLeaveRequests.filter(
+        (l) =>
+          l.staffId === staffId && l.startDate <= date && l.endDate >= date,
       );
       if (leavesToDelete.length > 0) {
-        Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
-           if (onUpdateLeaves) {
-               const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
-               onUpdateLeaves(remaining);
-           }
-        }).catch(err => {
-            console.error("Failed to delete leaves", err);
-            // Even if it fails, delete it locally so ui updates
-            if (onUpdateLeaves) {
-               const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
-               onUpdateLeaves(remaining);
-           }
-        });
+        leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
+        newLeaveRequests = newLeaveRequests.filter(
+          (l) => !leavesToDelete.includes(l),
+        );
       }
     }
-    
-    if (onUpdateManualAssignments && manualAssignments) {
-        const remaining = manualAssignments.filter(ma => !(ma.staffId === staffId && ma.shiftId === currentShiftId));
-        if (remaining.length !== manualAssignments.length) {
-            onUpdateManualAssignments(remaining);
-        }
-    }
-    
+
+    // --- INSERTION INTO TARGET ---
     if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
+      // Clean up any stray leaves for this specific day just in case they were on leave
+      const leavesToDelete = newLeaveRequests.filter(
+        (l) => l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+      );
+      leavesToDelete.forEach(l => ops.deleteLeaves.push(l.id));
+      newLeaveRequests = newLeaveRequests.filter(l => !leavesToDelete.includes(l));
+
       const exists = prog.assignments.some(
         (a) => a.staffId === staffId && a.shiftId === targetShiftId,
       );
       if (!exists) {
-        const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+        const maxSort = Math.max(
+            0,
+            ...prog.assignments.map((a) => a.manualSortIndex || 0),
+        );
         prog.assignments.push({
-          id: Math.random().toString(36).substr(2, 9),
+          id: Math.random().toString(36).substring(2, 11),
           staffId,
           shiftId: targetShiftId,
           flightId: "",
           role: role || "OPS",
-          manualSortIndex: maxSort + 1
+          manualSortIndex: maxSort + 1,
+        });
+
+        newManualSettings.push({
+          staffId,
+          shiftId: targetShiftId,
+          roles: [role || "OPS"],
         });
       }
     } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
       const cat = targetShiftId.replace("ABSENCE_", "");
       let type: any = null;
       if (cat === "ANNUAL LEAVE") type = "Annual leave";
-      if (cat === "SICK LEAVE") type = "Sick leave";
-      if (cat === "ROSTER LEAVE") type = "Roster leave";
-      if (cat === "DAYS OFF") type = "Day off";
-      
-      const st = staff.find(s => s.id === staffId);
-      if (type === "Roster leave" && st?.type === "Local") {
+      else if (cat === "SICK LEAVE") type = "Sick leave";
+      else if (cat === "ROSTER LEAVE") type = "Roster leave";
+      else if (cat === "DAYS OFF") type = "Day off";
+      else if (cat === "STANDBY (RESERVE)") type = "Standby (Reserve)";
+
+      if (type === "Roster leave" && st.type === "Local") {
         return; // Locals do not get roster leave
       }
-      
+
       if (type) {
-        const newLeaveId = Math.random().toString(36).substr(2, 9);
-        const req = {
+        // Remove existing leaves on target day to avoid overlaps
+        const overlapping = newLeaveRequests.filter(
+          (l) =>
+            l.staffId === staffId &&
+            l.startDate <= targetDate &&
+            l.endDate >= targetDate,
+        );
+        overlapping.forEach((l) => ops.deleteLeaves.push(l.id));
+        newLeaveRequests = newLeaveRequests.filter(
+          (l) => !overlapping.includes(l),
+        );
+
+        const newLeaveId = Math.random().toString(36).substring(2, 11);
+        const req: any = {
           id: newLeaveId,
           staffId,
           type,
           startDate: targetDate,
           endDate: targetDate,
+          status: "approved",
           notes: "Assigned visually",
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         };
-        db.upsertLeave(req as any).then(() => {
-          if (onUpdateLeaves) {
-              const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
-              onUpdateLeaves([...prevLeaves, req as any]);
-          }
-        }).catch(err => {
-            console.error("Failed to upsert leave", err);
-            if (onUpdateLeaves) {
-              const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
-              onUpdateLeaves([...prevLeaves, req as any]);
-            }
-        });
+
+        newLeaveRequests.push(req);
+        ops.upsertLeaves.push(req);
       }
     }
-    
+
+    // --- PHASE 3: DISPATCH STATE OUT ---
+    if (onUpdateLeaves) {
+      onUpdateLeaves(newLeaveRequests);
+    }
+    if (onUpdateManualAssignments) {
+        onUpdateManualAssignments(newManualSettings);
+    }
     onUpdatePrograms(newPrograms);
+
+    // --- PHASE 4: FIRE DB ASYNC ---
+    if (ops.deleteLeaves.length > 0) {
+      Promise.all(ops.deleteLeaves.map((id) => db.deleteLeave(id))).catch(
+        console.error,
+      );
+    }
+    if (ops.upsertLeaves.length > 0) {
+      // Assuming upsertLeaves exists, if not we map to upsertLeave
+      Promise.all(ops.upsertLeaves.map((req) => db.upsertLeave(req))).catch(
+        console.error,
+      );
+    }
   };
 
   const handleDrop = (
@@ -2689,6 +2758,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                         categories["ROSTER LEAVE"].push(item);
                       else if (leave.type === "Sick leave")
                         categories["SICK LEAVE"].push(item);
+                      else if (leave.type === "Standby (Reserve)")
+                        categories["STANDBY (RESERVE)"].push(item);
                       else categories["DAYS OFF"].push(item);
                     } else if (isRosterOutOfContract) {
                       categories["ROSTER LEAVE"].push(item);
@@ -3216,9 +3287,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                  }}
+                                  onDragOver={handleDragOver}
                                   onDrop={(e) => {
                                     e.stopPropagation();
                                     handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
@@ -3323,7 +3392,6 @@ export const ProgramDisplay: React.FC<Props> = ({
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
         const offStaff = staff.filter(s => {
-           if (s.isDriver) return true; // Drivers can be assigned to multiple shifts
            return !workingIds.has(s.id);
         });
 
@@ -3342,14 +3410,12 @@ export const ProgramDisplay: React.FC<Props> = ({
               return p;
           });
           const newProg = newPrograms[progIdx];
-          const maxSort = Math.max(0, ...newProg.assignments.map(a => a.manualSortIndex || 0));
           newProg.assignments.push({
             id: Math.random().toString(36).substr(2, 9),
             staffId,
             shiftId: shift.id,
             flightId: "",
             role: "OPS",
-            manualSortIndex: maxSort + 1
           });
           onUpdatePrograms(newPrograms);
         };
@@ -3484,14 +3550,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <option key={s.id} value={s.id} disabled={s.id === staffActionModal.currentShiftId}>Shift at {s.pickupTime}</option>
                     ))}
                   </optgroup>
-                  <optgroup label="Absences">
+                  <optgroup label="Absences & Off-Duty">
+                    <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Days Off (Unassigned)</option>
                     <option value="ABSENCE_ANNUAL LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ANNUAL LEAVE"}>Annual Leave</option>
                     <option value="ABSENCE_SICK LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_SICK LEAVE"}>Sick Leave</option>
                     <option value="ABSENCE_ROSTER LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ROSTER LEAVE" || st.type === "Local"}>Roster Leave</option>
                     <option value="ABSENCE_STANDBY (RESERVE)" disabled={staffActionModal.currentShiftId === "ABSENCE_STANDBY (RESERVE)"}>Standby (Reserve)</option>
-                  </optgroup>
-                  <optgroup label="Action">
-                    <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Remove from Shift / Send Off-Duty</option>
                   </optgroup>
                 </select>
               </div>

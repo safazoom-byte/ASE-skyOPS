@@ -16,6 +16,7 @@ export type LeaveType =
   | "Lieu leave"
   | "Sick leave"
   | "Roster leave"
+  | "Standby (Reserve)"
   | "NIL";
 
 export interface Flight {
