@@ -1,3 +1,4 @@
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import {
   DailyProgram,
   ProgramData,
@@ -6,7 +7,6 @@ import {
   IncomingDuty,
   ShiftConfig,
   Skill,
-  Flight,
 } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
 
@@ -132,19 +132,6 @@ const safeParseJson = (text: string | undefined): any => {
     } catch (err2) {}
     return null;
   }
-};
-
-const aiFetch = async (model: string, contents: any, config?: any) => {
-  const result = await fetch("/api/gemini/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, contents, config }),
-  });
-  if (!result.ok) {
-    const errorData = await result.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to fetch from AI service");
-  }
-  return await result.json();
 };
 
 export const calculateCredits = (
@@ -506,11 +493,11 @@ export const generateAIProgram = async (
           const shiftEnd = getExactShiftEnd(shift);
           const st = data.staff.find((s) => s.id === ma.staffId);
           if (st) {
-            // Prevent duplicates on the SAME DAY
-            const alreadyAssignedToday = program.assignments.some(
-              (a) => a.staffId === ma.staffId,
+            // Only add if not already added to this shift
+            const alreadyAssigned = program.assignments.some(
+              (a) => a.staffId === ma.staffId && a.shiftId === ma.shiftId,
             );
-            if (!alreadyAssignedToday) {
+            if (!alreadyAssigned) {
               program.assignments.push({
                 id: Math.random().toString(36).substr(2, 9),
                 staffId: ma.staffId,
@@ -701,67 +688,18 @@ export const generateAIProgram = async (
   };
 };
 
-export const compareFlightsWithAI = async (
-  media: ExtractionMedia[],
-  currentFlights: Flight[],
-  dateRangeStr: string
-): Promise<{ added: Flight[], updated: Flight[], deletedIds: string[] }> => {
-  const flightsStr = JSON.stringify(currentFlights, null, 2);
-  
-  const prompt = `You are an aviation scheduling assistant.
-The user has uploaded a flight schedule (in the attached media) for the period: ${dateRangeStr}.
-I am providing you the CURRENT flights we have in our database for this period:
-${flightsStr}
-
-YOUR TASK:
-1. Extract ALL flights from the uploaded schedule image/file.
-2. Compare the extracted flights with the CURRENT flights.
-3. Identify:
-   - "added": Flights in the new schedule that are NOT in the CURRENT list.
-   - "updated": Flights that exist in BOTH but have changes (e.g. STA/STD time changes).
-   - "deletedIds": IDs of flights that are in the CURRENT list but are MISSING from the new schedule.
-
-RULES:
-- When matching, use "flightNumber" and "date" as primary keys. Sometimes flight numbers have slight formatting differences.
-- Generate a new random 9-character ID for any "added" flights.
-- Ensure the types are correct (Flight). "added" and "updated" items must follow the properties of the Flight interface.
-
-Provide the result purely as a JSON object containing { "added": [], "updated": [], "deletedIds": [] }. Return ONLY JSON.`;
-
-  const parts: any[] = [{ text: prompt }];
-  if (media.length > 0) {
-    media.forEach((m) =>
-      parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } })
-    );
-  }
-
-  const response = await withRetry<{ text: string }>(() =>
-    aiFetch(
-      "gemini-2.5-flash",
-      { parts },
-      { responseMimeType: "application/json" }
-    )
-  );
-
-  const text = response.text || "";
-  const result = safeParseJson(text);
-  if (!result || typeof result !== "object") {
-    throw new Error("Failed to parse Gemini comparison response.");
-  }
-
-  return {
-    added: Array.isArray(result.added) ? result.added : [],
-    updated: Array.isArray(result.updated) ? result.updated : [],
-    deletedIds: Array.isArray(result.deletedIds) ? result.deletedIds : []
-  };
-};
-
 export const extractDataFromContent = async (params: {
   textData?: string;
   media?: ExtractionMedia[];
   startDate?: string;
   targetType: string;
 }): Promise<any> => {
+  if (!process.env.API_KEY) {
+    throw new Error(
+      "Missing Gemini API Key. Please set VITE_API_KEY in your Vercel environment variables.",
+    );
+  }
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const parts: any[] = [];
   if (params.textData) parts.push({ text: `DATA:\n${params.textData}` });
   if (params.media)
@@ -783,12 +721,12 @@ Do not wrap in markdown or any other text.`;
   parts.unshift({ text: prompt });
 
   // Wrap extraction call with retry
-  const response = await withRetry<{ text: string }>(() =>
-    aiFetch(
-      "gemini-2.5-flash",
-      { parts },
-      { responseMimeType: "application/json" }
-    ),
+  const response = await withRetry<GenerateContentResponse>(() =>
+    ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: { parts },
+      config: { responseMimeType: "application/json" },
+    }),
   );
   
   const parsed = safeParseJson(response.text);
@@ -826,6 +764,7 @@ export const modifyProgramWithAI = async (
   data: ProgramData,
   media: ExtractionMedia[] = [],
 ): Promise<any> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `TASK: Modify roster. Instruction: ${instruction}. Current: ${JSON.stringify(data.programs)}. Return { "programs": [], "explanation": "" }`;
   const parts: any[] = [{ text: prompt }];
   if (media.length > 0)
@@ -834,12 +773,12 @@ export const modifyProgramWithAI = async (
     );
 
   // Wrap modification call with retry
-  const response = await withRetry<{ text: string }>(() =>
-    aiFetch(
-      "gemini-3.1-pro-preview",
-      { parts },
-      { responseMimeType: "application/json" }
-    ),
+  const response = await withRetry<GenerateContentResponse>(() =>
+    ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: { parts },
+      config: { responseMimeType: "application/json" },
+    }),
   );
   return safeParseJson(response.text);
 };
@@ -850,15 +789,16 @@ export const repairProgramWithAI = async (
   data: ProgramData,
   constraints: { minRestHours: number },
 ): Promise<{ programs: DailyProgram[] }> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `FIX ROSTER. Violations: ${auditReport}. Rules: 5/2 local rule, 12h rest, roster contract dates. Return: { "programs": [] }`;
 
   // Wrap repair call with retry
-  const response = await withRetry<{ text: string }>(() =>
-    aiFetch(
-      "gemini-3.1-pro-preview",
-      prompt,
-      { responseMimeType: "application/json" }
-    ),
+  const response = await withRetry<GenerateContentResponse>(() =>
+    ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: prompt,
+      config: { responseMimeType: "application/json" },
+    }),
   );
   return {
     programs: safeParseJson(response.text)?.programs || currentPrograms,

@@ -32,8 +32,6 @@ import {
   Lock,
   Unlock,
   ShieldCheck,
-  MessageSquare,
-  X,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -54,7 +52,6 @@ interface Props {
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
   onUpdateLeaves?: (l: LeaveRequest[]) => void;
-  onUpdateManualAssignments?: (m: ManualAssignment[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -72,7 +69,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   onUpdatePrograms,
   onRestoreVersion,
   onUpdateLeaves,
-  onUpdateManualAssignments,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -82,7 +78,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
-  const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
+  const [unlockAbsences, setUnlockAbsences] = useState(false);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -190,12 +186,6 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const sortAssignments = (assignments: any[]) => {
     return [...assignments].sort((a, b) => {
-      if (a.manualSortIndex !== undefined && b.manualSortIndex !== undefined) {
-        return a.manualSortIndex - b.manualSortIndex;
-      }
-      if (a.manualSortIndex !== undefined) return -1;
-      if (b.manualSortIndex !== undefined) return 1;
-
       const stA = getStaff(a.staffId);
       const stB = getStaff(b.staffId);
       const score = (assig: any, st: any) => {
@@ -216,15 +206,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         if (st.isLabour) return 10;
         return 5;
       };
-      
-      const scoreDiff = score(a, stA) - score(b, stB);
-      if (scoreDiff !== 0) return scoreDiff;
-      
-      // Secondary sort alphabetically if scores match
-      if (stA && stB) {
-        return stA.initials.localeCompare(stB.initials);
-      }
-      return 0;
+      return score(a, stA) - score(b, stB);
     });
   };
 
@@ -555,10 +537,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         const assignments = sortAssignments(prog.assignments.filter(
           (a) => a.shiftId === shift.id,
         ));
-        const nonLabourCount = assignments.filter((a) => {
-          const st = getStaff(a.staffId);
-          return st && !st.isLabour && !st.isSecurity;
-        }).length;
+        const nonLabourCount = assignments.filter(
+          (a) => !getStaff(a.staffId)?.isLabour,
+        ).length;
         const flightStrs =
           (shift.flightIds || [])
             .map((fid) => {
@@ -604,6 +585,8 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
+                return true;
+              if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
                 return true;
               if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
                 return true;
@@ -967,6 +950,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && st.isOps) return true;
           if (roleCode === "LF" && st.isLostFound) return true;
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
+          if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
           if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
 
           return false;
@@ -983,6 +967,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const rmp = getStaffForRole("Ramp");
         const ops = getStaffForRole("Operations");
         const lf = getStaffForRole("Lost and Found");
+        const drv = getStaffForRole("Driver");
         const sec = getStaffForRole("Security");
         
         roleMatrixData.push([
@@ -993,6 +978,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           rmp,
           ops,
           lf,
+          drv,
           sec,
         ]);
         roleMatrixMeta.push({
@@ -1013,6 +999,10 @@ export const ProgramDisplay: React.FC<Props> = ({
           lfReq:
             (s.roleCounts?.["Lost and Found"] ||
               (s.roleCounts as any)?.["LF"] ||
+              0) > 0,
+          drvReq:
+            (s.roleCounts?.["Driver"] ||
+              (s.roleCounts as any)?.["DRV"] ||
               0) > 0,
           secReq:
             (s.roleCounts?.["Security"] ||
@@ -1174,73 +1164,24 @@ export const ProgramDisplay: React.FC<Props> = ({
         dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'left' };
         
-        const categories = {
-          "Day off": [] as string[],
-          "Annual": [] as string[],
-          "Lieu": [] as string[],
-          "Sick Leave": [] as string[]
-        };
-
-        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
-
-        offStaff.forEach(s => {
-          const leave = hasLeaveOnDate(s.id, prog.dateString!);
-          let isRosterOutOfContract = false;
-          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
-          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
-          
-          let mappedCat = "";
-          if (leave) {
-            if (leave.type === "Annual leave") mappedCat = "Annual";
-            else if (leave.type === "Roster leave") mappedCat = "Lieu";
-            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
-            else mappedCat = "Day off";
-          } else if (isRosterOutOfContract) {
-            mappedCat = "Lieu";
-          } else {
-            if (s.type === "Local") mappedCat = "Day off";
-          }
-
-          if (mappedCat === "Day off") {
-             mappedCat = "Day off";
-          }
-
-          if (mappedCat && (categories as any)[mappedCat]) {
-            (categories as any)[mappedCat].push(s.initials);
-          }
+        let absText = "";
+        const dayOffStaff = staff.filter(s => hasLeaveOnDate(s.id, prog.dateString!));
+        const dayOffText = dayOffStaff.map(s => s.initials).join(" - ");
+        const annStaff = staff.filter(s => {
+          const l = hasLeaveOnDate(s.id, prog.dateString!, true);
+          return l && l.type === "Annual leave";
         });
-
-        const absenceTextLines: string[] = [];
-        Object.entries(categories).forEach(([k, v]) => {
-           if (v.length > 0) {
-              const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
-           }
-        });
-        
-        const absText = absenceTextLines.length > 0 ? `[\n${absenceTextLines.join("\n")}\n]` : "";
+        const annText = annStaff.map(s => s.initials).join(" - ");
+        if (dayOffText) absText += `[ Day off: ${dayOffText} `;
+        if (annText) absText += `| Annual: ${annText} `;
+        if (absText) absText += `]`;
         
         const dayOffCell = sheet.getCell(`H${dayRow.number}`);
         dayOffCell.value = absText;
-        dayOffCell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
+        dayOffCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
         dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        dayOffCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-
-        // Auto-fit height estimation due to Excel merged cells limitation preventing auto-fit
-        if (absText.length > 0) {
-           let totalLines = 2; // For the brackets [ ]
-           absenceTextLines.forEach(line => {
-             totalLines += Math.max(1, Math.ceil(line.length / 45));
-           });
-           const requiredHeight = Math.max(30, totalLines * 15);
-           dayRow.height = requiredHeight;
-        } else {
-           dayRow.height = 20;
-        }
 
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
@@ -1253,7 +1194,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           assignments.forEach(a => {
              const s = getStaff(a.staffId);
              if (s) {
-                 const type = s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
+                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
                  staffTokens.push({ text: s.initials, type });
              }
           });
@@ -1301,6 +1242,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           staffTokens.forEach((t, i) => {
               let color = 'FF000000';
+              if (t.type === 'driver') color = 'FF15803D';
               if (t.type === 'labour') color = 'FFB91C1C';
               if (t.type === 'sec') color = 'FF7E22CE';
               
@@ -1311,7 +1253,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           const shiftNote = prog.notes?.[shift.id] || shift.description || "";
           if (shiftNote) {
               if (richText.length > 0) richText.push({ text: "\n" });
-              richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
+              richText.push({ text: shiftNote, font: { color: { argb: 'FF666666' }, italic: true } });
           }
           
           if (richText.length > 0) {
@@ -1371,6 +1313,9 @@ export const ProgramDisplay: React.FC<Props> = ({
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+        
         const categories = {
           "Day off": [] as string[],
           "Annual": [] as string[],
@@ -1378,9 +1323,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           "Sick Leave": [] as string[],
           "SSH Support": [] as string[]
         };
-
-        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
@@ -1443,6 +1385,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                  let type = "traffic";
                  if (s.isSecurity) type = "sec";
                  else if (s.isLabour) type = "labour";
+                 else if (s.isDriver) type = "driver";
                  return { text: s.initials, type };
              }).filter(Boolean) as {text: string, type: string}[];
              
@@ -1451,7 +1394,7 @@ export const ProgramDisplay: React.FC<Props> = ({
              const shiftNote = prog.notes?.[shift.id] || shift.description || "";
              if (shiftNote) {
                  if (pureInitials) pureInitials += `\n`;
-                 pureInitials += `${shiftNote}`;
+                 pureInitials += `(${shiftNote})`;
              }
              
              const flightIds = shift.flightIds || [];
@@ -1550,17 +1493,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                     cursorY += (lineHeight / 2);
                 }
                 
-                let reachedNoteRegion = false;
-                
                 for (let i = 0; i < lines.length; i++) {
                     let line = lines[i];
-                    
-                    const normalizedLine = line.replace(/[\s\(\)]/g, '');
-                    const normalizedNote = customNote ? customNote.replace(/[\s\(\)]/g, '') : '';
-                    if (normalizedLine.length > 0 && normalizedNote && normalizedNote.includes(normalizedLine)) {
-                        reachedNoteRegion = true;
-                    }
-
                     const textWidth = doc.getTextWidth(line);
                     let startX = data.cell.x + leftPadding;
                     if (data.cell.styles.halign === 'center') {
@@ -1574,23 +1508,29 @@ export const ProgramDisplay: React.FC<Props> = ({
                         if (!word) continue;
                         
                         let color = [0, 0, 0];
-                        let isBold = true;
                         
-                        if (reachedNoteRegion) {
-                            color = [255, 0, 0];
-                            isBold = true;
+                        const token = customInitials.find(t => t.text === word);
+                        if (token) {
+                            switch(token.type) {
+                                case 'driver': color = [21, 128, 61]; break; // Dark Green (green-700)
+                                case 'labour': color = [185, 28, 28]; break; // Dark Red (red-700)
+                                case 'sec': color = [126, 34, 206]; break; // Dark Purple (purple-700)
+                                default: color = [0, 0, 0]; break;
+                            }
+                            doc.setFont("helvetica", "bold");
                         } else {
-                            const token = customInitials.find(t => t.text === word);
-                            if (token) {
-                                switch(token.type) {
-                                    case 'labour': color = [185, 28, 28]; break; // Dark Red
-                                    case 'sec': color = [126, 34, 206]; break; // Dark Purple
-                                    default: color = [0, 0, 0]; break;
+                            if (customNote && customNote.includes(word) && word.trim() !== "-" && word.trim() !== "") {
+                                color = [100, 100, 100];
+                                doc.setFont("helvetica", "italic");
+                            } else {
+                                doc.setFont("helvetica", "bold");
+                                if (line.trim().startsWith("(")) {
+                                    color = [100, 100, 100];
+                                    doc.setFont("helvetica", "italic");
                                 }
                             }
                         }
                         
-                        doc.setFont("helvetica", isBold ? "bold" : "normal");
                         doc.setTextColor(color[0], color[1], color[2]);
                         doc.text(word, cursorX, cursorY, { baseline: 'middle' });
                         cursorX += doc.getTextWidth(word);
@@ -1624,28 +1564,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const handleUpdateNote = (
-    dateString: string,
-    targetId: string,
-    note: string
-  ) => {
-    if (!onUpdatePrograms) return;
-    const newPrograms = programs.map((p) => {
-      if (p.dateString === dateString) {
-        return {
-          ...p,
-          notes: {
-            ...(p.notes || {}),
-            [targetId]: note,
-          },
-        };
-      }
-      return p;
-    });
-
-    onUpdatePrograms(newPrograms);
-  };
-
   const handleDragStart = (
     e: React.DragEvent,
     staffId: string,
@@ -1654,7 +1572,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     role: string,
   ) => {
     e.dataTransfer.setData(
-      "text/plain",
+      "application/json",
       JSON.stringify({ staffId, currentShiftId, date, role }),
     );
     e.dataTransfer.effectAllowed = "move";
@@ -1665,188 +1583,20 @@ export const ProgramDisplay: React.FC<Props> = ({
     e.dataTransfer.dropEffect = "move";
   };
 
-  const executeMove = (
-    staffId: string,
-    currentShiftId: string,
-    date: string,
-    role: string,
-    targetShiftId: string,
-    targetDate: string,
+  const handleUpdateNote = (
+    dateString: string,
+    targetId: string,
+    note: string
   ) => {
-    const newPrograms = programs.map((p) => ({
-      ...p,
-      assignments: Array.isArray(p.assignments)
-        ? p.assignments.map((a) => ({ ...a }))
-        : [],
-    }));
+    if (!onUpdatePrograms) return;
+    const newPrograms = [...programs];
+    const prog = newPrograms.find((p) => p.dateString === dateString);
+    if (!prog) return;
 
-    let newLeaveRequests = leaveRequests ? [...leaveRequests] : [];
-    let newManualSettings = manualAssignments ? [...manualAssignments] : [];
+    if (!prog.notes) prog.notes = {};
+    prog.notes[targetId] = note;
 
-    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
-    const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
-    if (progIndex === -1 || sourceProgIndex === -1) return;
-
-    const prog = newPrograms[progIndex];
-    const sourceProg = newPrograms[sourceProgIndex];
-    const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
-    const st = staff.find((s) => s.id === staffId);
-    if (!st) return;
-
-    const ops = {
-      deleteLeaves: [] as string[],
-      upsertLeaves: [] as any[],
-    };
-
-    // --- REMOVAL FROM SOURCE ---
-    if (!currentShiftId.startsWith("ABSENCE")) {
-      if (currentShiftId === targetShiftId && date === targetDate) {
-        const existingIdx = prog.assignments.findIndex(
-          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-        );
-        if (existingIdx !== -1) {
-          const minSort = Math.min(
-            0,
-            ...prog.assignments.map((a) => a.manualSortIndex || 0),
-          );
-          prog.assignments[existingIdx] = {
-            ...prog.assignments[existingIdx],
-            manualSortIndex: minSort - 1,
-          };
-          onUpdatePrograms(newPrograms);
-        }
-        return;
-      }
-
-      const removeIdxs = sourceProg.assignments
-        .map((a, idx) => (a.staffId === staffId ? idx : -1))
-        .filter((idx) => idx !== -1)
-        .reverse();
-
-      removeIdxs.forEach((idx) => {
-        sourceProg.assignments.splice(idx, 1);
-      });
-
-      newManualSettings = newManualSettings.filter(
-        (ma) => !(ma.staffId === staffId && (ma.shiftId === currentShiftId || currentShiftId === "OFFDUTY")),
-      );
-    } else if (
-      currentShiftId.startsWith("ABSENCE_") &&
-      (targetShiftId !== currentShiftId || date !== targetDate)
-    ) {
-      const leavesToDelete = newLeaveRequests.filter(
-        (l) =>
-          l.staffId === staffId && l.startDate <= date && l.endDate >= date,
-      );
-      if (leavesToDelete.length > 0) {
-        leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
-        newLeaveRequests = newLeaveRequests.filter(
-          (l) => !leavesToDelete.includes(l),
-        );
-      }
-    }
-
-    // --- INSERTION INTO TARGET ---
-    if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
-      const leavesToDelete = newLeaveRequests.filter(
-        (l) => l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
-      );
-      leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
-      newLeaveRequests = newLeaveRequests.filter((l) => !leavesToDelete.includes(l));
-
-      const duplicateIdxs = prog.assignments
-        .map((a, idx) => (a.staffId === staffId && a.shiftId !== targetShiftId ? idx : -1))
-        .filter((idx) => idx !== -1)
-        .reverse();
-
-      duplicateIdxs.forEach((idx) => {
-        prog.assignments.splice(idx, 1);
-      });
-
-      const exists = prog.assignments.some(
-        (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-      );
-      if (!exists) {
-        const maxSort = Math.max(
-          0,
-          ...prog.assignments.map((a) => a.manualSortIndex || 0),
-        );
-        prog.assignments.push({
-          id: Math.random().toString(36).substring(2, 11),
-          staffId,
-          shiftId: targetShiftId,
-          flightId: "",
-          role: role || "OPS",
-          manualSortIndex: maxSort + 1,
-        });
-
-        const manualExists = newManualSettings.some(
-          (ma) => ma.staffId === staffId && ma.shiftId === targetShiftId
-        );
-        if (!manualExists) {
-          newManualSettings.push({
-            staffId,
-            shiftId: targetShiftId,
-            roles: [role || "OPS"],
-          });
-        }
-      }
-    } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
-      const cat = targetShiftId.replace("ABSENCE_", "");
-      let type: any = null;
-      if (cat === "ANNUAL LEAVE") type = "Annual leave";
-      else if (cat === "SICK LEAVE") type = "Sick leave";
-      else if (cat === "ROSTER LEAVE") type = "Roster leave";
-      else if (cat === "DAYS OFF") type = "Day off";
-      else if (cat === "STANDBY (RESERVE)") type = "Standby (Reserve)";
-
-      if (type === "Roster leave" && st.type === "Local") {
-        return;
-      }
-
-      if (type) {
-        const overlapping = newLeaveRequests.filter(
-          (l) =>
-            l.staffId === staffId &&
-            l.startDate <= targetDate &&
-            l.endDate >= targetDate,
-        );
-        overlapping.forEach((l) => ops.deleteLeaves.push(l.id));
-        newLeaveRequests = newLeaveRequests.filter(
-          (l) => !overlapping.includes(l),
-        );
-
-        const newLeaveId = Math.random().toString(36).substring(2, 11);
-        const req: any = {
-          id: newLeaveId,
-          staffId,
-          type,
-          startDate: targetDate,
-          endDate: targetDate,
-          status: "approved",
-          notes: "Assigned visually",
-          createdAt: new Date().toISOString(),
-        };
-
-        newLeaveRequests.push(req);
-        ops.upsertLeaves.push(req);
-      }
-    }
-
-    if (onUpdateLeaves) {
-      onUpdateLeaves(newLeaveRequests);
-    }
-    if (onUpdateManualAssignments) {
-      onUpdateManualAssignments(newManualSettings);
-    }
     onUpdatePrograms(newPrograms);
-
-    if (ops.deleteLeaves.length > 0) {
-      Promise.all(ops.deleteLeaves.map((id) => db.deleteLeave(id))).catch(console.error);
-    }
-    if (ops.upsertLeaves.length > 0) {
-      Promise.all(ops.upsertLeaves.map((req) => db.upsertLeave(req))).catch(console.error);
-    }
   };
 
   const handleDrop = (
@@ -1855,18 +1605,107 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetDate: string,
   ) => {
     e.preventDefault();
-    const data = e.dataTransfer.getData("text/plain");
+    const data = e.dataTransfer.getData("application/json");
     if (!data) return;
 
     try {
       const { staffId, currentShiftId, date, role } = JSON.parse(data);
-      executeMove(staffId, currentShiftId, date, role, targetShiftId, targetDate);
+      if (date !== targetDate) return;
+      const newPrograms = [...programs];
+      const prog = newPrograms.find((p) => p.dateString === targetDate);
+      if (!prog) return;
+
+      const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
+
+      if (!currentShiftId.startsWith("ABSENCE")) {
+        const staffObj = staff.find((s) => s.id === staffId);
+        const isDriver = staffObj?.isDriver;
+
+        // If dropped onto the same shift it was already in, move it to the front
+        if (currentShiftId === targetShiftId) {
+          const existingIdx = prog.assignments.findIndex(
+            (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+          );
+          if (existingIdx !== -1) {
+            const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+            prog.assignments[existingIdx].manualSortIndex = minSort - 1;
+            onUpdatePrograms(newPrograms);
+          }
+          return;
+        }
+
+        if (!isDriver || isTargetAbsence) {
+          const oldIdx = prog.assignments.findIndex(
+            (a) => a.staffId === staffId && a.shiftId === currentShiftId,
+          );
+          if (oldIdx !== -1) {
+            prog.assignments.splice(oldIdx, 1);
+          }
+        }
+      } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
+        // Dragging out of a leave category into either a working shift OR another leave category
+        const leavesToDelete = leaveRequests.filter(l => 
+          l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+        );
+        if (leavesToDelete.length > 0) {
+          Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
+             if (onUpdateLeaves) {
+                 const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
+                 onUpdateLeaves(remaining);
+             }
+          });
+        }
+      }
+      
+      if (!isTargetAbsence) {
+        const exists = prog.assignments.some(
+          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+        );
+        if (!exists) {
+          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          prog.assignments.push({
+            id: Math.random().toString(36).substr(2, 9),
+            staffId,
+            shiftId: targetShiftId,
+            flightId: "",
+            role: role || "OPS",
+            manualSortIndex: maxSort + 1
+          });
+        }
+      } else if (targetShiftId !== "ABSENCE") {
+        // Handle dropping into a specific absence category
+        const cat = targetShiftId.replace("ABSENCE_", "");
+        let type: any = null;
+        if (cat === "ANNUAL LEAVE") type = "Annual leave";
+        if (cat === "SICK LEAVE") type = "Sick leave";
+        if (cat === "ROSTER LEAVE") type = "Roster leave";
+        if (cat === "DAYS OFF") type = "Day off";
+        
+        if (type) {
+          const newLeaveId = Math.random().toString(36).substr(2, 9);
+          const req = {
+            id: newLeaveId,
+            staffId,
+            type,
+            startDate: targetDate,
+            endDate: targetDate,
+            notes: "Assigned visually",
+            createdAt: new Date().toISOString()
+          };
+          db.upsertLeave(req as any).then(() => {
+            if (onUpdateLeaves) {
+                // Remove previous overlapping leaves from same day to prevent duplicates
+                const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
+                onUpdateLeaves([...prevLeaves, req as any]);
+            }
+          });
+        }
+      }
+      onUpdatePrograms(newPrograms);
     } catch (err) {
       console.error("Drop failed", err);
     }
   };
-
-
 
   const staffStats = React.useMemo(() => {
     const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
@@ -2723,8 +2562,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                         categories["ROSTER LEAVE"].push(item);
                       else if (leave.type === "Sick leave")
                         categories["SICK LEAVE"].push(item);
-                      else if (leave.type === "Standby (Reserve)")
-                        categories["STANDBY (RESERVE)"].push(item);
                       else categories["DAYS OFF"].push(item);
                     } else if (isRosterOutOfContract) {
                       categories["ROSTER LEAVE"].push(item);
@@ -2855,10 +2692,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     .map((fid) => getFlight(fid)?.flightNumber)
                                     .filter(Boolean)
                                     .join(" / ") || "NIL";
-                                const nonLabourCount = assignments.filter((a) => {
-                                  const st = getStaff(a.staffId);
-                                  return st && !st.isLabour && !st.isSecurity;
-                                }).length;
+                                const nonLabourCount = assignments.filter(
+                                  (a) => !getStaff(a.staffId)?.isLabour,
+                                ).length;
                                 const isFull = nonLabourCount >= shift.maxStaff;
                                 const isOver = nonLabourCount > shift.maxStaff;
 
@@ -3053,29 +2889,50 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             return (
                                               <div
                                                 key={a.id}
-                                                draggable={true}
+                                                draggable={
+                                                  !(
+                                                    manualAssignments &&
+                                                    manualAssignments.some(
+                                                      (ma) =>
+                                                        ma.staffId === st.id &&
+                                                        ma.shiftId === shift.id,
+                                                    )
+                                                  )
+                                                }
                                                 onDragStart={(e) => {
-                                                  e.stopPropagation();
+                                                  if (
+                                                    manualAssignments &&
+                                                    manualAssignments.some(
+                                                      (ma) =>
+                                                        ma.staffId === st.id &&
+                                                        ma.shiftId === shift.id,
+                                                    )
+                                                  ) {
+                                                    e.preventDefault();
+                                                    return;
+                                                  }
                                                   handleDragStart(
                                                     e,
                                                     st.id,
                                                     shift.id,
                                                     prog.dateString!,
-                                                    a.role || (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ" ? "SL" :
-                                                    st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ" ? "LC" :
-                                                    st.isRamp ? "RMP" :
-                                                    st.isLostFound ? "LF" :
-                                                    st.isLabour ? "LBR" :
-                                                    st.isSecurity ? "SEC" :
-                                                    "OPS")
+                                                    a.role,
                                                   );
                                                 }}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-transform flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2" : ""}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
+                                                {manualAssignments &&
+                                                manualAssignments.some(
+                                                  (ma) =>
+                                                    ma.staffId === st.id &&
+                                                    ma.shiftId === shift.id,
+                                                ) ? (
+                                                  <Lock
+                                                    size={8}
+                                                    className="text-slate-500 opacity-70 -ml-0.5"
+                                                  />
+                                                ) : null}
                                                 {rest !== null &&
                                                   rest < minRestHours && (
                                                     <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">
@@ -3190,19 +3047,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           </div>
                                         )}
                                         
-                                        <div className="mt-1 flex flex-col gap-1">
-                                          <button 
-                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
-                                              className="w-full flex items-center justify-center gap-1.5 text-[10px] p-1.5 bg-slate-50 border border-slate-200 border-dashed rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-colors font-semibold"
-                                          >
-                                              <MessageSquare size={12} />
-                                              {prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
-                                          </button>
-                                          {prog.notes?.[shift.id] && (
-                                              <div className="text-[10px] text-red-600 font-bold p-1.5 bg-red-50 border border-red-100 rounded break-words whitespace-pre-wrap">
-                                                  <strong>Note: </strong> {prog.notes[shift.id]}
-                                              </div>
-                                          )}
+                                        <div className="mt-1">
+                                          <input 
+                                              type="text"
+                                              placeholder="Shift note..."
+                                              value={prog.notes?.[shift.id] || ''}
+                                              onChange={(e) => handleUpdateNote(prog.dateString!, shift.id, e.target.value)}
+                                              className="w-full text-[10px] p-1 bg-white border border-slate-200 rounded text-slate-700 outline-none focus:border-indigo-400 placeholder:text-slate-300 transition-colors"
+                                          />
                                         </div>
                                       </div>
                                     </td>
@@ -3215,20 +3067,27 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
+                        className="border-t-4 border-slate-100"
                         onDragOver={handleDragOver}
                         onDrop={(e) =>
-                          handleDrop(e, "ABSENCE_DAYS OFF", prog.dateString!)
+                          handleDrop(e, "ABSENCE", prog.dateString!)
                         }
-                        className={`border-t-4 border-slate-100 transition-colors`}
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                           <div className="flex items-center gap-2">
                             <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
                               Absence and Rest Registry
                             </h4>
+                            <button
+                              onClick={() => setUnlockAbsences(!unlockAbsences)}
+                              className={`p-1 rounded ${unlockAbsences ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-500"} hover:opacity-80 transition-all`}
+                              title={unlockAbsences ? "Lock absences" : "Unlock absences to reassign"}
+                            >
+                              {unlockAbsences ? <Unlock size={12} /> : <Lock size={12} />}
+                            </button>
                           </div>
                           <span className="text-[9px] font-bold text-slate-400 italic">
-                            Drag or tap here to unassign
+                            Drag here to unassign
                           </span>
                         </div>
                         <table className="w-full text-left border-collapse">
@@ -3254,11 +3113,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
-                                  onDragOver={handleDragOver}
-                                  onDrop={(e) =>
-                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!)
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                  }}
+                                  onDrop={(e) => {
+                                    e.stopPropagation();
+                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
+                                  }}
+                                  className={
+                                    isCatModified
+                                      ? "bg-indigo-50/70 border-l-4 border-indigo-400"
+                                      : ""
                                   }
-                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
                                     {cat}
@@ -3280,11 +3146,21 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             daysWorked,
                                             null,
                                           );
+                                          const isLocked =
+                                            !unlockAbsences && (
+                                              cat === "ROSTER LEAVE" ||
+                                              cat === "ANNUAL LEAVE" ||
+                                              isRequestedDayOff
+                                            );
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
-                                                draggable={true}
+                                                draggable={!isLocked}
                                                 onDragStart={(e) => {
+                                                  if (isLocked) {
+                                                    e.preventDefault();
+                                                    return;
+                                                  }
                                                   handleDragStart(
                                                     e,
                                                     s.id,
@@ -3296,12 +3172,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     s.isLostFound ? "LF" :
                                                     s.isLabour ? "LBR" :
                                                     s.isSecurity ? "SEC" :
+                                                    s.isDriver ? "DRV" :
                                                     "OPS"
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-transform flex items-center gap-1 group ${colorClass}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{s.initials}</span>
+                                                {isLocked ? (
+                                                  <Lock
+                                                    size={8}
+                                                    className="opacity-70 ml-0.5"
+                                                  />
+                                                ) : null}
                                               </div>
                                             </React.Fragment>
                                           );
@@ -3325,45 +3208,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                 })}
             </>
           )}
-        </div>
-      )}
-
-      {noteModal && (
-        <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-            <div className="bg-indigo-600 p-4 flex items-center justify-between">
-              <h3 className="font-black italic uppercase tracking-widest text-white leading-none flex items-center gap-2">
-                <MessageSquare size={16} />
-                Shift Note
-              </h3>
-            </div>
-            <div className="p-5">
-              <textarea
-                autoFocus
-                className="w-full text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 placeholder:text-slate-300 transition-all resize-none h-32"
-                placeholder="Enter shift note here..."
-                value={noteModal.currentNote}
-                onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
-              />
-            </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 justify-end">
-              <button
-                onClick={() => setNoteModal(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl font-bold transition-colors text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  handleUpdateNote(noteModal.dateString, noteModal.shiftId, noteModal.currentNote);
-                  setNoteModal(null);
-                }}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm"
-              >
-                Save Note
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

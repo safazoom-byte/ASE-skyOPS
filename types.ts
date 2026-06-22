@@ -5,7 +5,8 @@ export type Skill =
   | "Shift Leader"
   | "Operations"
   | "Labour"
-  | "Security";
+  | "Security"
+  | "Driver";
 export type ProficiencyLevel = "Yes" | "No";
 export type StaffCategory = "Local" | "Roster";
 export type WorkPattern = string;
@@ -15,7 +16,6 @@ export type LeaveType =
   | "Lieu leave"
   | "Sick leave"
   | "Roster leave"
-  | "Standby (Reserve)"
   | "NIL";
 
 export interface Flight {
@@ -46,6 +46,7 @@ export interface Staff {
   isLostFound: boolean;
   isLabour: boolean;
   isSecurity: boolean;
+  isDriver: boolean;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;
   workFromDate?: string;

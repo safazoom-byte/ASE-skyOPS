@@ -2,8 +2,6 @@ import React, { useState, useMemo, useEffect } from "react";
 import { ShiftConfig, Flight, Skill, Staff, LeaveRequest } from "../types";
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from "../constants";
 import * as XLSX from "xlsx";
-import { FlightModalDialog } from "./FlightModalDialog";
-import { ErrorBoundary } from "./ErrorBoundary";
 import {
   Clock,
   Trash2,
@@ -50,9 +48,6 @@ interface Props {
   onUpdate: (s: ShiftConfig) => void;
   onDelete: (id: string) => void;
   onOpenScanner?: () => void;
-  onAddFlight?: (f: Flight) => void;
-  onUpdateFlight?: (f: Flight) => void;
-  onDeleteFlight?: (id: string) => void;
 }
 
 export const ShiftManager: React.FC<Props> = ({
@@ -66,9 +61,6 @@ export const ShiftManager: React.FC<Props> = ({
   onUpdate,
   onDelete,
   onOpenScanner,
-  onAddFlight,
-  onUpdateFlight,
-  onDeleteFlight,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
@@ -104,68 +96,6 @@ export const ShiftManager: React.FC<Props> = ({
   }
 
   const [showBulkModal, setShowBulkModal] = useState(false);
-
-  const [flightModal, setFlightModal] = useState<{
-    shiftId: string;
-    flightId?: string;
-    isNew?: boolean;
-  } | null>(null);
-
-  const [selectedFlightInfo, setSelectedFlightInfo] = useState<{
-    sourceShiftId: string;
-    flightId: string;
-  } | null>(null);
-
-  const handleDragStart = (e: React.DragEvent, sourceShiftId: string, flightId: string) => {
-    e.dataTransfer.setData("application/json", JSON.stringify({ sourceShiftId, flightId }));
-  };
-
-  const executeFlightMove = (sourceShiftId: string, flightId: string, targetShiftId: string) => {
-    if (sourceShiftId === targetShiftId) {
-      setSelectedFlightInfo(null);
-      return;
-    }
-
-    const sourceShift = shifts.find(s => s.id === sourceShiftId);
-    const targetShift = shifts.find(s => s.id === targetShiftId);
-    if (!sourceShift || !targetShift) return;
-
-    const newSourceFlights = (sourceShift.flightIds || []).filter(f => f !== flightId);
-    const newTargetFlights = [...(targetShift.flightIds || []), flightId];
-    // make it unique
-    const uniqueTargetFlights = Array.from(new Set(newTargetFlights));
-    onUpdate({ ...sourceShift, flightIds: newSourceFlights });
-    onUpdate({ ...targetShift, flightIds: uniqueTargetFlights });
-    setSelectedFlightInfo(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetShiftId: string) => {
-    e.preventDefault();
-    try {
-      const dataStr = e.dataTransfer.getData("application/json");
-      if (!dataStr) return;
-      const { sourceShiftId, flightId } = JSON.parse(dataStr);
-      executeFlightMove(sourceShiftId, flightId, targetShiftId);
-    } catch(err) {}
-  };
-
-  const handleTargetContainerTap = (targetShiftId: string) => {
-    if (!selectedFlightInfo) return;
-    executeFlightMove(selectedFlightInfo.sourceShiftId, selectedFlightInfo.flightId, targetShiftId);
-  };
-
-  const handleFlightTap = (e: React.MouseEvent, sourceShiftId: string, flightId: string) => {
-    e.stopPropagation();
-    if (selectedFlightInfo?.flightId === flightId && selectedFlightInfo?.sourceShiftId === sourceShiftId) {
-      setSelectedFlightInfo(null);
-    } else {
-      setSelectedFlightInfo({ sourceShiftId, flightId });
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
 
   // Weekly State
   const [bulkStartDate, setBulkStartDate] = useState(
@@ -420,6 +350,8 @@ export const ShiftManager: React.FC<Props> = ({
         return <Search size={16} />;
       case "Labour":
         return <Users size={16} />;
+      case "Driver":
+        return <Truck size={16} />;
       case "Security":
         return <Shield size={16} />;
       default:
@@ -441,6 +373,8 @@ export const ShiftManager: React.FC<Props> = ({
         return "LF";
       case "Labour":
         return "LBR";
+      case "Driver":
+        return "DRV";
       case "Security":
         return "SEC";
       default:
@@ -574,6 +508,69 @@ export const ShiftManager: React.FC<Props> = ({
       });
     return groups;
   }, [filteredShifts]);
+
+  const duplicateLastWeek = () => {
+    if (!startDate) return;
+
+    const sourceStartStr = window.prompt(
+      "Enter origin start date (YYYY-MM-DD):",
+      new Date(new Date(startDate).getTime() - 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0],
+    );
+    if (!sourceStartStr) return;
+    const sourceEndStr = window.prompt(
+      "Enter origin end date (YYYY-MM-DD):",
+      new Date(new Date(sourceStartStr).getTime() + 6 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0],
+    );
+    if (!sourceEndStr) return;
+    const targetStartStr = window.prompt(
+      "Enter target start date to paste (YYYY-MM-DD):",
+      startDate,
+    );
+    if (!targetStartStr) return;
+
+    const sourceStart = new Date(sourceStartStr);
+    const sourceEnd = new Date(sourceEndStr);
+    const targetStart = new Date(targetStartStr);
+    const diffDays = Math.round(
+      (targetStart.getTime() - sourceStart.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    const toDuplicate = shifts.filter((s) => {
+      const d = new Date(s.pickupDate);
+      return d >= sourceStart && d <= sourceEnd;
+    });
+
+    if (toDuplicate.length === 0) {
+      alert("No shifts found in the origin period to duplicate.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Found ${toDuplicate.length} shifts to duplicate. Proceed?`,
+      )
+    )
+      return;
+
+    toDuplicate.forEach((s) => {
+      const pd = new Date(s.pickupDate);
+      pd.setUTCDate(pd.getUTCDate() + diffDays);
+      const ed = s.endDate ? new Date(s.endDate) : new Date(s.pickupDate);
+      ed.setUTCDate(ed.getUTCDate() + diffDays);
+
+      onAdd({
+        ...s,
+        id: Math.random().toString(36).substr(2, 9),
+        pickupDate: pd.toISOString().split("T")[0],
+        endDate: ed.toISOString().split("T")[0],
+        day: getDayOffset(pd.toISOString().split("T")[0]),
+      });
+    });
+  };
 
   const durationText = calculateDuration();
 
@@ -1037,10 +1034,6 @@ export const ShiftManager: React.FC<Props> = ({
                   )
                     return;
 
-                  const doFlights = window.confirm(
-                    "Also duplicate connected flights from these shifts?"
-                  );
-
                   toDuplicate.forEach((s) => {
                     const pd = new Date(s.pickupDate);
                     pd.setUTCDate(pd.getUTCDate() + diffDays);
@@ -1049,34 +1042,12 @@ export const ShiftManager: React.FC<Props> = ({
                       : new Date(s.pickupDate);
                     ed.setUTCDate(ed.getUTCDate() + diffDays);
 
-                    let newFlightIds = s.flightIds ? [...s.flightIds] : [];
-
-                    if (doFlights && s.flightIds && s.flightIds.length > 0 && onAddFlight) {
-                      newFlightIds = s.flightIds.map(fid => {
-                        const existingFlight = flights.find(f => f.id === fid);
-                        if (!existingFlight) return fid;
-                        const newId = Math.random().toString(36).substr(2,9);
-                        const fd = new Date(existingFlight.date);
-                        fd.setUTCDate(fd.getUTCDate() + diffDays);
-                        
-                        onAddFlight({
-                          ...existingFlight,
-                          id: newId,
-                          date: fd.toISOString().split("T")[0],
-                          day: getDayOffset(fd.toISOString().split("T")[0])
-                        });
-
-                        return newId;
-                      });
-                    }
-
                     onAdd({
                       ...s,
                       id: Math.random().toString(36).substr(2, 9),
                       pickupDate: pd.toISOString().split("T")[0],
                       endDate: ed.toISOString().split("T")[0],
                       day: getDayOffset(pd.toISOString().split("T")[0]),
-                      flightIds: newFlightIds
                     });
                   });
                 }}
@@ -1315,40 +1286,25 @@ export const ShiftManager: React.FC<Props> = ({
                                       ))}
                                     </div>
                                   </td>
-                                  <td 
-                                    className="px-4 py-2"
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) => handleDrop(e, s.id)}
-                                  >
-                                    <div className="flex flex-wrap items-center gap-1 max-w-[150px] min-h-[30px] p-1 bg-slate-50 border border-transparent hover:border-slate-200 rounded-md transition-colors w-full">
+                                  <td className="px-4 py-2">
+                                    <div className="flex flex-wrap gap-0.5 max-w-[120px]">
                                       {s.flightIds && s.flightIds.length > 0 ? (
                                         s.flightIds.map((fid) => {
                                           const flight = getFlightById(fid);
                                           return flight ? (
                                             <span
                                               key={fid}
-                                              draggable
-                                              onDragStart={(e) => handleDragStart(e, s.id, fid)}
-                                              onClick={() => setFlightModal({ shiftId: s.id, flightId: fid, isNew: false })}
-                                              className="text-[9px] font-bold text-blue-600 bg-blue-100/50 hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform"
-                                              title="Click to edit/split/delete, drag to move"
+                                              className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1 rounded"
                                             >
                                               {flight.flightNumber}
                                             </span>
                                           ) : null;
                                         })
                                       ) : (
-                                        <span className="text-[10px] text-slate-300 pointer-events-none select-none">
-                                          Drag flights here
+                                        <span className="text-[10px] text-slate-300">
+                                          -
                                         </span>
                                       )}
-                                      <button 
-                                        onClick={() => setFlightModal({ shiftId: s.id, isNew: true })}
-                                        className="w-5 h-5 flex items-center justify-center rounded bg-slate-100 hover:bg-indigo-100 text-slate-400 hover:text-indigo-600 transition-colors shrink-0"
-                                        title="Add Flight"
-                                      >
-                                        <Plus size={12} />
-                                      </button>
                                     </div>
                                   </td>
                                   <td className="px-4 py-2 text-center">
@@ -1375,12 +1331,6 @@ export const ShiftManager: React.FC<Props> = ({
           </div>
         </div>
       </div>
-
-      {flightModal && (
-        <ErrorBoundary>
-          <FlightModalDialog flightModal={flightModal} setFlightModal={setFlightModal} shifts={shifts} flights={flights} onAddFlight={onAddFlight} onUpdateFlight={onUpdateFlight} onDeleteFlight={onDeleteFlight} onUpdate={onUpdate} />
-        </ErrorBoundary>
-      )}
 
       {/* BULK SHIFT CREATOR MODAL */}
       {showBulkModal && (

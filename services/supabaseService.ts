@@ -126,6 +126,7 @@ export const db = {
             isLostFound: !!s.is_lost_found,
             isLabour: !!s.is_labour,
             isSecurity: !!s.is_security,
+            isDriver: !!s.is_driver,
             powerRate: s.power_rate || 75,
             maxShiftsPerWeek: s.max_shifts_per_week || 5,
             workFromDate: s.work_from_date,
@@ -145,24 +146,12 @@ export const db = {
           roleCounts: s.role_counts || {},
           flightIds: s.flight_ids || [],
         })),
-        programs: (pRes.data || []).map((p: any) => {
-          const rawOffDuty = p.off_duty || [];
-          const notesHacks = rawOffDuty.filter((od: any) => od.staffId === "NOTES_HACK");
-          const actualOffDuty = rawOffDuty.filter((od: any) => od.staffId !== "NOTES_HACK");
-          
-          let notes = p.notes || {};
-          if (notesHacks.length > 0) {
-             notes = notesHacks[0].data || notes;
-          }
-
-          return {
-            day: p.day,
-            dateString: p.date_string,
-            assignments: p.assignments || [],
-            offDuty: actualOffDuty,
-            notes: notes,
-          };
-        }),
+        programs: (pRes.data || []).map((p: any) => ({
+          day: p.day,
+          dateString: p.date_string,
+          assignments: p.assignments || [],
+          offDuty: p.off_duty || [],
+        })),
         leaveRequests: (lRes.data || []).map((l: any) => ({
           id: l.id,
           staffId: l.staff_id,
@@ -224,6 +213,7 @@ export const db = {
       is_lost_found: s.isLostFound,
       is_labour: s.isLabour,
       is_security: s.isSecurity,
+      is_driver: s.isDriver,
       power_rate: s.powerRate,
       max_shifts_per_week: s.maxShiftsPerWeek,
       work_from_date: s.workFromDate || null,
@@ -330,20 +320,13 @@ export const db = {
     }
 
     await client.from("programs").insert(
-      programs.map((p) => {
-        const offDutyToSave = [
-            ...(p.offDuty || []),
-            { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} }
-        ];
-
-        return {
-          user_id: session.user.id,
-          day: p.day,
-          date_string: p.dateString || "",
-          assignments: p.assignments || [],
-          off_duty: offDutyToSave,
-        };
-      }),
+      programs.map((p) => ({
+        user_id: session.user.id,
+        day: p.day,
+        date_string: p.dateString || "",
+        assignments: p.assignments || [],
+        off_duty: p.offDuty || [],
+      })),
     );
   },
 

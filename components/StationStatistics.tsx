@@ -47,6 +47,7 @@ export const StationStatistics: React.FC<Props> = ({
     if (skill === "Lost and Found") return s.isLostFound;
     if (skill === "Labour") return s.isLabour;
     if (skill === "Security") return s.isSecurity;
+    if (skill === "Driver") return s.isDriver;
     return false;
   };
 
@@ -59,7 +60,7 @@ export const StationStatistics: React.FC<Props> = ({
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
     // EXCLUDE specific roles from station statistics:
-    const filteredStaff = staff.filter(s => !(s.isLabour || s.isSecurity));
+    const filteredStaff = staff.filter(s => !(s.isDriver || s.isLabour || s.isSecurity));
 
     const totalLocal = filteredStaff.filter((s) => s.type === "Local").length;
     const activeStaff: Staff[] = [];
@@ -170,6 +171,7 @@ export const StationStatistics: React.FC<Props> = ({
         "Lost and Found": 0,
         Labour: 0,
         Security: 0,
+        Driver: 0,
       };
 
       AVAILABLE_SKILLS.forEach((skill) => {
