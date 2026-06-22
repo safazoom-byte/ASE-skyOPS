@@ -460,18 +460,31 @@ export const generateAIProgram = async (
 
           // 6. Check Specific Role Skill (if requested)
           if (roleKey) {
-            if (roleKey === "LC" && !s.isLoadControl) return false;
-            if (roleKey === "SL" && !s.isShiftLeader) return false;
-            if (roleKey === "RMP" && !s.isRamp) return false;
-            if (roleKey === "OPS" && !s.isOps) return false;
-            if (roleKey === "LF" && !s.isLostFound) return false;
-            if (roleKey === "LBR" && !s.isLabour) return false;
+            const isLCKey = roleKey === "LC" || roleKey === "Load Control";
+            const isSLKey = roleKey === "SL" || roleKey === "Shift Leader";
+            const isRMPKey = roleKey === "RMP" || roleKey === "Ramp";
+            const isOPSKey = roleKey === "OPS" || roleKey === "Operations";
+            const isLFKey = roleKey === "LF" || roleKey === "Lost and Found";
+            const isLBRKey = roleKey === "LBR" || roleKey === "Labour";
+            const isSECKey = roleKey === "SEC" || roleKey === "Security";
+            const isDRVKey = roleKey === "DRV" || roleKey === "Driver";
 
-            // Labour shouldn't fulfill anything else
-            if (roleKey !== "LBR" && s.isLabour) return false;
+            if (isLCKey && !(s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ")) return false;
+            if (isSLKey && !(s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ")) return false;
+            if (isRMPKey && !s.isRamp) return false;
+            if (isOPSKey && !s.isOps) return false;
+            if (isLFKey && !s.isLostFound) return false;
+            if (isLBRKey && !s.isLabour) return false;
+            if (isSECKey && !s.isSecurity) return false;
+            if (isDRVKey && !s.isDriver) return false;
+
+            // Highly restricted roles shouldn't fulfill general or different skill slots
+            if (!isLBRKey && s.isLabour) return false;
+            if (!isSECKey && s.isSecurity) return false;
+            if (!isDRVKey && s.isDriver) return false;
           } else {
-            // Labour shouldn't be assigned to general staff slots
-            if (s.isLabour) return false;
+            // General slots - strictly exclude Labour, Security, and Driver
+            if (s.isLabour || s.isDriver || s.isSecurity) return false;
           }
 
           return true;
@@ -543,6 +556,8 @@ export const generateAIProgram = async (
           if (role === "Operations") roleKey = "OPS";
           if (role === "Lost and Found") roleKey = "LF";
           if (role === "Labour") roleKey = "LBR";
+          if (role === "Security") roleKey = "SEC";
+          if (role === "Driver") roleKey = "DRV";
 
           for (let i = 0; i < count; i++) {
             // Check if someone ALREADY on this shift can fulfill this role
@@ -558,6 +573,8 @@ export const generateAIProgram = async (
               if (roleKey === "OPS" && !st.isOps) return false;
               if (roleKey === "LF" && !st.isLostFound) return false;
               if (roleKey === "LBR" && !st.isLabour) return false;
+              if (roleKey === "SEC" && !st.isSecurity) return false;
+              if (roleKey === "DRV" && !st.isDriver) return false;
 
               if (
                 a.role === roleKey ||
@@ -572,6 +589,8 @@ export const generateAIProgram = async (
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if (roleKey === "LBR" && st.isLabour) return true;
+              if (roleKey === "SEC" && st.isSecurity) return true;
+              if (roleKey === "DRV" && st.isDriver) return true;
               return false;
             }).length;
 

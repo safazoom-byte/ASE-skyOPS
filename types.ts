@@ -38,6 +38,7 @@ export interface Staff {
   initials: string;
   type: StaffCategory;
   workPattern: WorkPattern;
+  isActive?: boolean;
   // Flattened for direct DB/Excel mapping
   isRamp: boolean;
   isShiftLeader: boolean;

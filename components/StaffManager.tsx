@@ -17,6 +17,7 @@ import {
   CalendarRange,
   Zap,
   Search,
+  Power,
 } from "lucide-react";
 
 interface Props {
@@ -147,6 +148,7 @@ export const StaffManager: React.FC<Props> = ({
       initials,
       type: (newStaff.type as StaffCategory) || "Local",
       workPattern: isRoster ? "Continuous (Roster)" : "5 Days On / 2 Off",
+      isActive: true,
       powerRate: Number(newStaff.powerRate) || 75,
       isRamp: !!newStaff.isRamp,
       isShiftLeader: !!newStaff.isShiftLeader,
@@ -539,10 +541,10 @@ export const StaffManager: React.FC<Props> = ({
               return (
                 <div
                   key={member.id}
-                  className="bg-white rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 p-0 group hover:shadow-xl transition-all relative overflow-hidden flex flex-col"
+                  className={`bg-white rounded-3xl md:rounded-[4rem] shadow-sm border p-0 group hover:shadow-xl transition-all relative overflow-hidden flex flex-col ${member.isActive === false ? "opacity-60 bg-slate-50 border-slate-200" : "border-slate-100"}`}
                 >
                   <div
-                    className={`h-20 md:h-24 px-6 md:px-8 flex items-center justify-between ${isRoster ? "bg-amber-500/10" : "bg-blue-600/5"}`}
+                    className={`h-20 md:h-24 px-6 md:px-8 flex items-center justify-between ${member.isActive === false ? "bg-slate-200/40" : isRoster ? "bg-amber-500/10" : "bg-blue-600/5"}`}
                   >
                     <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
                       <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-xl md:rounded-2xl flex items-center justify-center shadow-sm text-slate-950 font-black italic text-lg md:text-xl border border-slate-100 shrink-0">
@@ -553,9 +555,9 @@ export const StaffManager: React.FC<Props> = ({
                           {member.name}
                         </h5>
                         <span
-                          className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${isRoster ? "text-amber-600" : "text-blue-600"}`}
+                          className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${member.isActive === false ? "text-rose-500" : isRoster ? "text-amber-600" : "text-blue-600"}`}
                         >
-                          {member.type} AGENT
+                          {member.isActive === false ? "DEACTIVATED" : `${member.type} AGENT`}
                         </span>
                       </div>
                     </div>
@@ -657,6 +659,18 @@ export const StaffManager: React.FC<Props> = ({
                         className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-2xl font-black uppercase text-[8px] md:text-[9px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all"
                       >
                         <Edit2 size={12} /> REFINE
+                      </button>
+                      <button
+                        onClick={() => {
+                          onUpdate({
+                            ...member,
+                            isActive: member.isActive === false ? true : false,
+                          });
+                        }}
+                        className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center transition-all shrink-0 ${member.isActive === false ? "bg-emerald-100 text-emerald-600 hover:bg-emerald-500 hover:text-white" : "bg-slate-100 text-slate-500 hover:bg-red-500 hover:text-white"}`}
+                        title={member.isActive === false ? "Activate member" : "Deactivate member"}
+                      >
+                        <Power size={16} />
                       </button>
                       <button
                         onClick={() => {
@@ -998,6 +1012,22 @@ export const StaffManager: React.FC<Props> = ({
                     value={editingStaff.powerRate}
                     onChange={(e) => handleInputChange(e, true)}
                   />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                  Roster Status
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingStaff({ ...editingStaff, isActive: editingStaff.isActive !== false ? false : true })}
+                    className={`px-5 py-4 border rounded-2xl flex-1 font-black text-xs flex items-center justify-center gap-2 transition-all ${editingStaff.isActive !== false ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"}`}
+                  >
+                    <Power size={14} />
+                    {editingStaff.isActive !== false ? "ACTIVE ON ROSTER" : "DEACTIVATED"}
+                  </button>
                 </div>
               </div>
 

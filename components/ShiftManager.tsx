@@ -116,8 +116,17 @@ export const ShiftManager: React.FC<Props> = ({
     flightId: string;
   } | null>(null);
 
+  const [draggingFlight, setDraggingFlight] = useState<{ sourceShiftId: string; flightId: string } | null>(null);
+  const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
+
   const handleDragStart = (e: React.DragEvent, sourceShiftId: string, flightId: string) => {
     e.dataTransfer.setData("application/json", JSON.stringify({ sourceShiftId, flightId }));
+    setDraggingFlight({ sourceShiftId, flightId });
+  };
+
+  const handleDragEnd = () => {
+    setDraggingFlight(null);
+    setDragOverShiftId(null);
   };
 
   const executeFlightMove = (sourceShiftId: string, flightId: string, targetShiftId: string) => {
@@ -141,12 +150,23 @@ export const ShiftManager: React.FC<Props> = ({
 
   const handleDrop = (e: React.DragEvent, targetShiftId: string) => {
     e.preventDefault();
+    setDraggingFlight(null);
+    setDragOverShiftId(null);
     try {
       const dataStr = e.dataTransfer.getData("application/json");
       if (!dataStr) return;
       const { sourceShiftId, flightId } = JSON.parse(dataStr);
       executeFlightMove(sourceShiftId, flightId, targetShiftId);
     } catch(err) {}
+  };
+
+  const handleDragEnter = (e: React.DragEvent, targetShiftId: string) => {
+    e.preventDefault();
+    setDragOverShiftId(targetShiftId);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
   };
 
   const handleTargetContainerTap = (targetShiftId: string) => {
@@ -1322,9 +1342,19 @@ export const ShiftManager: React.FC<Props> = ({
                                   <td 
                                     className="px-4 py-2"
                                     onDragOver={handleDragOver}
+                                    onDragEnter={(e) => handleDragEnter(e, s.id)}
+                                    onDragLeave={handleDragLeave}
                                     onDrop={(e) => handleDrop(e, s.id)}
                                   >
-                                    <div className="flex flex-wrap items-center gap-1 max-w-[150px] min-h-[30px] p-1 bg-slate-50 border border-transparent hover:border-slate-200 rounded-md transition-colors w-full">
+                                    <div 
+                                      className={`flex flex-wrap items-center gap-1 max-w-[150px] min-h-[36px] p-1 rounded-md transition-all duration-200 w-full ${
+                                        dragOverShiftId === s.id
+                                          ? "bg-emerald-50 border-2 border-emerald-500 scale-[1.03] shadow-md ring-4 ring-emerald-100"
+                                          : draggingFlight
+                                          ? "bg-indigo-50/40 border-2 border-dashed border-indigo-300 animate-pulse"
+                                          : "bg-slate-50 border border-slate-200 hover:border-slate-400"
+                                      }`}
+                                    >
                                       {s.flightIds && s.flightIds.length > 0 ? (
                                         s.flightIds.map((fid) => {
                                           const flight = getFlightById(fid);
@@ -1333,8 +1363,13 @@ export const ShiftManager: React.FC<Props> = ({
                                               key={fid}
                                               draggable
                                               onDragStart={(e) => handleDragStart(e, s.id, fid)}
+                                              onDragEnd={handleDragEnd}
                                               onClick={() => setFlightModal({ shiftId: s.id, flightId: fid, isNew: false })}
-                                              className="text-[9px] font-bold text-blue-600 bg-blue-100/50 hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform"
+                                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform ${
+                                                draggingFlight?.flightId === fid
+                                                  ? "bg-indigo-600 text-white scale-95 opacity-50"
+                                                  : "text-blue-600 bg-blue-100/50 hover:bg-blue-100 border border-blue-200"
+                                              }`}
                                               title="Click to edit/split/delete, drag to move"
                                             >
                                               {flight.flightNumber}
@@ -1342,8 +1377,8 @@ export const ShiftManager: React.FC<Props> = ({
                                           ) : null;
                                         })
                                       ) : (
-                                        <span className="text-[10px] text-slate-300 pointer-events-none select-none">
-                                          Drag flights here
+                                        <span className={`text-[10px] pointer-events-none select-none ${draggingFlight ? 'text-indigo-500 font-bold' : 'text-slate-300'}`}>
+                                          {draggingFlight ? "Drop here!" : "Drag flights here"}
                                         </span>
                                       )}
                                       <button 

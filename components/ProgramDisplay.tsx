@@ -183,6 +183,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     setShowHistory(false);
   };
 
+  const activeStaff = React.useMemo(() => staff.filter((s) => s.isActive !== false), [staff]);
+
   const getStaff = (id: string) => staff.find((s) => s.id === id);
   const getFlight = (id: string) => flights.find((f) => f.id === id);
   const getShift = (id: string) => shifts.find((s) => s.id === id);
@@ -570,6 +572,9 @@ export const ProgramDisplay: React.FC<Props> = ({
             if (role === "Ramp") roleKey = "RMP";
             if (role === "Operations") roleKey = "OPS";
             if (role === "Lost and Found") roleKey = "LF";
+            if (role === "Labour") roleKey = "LBR";
+            if (role === "Security") roleKey = "SEC";
+            if (role === "Driver") roleKey = "DRV";
 
             const fulfilledCount = assignments.filter((a) => {
               const st = getStaff(a.staffId);
@@ -1163,12 +1168,13 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
         const dayRow = sheet.addRow([`${dayName} ${dateFormatted}`, "", "", "", "", "", "", ""]);
-        sheet.mergeCells(`A${dayRow.number}:G${dayRow.number}`);
+        sheet.mergeCells(`A${dayRow.number}:H${dayRow.number}`);
         const dayHeaderCell = sheet.getCell(`A${dayRow.number}`);
-        dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
         dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
         dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'center' };
+        dayRow.height = 24;
         
         const categories = {
           "Day off": [] as string[],
@@ -1178,7 +1184,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
 
         offStaff.forEach(s => {
           const leave = hasLeaveOnDate(s.id, prog.dateString!);
@@ -1198,42 +1204,23 @@ export const ProgramDisplay: React.FC<Props> = ({
             if (s.type === "Local") mappedCat = "Day off";
           }
 
-          if (mappedCat === "Day off") {
-             mappedCat = "Day off";
-          }
-
           if (mappedCat && (categories as any)[mappedCat]) {
             (categories as any)[mappedCat].push(s.initials);
           }
         });
 
-        const absenceTextLines: string[] = [];
-        Object.entries(categories).forEach(([k, v]) => {
-           if (v.length > 0) {
-              const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
-           }
-        });
-        
-        const absText = absenceTextLines.length > 0 ? `[\n${absenceTextLines.join("\n")}\n]` : "";
-        
-        const dayOffCell = sheet.getCell(`H${dayRow.number}`);
-        dayOffCell.value = absText;
-        dayOffCell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
-        dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
-        dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        dayOffCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-
-        // Auto-fit height estimation due to Excel merged cells limitation preventing auto-fit
-        if (absText.length > 0) {
-           let totalLines = 2; // For the brackets [ ]
-           absenceTextLines.forEach(line => {
-             totalLines += Math.max(1, Math.ceil(line.length / 45));
-           });
-           const requiredHeight = Math.max(30, totalLines * 15);
-           dayRow.height = requiredHeight;
-        } else {
-           dayRow.height = 20;
+        const absenceRowsData: { category: string, label: string, initials: string[] }[] = [];
+        if (categories["Day off"].length > 0) {
+          absenceRowsData.push({ category: "Day off", label: "DAY OFF", initials: categories["Day off"] });
+        }
+        if (categories["Annual"].length > 0) {
+          absenceRowsData.push({ category: "Annual", label: "ANNUAL LEAVE", initials: categories["Annual"] });
+        }
+        if (categories["Lieu"].length > 0) {
+          absenceRowsData.push({ category: "Lieu", label: "ROSTER LEAVE", initials: categories["Lieu"] });
+        }
+        if (categories["Sick Leave"].length > 0) {
+          absenceRowsData.push({ category: "Sick Leave", label: "SICK LEAVE", initials: categories["Sick Leave"] });
         }
 
         const shiftsToday = shifts
@@ -1293,15 +1280,35 @@ export const ProgramDisplay: React.FC<Props> = ({
           const staffCell = sheet.getCell(`H${startRowNo}`);
           const richText: any[] = [];
           
-          staffTokens.forEach((t, i) => {
-              let color = 'FF000000';
-              if (t.type === 'driver') color = 'FF15803D';
-              if (t.type === 'labour') color = 'FFB91C1C';
-              if (t.type === 'sec') color = 'FF7E22CE';
-              
-              if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
-              richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
-          });
+          const normalTokens = staffTokens.filter(t => t.type === 'reg');
+          const labourTokens = staffTokens.filter(t => t.type === 'labour');
+          const line1Tokens = [...normalTokens, ...labourTokens];
+
+          const securityTokens = staffTokens.filter(t => t.type === 'sec');
+          const driverTokens = staffTokens.filter(t => t.type === 'driver');
+          const line2Tokens = [...securityTokens, ...driverTokens];
+
+          const addTokensToRichText = (tokens: typeof staffTokens) => {
+              tokens.forEach((t, i) => {
+                  let color = 'FF000000';
+                  if (t.type === 'driver') color = 'FF15803D';
+                  if (t.type === 'labour') color = 'FFB91C1C';
+                  if (t.type === 'sec') color = 'FF7E22CE';
+                  
+                  if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
+                  richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
+              });
+          };
+
+          if (line1Tokens.length > 0) {
+              addTokensToRichText(line1Tokens);
+          }
+          if (line2Tokens.length > 0) {
+              if (line1Tokens.length > 0) {
+                  richText.push({ text: "\n", font: { bold: true } });
+              }
+              addTokensToRichText(line2Tokens);
+          }
           
           const shiftNote = prog.notes?.[shift.id] || shift.description || "";
           if (shiftNote) {
@@ -1314,6 +1321,48 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
           staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        });
+
+        // Add absence/leave rows right below the day's physical shifts (Option B - Beside Day Shift)
+        absenceRowsData.forEach((absItem) => {
+          const initialsText = absItem.initials.join(" - ");
+          const note = prog.notes?.[`ABSENCE_${absItem.category}`];
+          const fullStaffText = `${initialsText}${note ? ` (${note})` : ""}`;
+
+          const absRow = sheet.addRow([
+            "OFF",             // S/N
+            absItem.label,     // Flight No/Day
+            "",                // From
+            "NS",              // STA
+            "---",             // STD
+            "",                // To
+            "OFF-DUTY",        // Pickup Time
+            fullStaffText      // SDU Staff Assignment
+          ]);
+
+          absRow.eachCell((cell, colNumber) => {
+            cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; // Soft light slate gray background
+            
+            if (colNumber === 1) {
+              cell.font = { bold: true, color: { argb: 'FF94A3B8' }, size: 9 };
+            } else if (colNumber === 2) {
+              cell.font = { bold: true, color: { argb: 'FF475569' }, size: 10 };
+            } else if (colNumber === 4 || colNumber === 5) {
+              cell.font = { color: { argb: 'FFCBD5E1' }, size: 9 };
+            } else if (colNumber === 7) {
+              cell.font = { bold: true, color: { argb: 'FF64748B' }, size: 9 };
+            } else if (colNumber === 8) {
+              cell.font = { bold: true, color: { argb: 'FF1E293B' }, size: 10 };
+            } else {
+              cell.font = { color: { argb: 'FF94A3B8' }, size: 9 };
+            }
+          });
+
+          // Dynamic row height for the absence row
+          const estimatedLines = Math.max(1, Math.ceil(fullStaffText.length / 55));
+          absRow.height = Math.max(22, estimatedLines * 16 + 6);
         });
       });
       
@@ -1422,7 +1471,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
         tableRows.push([
           { content: headerText, colSpan: 3, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } },
-          { content: combinedAbsenceText ? `[ ${combinedAbsenceText} ]` : "", colSpan: 5, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "right" } }
+          { content: combinedAbsenceText || "", colSpan: 5, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "right" } }
         ]);
           
         if (shiftsToday.length === 0) {
@@ -1442,7 +1491,24 @@ export const ProgramDisplay: React.FC<Props> = ({
                  return { text: s.initials, type };
              }).filter(Boolean) as {text: string, type: string}[];
              
-             let pureInitials = staffTokens.map(t => t.text).join("-");
+             const normalTokens = staffTokens.filter(t => t.type === 'traffic');
+             const labourTokens = staffTokens.filter(t => t.type === 'labour');
+             const line1Tokens = [...normalTokens, ...labourTokens];
+
+             const securityTokens = staffTokens.filter(t => t.type === 'sec');
+             const driverTokens = staffTokens.filter(t => t.type === 'driver');
+             const line2Tokens = [...securityTokens, ...driverTokens];
+
+             const orderedStaffTokens = [...line1Tokens, ...line2Tokens];
+
+             let pureInitialsLines: string[] = [];
+             if (line1Tokens.length > 0) {
+                 pureInitialsLines.push(line1Tokens.map(t => t.text).join("-"));
+             }
+             if (line2Tokens.length > 0) {
+                 pureInitialsLines.push(line2Tokens.map(t => t.text).join("-"));
+             }
+             let pureInitials = pureInitialsLines.join("\n");
              
              const shiftNote = prog.notes?.[shift.id] || shift.description || "";
              if (shiftNote) {
@@ -1479,7 +1545,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                          { content: f.std || "---", styles: rowStyles },
                          { content: f.to || "", styles: rowStyles },
                          { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", fontSize: 9, fillColor: [248, 250, 252], lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
-                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: staffTokens, customNote: shiftNote } as any
+                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: orderedStaffTokens, customNote: shiftNote } as any
                      ]);
                  } else {
                      tableRows.push([
@@ -1892,7 +1958,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       const d = new Date(p.dateString || startDate);
       return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
     });
-    const sortedMatrixStaff = [...staff]
+    const sortedMatrixStaff = [...activeStaff]
       .map((s) => ({
         ...s,
         totalHours: getStaffTotalHours(s.id),
@@ -2189,8 +2255,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const renderStaffCheckTab = () => {
-    const localStaff = staff.filter((s) => s.type === "Local");
-    const rosterStaff = staff.filter((s) => s.type === "Roster");
+    const localStaff = activeStaff.filter((s) => s.type === "Local");
+    const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
 
     const renderLocalTable = () => (
       <div className="mb-10 min-w-[800px]">
@@ -2594,7 +2660,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const workingIds = new Set(
                     prog.assignments.map((a) => a.staffId),
                   );
-                  const offStaff = staff.filter((s) => !workingIds.has(s.id));
+                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
                   const categories: Record<
                     string,
                     {
@@ -2683,7 +2749,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const refWorkingIds = new Set(
                     refProg.assignments.map((a) => a.staffId),
                   );
-                  const refOffStaff = staff.filter(
+                  const refOffStaff = activeStaff.filter(
                     (s) => !refWorkingIds.has(s.id),
                   );
                   const refCategories: Record<string, string[]> = {
@@ -3095,6 +3161,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   roleKey = "LF";
                                                 if (role === "Labour")
                                                   roleKey = "LBR";
+                                                if (role === "Security")
+                                                  roleKey = "SEC";
+                                                if (role === "Driver")
+                                                  roleKey = "DRV";
 
                                                 const fulfilledCount =
                                                   assignments.filter((a) => {
@@ -3140,6 +3210,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                       (roleKey === "LBR" ||
                                                         roleKey === "Labour") &&
                                                       st.isLabour
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      (roleKey === "SEC" ||
+                                                        roleKey === "Security") &&
+                                                      st.isSecurity
+                                                    )
+                                                      return true;
+                                                    if (
+                                                      (roleKey === "DRV" ||
+                                                        roleKey === "Driver") &&
+                                                      st.isDriver
                                                     )
                                                       return true;
                                                     return false;
@@ -3361,7 +3443,7 @@ export const ProgramDisplay: React.FC<Props> = ({
            return st && !st.isLabour && !st.isDriver && !st.isSecurity;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = staff.filter(s => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter(s => !workingIds.has(s.id));
 
         const addStaff = (staffId: string) => {
           const newPrograms = [...programs];

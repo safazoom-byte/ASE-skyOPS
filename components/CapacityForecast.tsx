@@ -46,8 +46,9 @@ export const CapacityForecast: React.FC<Props> = ({
     const endDateStr = end.toISOString().split("T")[0];
 
     // 1. Calculate Supply (Available Shifts)
-    const localStaff = staff.filter((s) => s.type === "Local");
-    const rosterStaff = staff.filter((s) => s.type === "Roster");
+    const activeStaff = staff.filter((s) => s.isActive !== false);
+    const localStaff = activeStaff.filter((s) => s.type === "Local");
+    const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
 
     // --- LOCAL CAPACITY CALCULATION (WITH LEAVE DISRUPTION) ---
     // Rule: Standard is 5 days work per 7 days (5/7 ratio).

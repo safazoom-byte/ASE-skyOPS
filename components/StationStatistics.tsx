@@ -59,8 +59,8 @@ export const StationStatistics: React.FC<Props> = ({
     const duration =
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // EXCLUDE specific roles from station statistics:
-    const filteredStaff = staff.filter(s => !(s.isDriver || s.isLabour || s.isSecurity));
+    // EXCLUDE specific roles from station statistics and filter active staff:
+    const filteredStaff = staff.filter(s => s.isActive !== false && !(s.isDriver || s.isLabour || s.isSecurity));
 
     const totalLocal = filteredStaff.filter((s) => s.type === "Local").length;
     const activeStaff: Staff[] = [];
@@ -74,7 +74,9 @@ export const StationStatistics: React.FC<Props> = ({
 
     // 1. Skill Supply vs Demand (Total Period)
     let totalAvailableShifts = 0;
-    const skillStats = AVAILABLE_SKILLS.map((skill) => {
+    const skillStats = AVAILABLE_SKILLS.filter(
+      (skill) => skill !== "Labour" && skill !== "Security" && skill !== "Driver"
+    ).map((skill) => {
       let available = 0;
       let supply = 0;
       let need = 0;
@@ -112,7 +114,9 @@ export const StationStatistics: React.FC<Props> = ({
     );
 
     // 2. Role Composition (Local vs Roster Breakdown)
-    const roleComposition = AVAILABLE_SKILLS.map((skill) => {
+    const roleComposition = AVAILABLE_SKILLS.filter(
+      (skill) => skill !== "Labour" && skill !== "Security" && skill !== "Driver"
+    ).map((skill) => {
       const localCount = filteredStaff.filter(
         (s) => s.type === "Local" && hasSkill(s, skill),
       ).length;
