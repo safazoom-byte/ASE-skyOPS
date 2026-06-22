@@ -464,7 +464,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
 
       const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-      const offStaff = staff.filter((s) => !workingIds.has(s.id));
+      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
       const pdfCategories: Record<string, string[]> = {
         "DAYS OFF": [],
         "ROSTER LEAVE": [],
@@ -1184,7 +1184,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
 
         offStaff.forEach(s => {
           const leave = hasLeaveOnDate(s.id, prog.dateString!);
@@ -1343,20 +1343,24 @@ export const ProgramDisplay: React.FC<Props> = ({
           absRow.eachCell((cell, colNumber) => {
             cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
             cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; // Soft light slate gray background
+            
+            // Pale Amber / Warning background
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // amber-100
             
             if (colNumber === 1) {
-              cell.font = { bold: true, color: { argb: 'FF94A3B8' }, size: 9 };
+              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 }; // amber-900
             } else if (colNumber === 2) {
-              cell.font = { bold: true, color: { argb: 'FF475569' }, size: 10 };
+              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 10 };
             } else if (colNumber === 4 || colNumber === 5) {
-              cell.font = { color: { argb: 'FFCBD5E1' }, size: 9 };
+              cell.font = { color: { argb: 'FFB45309' }, size: 9 }; // amber-700
             } else if (colNumber === 7) {
-              cell.font = { bold: true, color: { argb: 'FF64748B' }, size: 9 };
+              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 };
+              // Highlight the OFF-DUTY cell slightly darker amber
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } }; // amber-200
             } else if (colNumber === 8) {
-              cell.font = { bold: true, color: { argb: 'FF1E293B' }, size: 10 };
+              cell.font = { bold: true, color: { argb: 'FF78350F' }, size: 10 }; // amber-950
             } else {
-              cell.font = { color: { argb: 'FF94A3B8' }, size: 9 };
+              cell.font = { color: { argb: 'FF92400E' }, size: 9 };
             }
           });
 
@@ -1424,7 +1428,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
@@ -2660,7 +2664,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const workingIds = new Set(
                     prog.assignments.map((a) => a.staffId),
                   );
-                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
                   const categories: Record<
                     string,
                     {
@@ -3443,7 +3447,7 @@ export const ProgramDisplay: React.FC<Props> = ({
            return st && !st.isLabour && !st.isDriver && !st.isSecurity;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = activeStaff.filter(s => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter(s => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
 
         const addStaff = (staffId: string) => {
           const newPrograms = [...programs];

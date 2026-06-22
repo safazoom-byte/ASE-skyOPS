@@ -132,6 +132,7 @@ export const db = {
             workFromDate: s.work_from_date,
             workToDate: s.work_to_date,
             rosterPeriods,
+            isActive: s.is_active !== false,
           };
         }),
         shifts: (shRes.data || []).map((s: any) => ({
@@ -230,6 +231,7 @@ export const db = {
       max_shifts_per_week: s.maxShiftsPerWeek,
       work_from_date: s.workFromDate || null,
       work_to_date: s.workToDate || null,
+      is_active: s.isActive !== false,
     });
   },
 
