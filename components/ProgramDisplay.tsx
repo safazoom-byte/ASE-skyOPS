@@ -1333,8 +1333,8 @@ export const ProgramDisplay: React.FC<Props> = ({
             "OFF",             // S/N
             absItem.label,     // Flight No/Day
             "",                // From
-            "NS",              // STA
-            "---",             // STD
+            "",                // STA
+            "",                // STD
             "",                // To
             "OFF-DUTY",        // Pickup Time
             fullStaffText      // SDU Staff Assignment
@@ -1363,6 +1363,8 @@ export const ProgramDisplay: React.FC<Props> = ({
               cell.font = { color: { argb: 'FF92400E' }, size: 9 };
             }
           });
+          
+          sheet.mergeCells(absRow.number, 2, absRow.number, 6);
 
           // Dynamic row height for the absence row
           const estimatedLines = Math.max(1, Math.ceil(fullStaffText.length / 55));
