@@ -30,7 +30,6 @@ import {
   Trash2,
   Eye,
   Lock,
-  Unlock,
   ShieldCheck,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
@@ -51,7 +50,6 @@ interface Props {
   minRestHours: number;
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
-  onUpdateLeaves?: (l: LeaveRequest[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -68,7 +66,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   minRestHours,
   onUpdatePrograms,
   onRestoreVersion,
-  onUpdateLeaves,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -78,7 +75,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
-  const [unlockAbsences, setUnlockAbsences] = useState(false);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -230,17 +226,12 @@ export const ProgramDisplay: React.FC<Props> = ({
     }, 0);
   };
 
-  const activePrograms = React.useMemo(() => {
-    const map = new Map<string, DailyProgram>();
-    programs.forEach((p) => {
-      if (p.dateString && p.dateString >= startDate && p.dateString <= endDate) {
-        map.set(p.dateString, p);
-      }
-    });
-    return Array.from(map.values()).sort((a, b) =>
-      (a.dateString || "").localeCompare(b.dateString || "")
-    );
-  }, [programs, startDate, endDate]);
+  const activePrograms = programs
+    .filter((p) => {
+      if (!p.dateString) return false;
+      return p.dateString >= startDate && p.dateString <= endDate;
+    })
+    .sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
 
   const leaveMapByStaff = React.useMemo(() => {
     const map: Record<string, LeaveRequest[]> = {};
@@ -585,10 +576,6 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
-                return true;
-              if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
-                return true;
-              if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
                 return true;
               return false;
             }).length;
@@ -950,8 +937,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && st.isOps) return true;
           if (roleCode === "LF" && st.isLostFound) return true;
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
-          if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
-          if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
 
           return false;
         };
@@ -967,9 +952,6 @@ export const ProgramDisplay: React.FC<Props> = ({
         const rmp = getStaffForRole("Ramp");
         const ops = getStaffForRole("Operations");
         const lf = getStaffForRole("Lost and Found");
-        const drv = getStaffForRole("Driver");
-        const sec = getStaffForRole("Security");
-        
         roleMatrixData.push([
           dateLabel,
           `${s.pickupTime}-${s.endTime}`,
@@ -978,8 +960,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           rmp,
           ops,
           lf,
-          drv,
-          sec,
         ]);
         roleMatrixMeta.push({
           slReq:
@@ -1000,20 +980,12 @@ export const ProgramDisplay: React.FC<Props> = ({
             (s.roleCounts?.["Lost and Found"] ||
               (s.roleCounts as any)?.["LF"] ||
               0) > 0,
-          drvReq:
-            (s.roleCounts?.["Driver"] ||
-              (s.roleCounts as any)?.["DRV"] ||
-              0) > 0,
-          secReq:
-            (s.roleCounts?.["Security"] ||
-              (s.roleCounts as any)?.["SEC"] ||
-              0) > 0,
         });
       });
     });
     autoTable(doc, {
       startY: 20,
-      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF", "DRV", "SEC"]],
+      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF"]],
       body: roleMatrixData,
       theme: "grid",
       headStyles: { fillColor: [0, 0, 0] },
@@ -1093,187 +1065,80 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
-  const generateStaffExcelReport = async () => {
+  const generateStaffExcelReport = () => {
     setIsGeneratingExcel(true);
     try {
-      const ExcelJS = await import("exceljs");
-      const { saveAs } = await import("file-saver");
+      const exportData: any[] = [];
       
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet("Staff Program", {
-        pageSetup: {
-          paperSize: 9, 
-          orientation: 'landscape',
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-          margins: { left: 0.2, right: 0.2, top: 0.5, bottom: 0.5, header: 0, footer: 0 }
-        }
-      });
-      
-      const profile = await db.getUserProfile();
-      
-      sheet.columns = [
-        { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 },
-        { width: 10 }, { width: 10 }, { width: 15 }, { width: 60 }
-      ];
-
-      const row1 = sheet.addRow([]);
-      row1.height = 45;
-      
-      sheet.mergeCells('B1:G1');
-      const titleCell = sheet.getCell('B1');
-      titleCell.value = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
-      titleCell.font = { name: 'Arial', size: 15, bold: true };
-      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-
-      if (profile?.companyLogo) {
-        const base64Data = profile.companyLogo.split(';base64,')[1];
-        const extMatch = profile.companyLogo.match(/image\/(jpeg|png)/);
-        const extension = extMatch ? extMatch[1] : 'png';
-        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
-        sheet.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 60, height: 45 } });
-      }
-      
-      if (profile?.skyopsLogo) {
-        const base64Data = profile.skyopsLogo.split(';base64,')[1];
-        const extMatch = profile.skyopsLogo.match(/image\/(jpeg|png)/);
-        const extension = extMatch ? extMatch[1] : 'png';
-        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
-        sheet.addImage(imgId, { tl: { col: 7.1, row: 0.1 }, ext: { width: 60, height: 45 } });
-      }
-
-      const headers = ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
-      const headerRow = sheet.addRow(headers);
-      headerRow.height = 25;
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
-        cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-      });
-
       activePrograms.forEach(prog => {
         const d = new Date(prog.dateString || startDate);
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
-        const dayRow = sheet.addRow([`${dayName} ${dateFormatted}`, "", "", "", "", "", "", ""]);
-        sheet.mergeCells(`A${dayRow.number}:G${dayRow.number}`);
-        const dayHeaderCell = sheet.getCell(`A${dayRow.number}`);
-        dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
-        dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        
-        let absText = "";
-        const dayOffStaff = staff.filter(s => hasLeaveOnDate(s.id, prog.dateString!));
-        const dayOffText = dayOffStaff.map(s => s.initials).join(" - ");
-        const annStaff = staff.filter(s => {
-          const l = hasLeaveOnDate(s.id, prog.dateString!, true);
-          return l && l.type === "Annual leave";
+        exportData.push({
+          "S/N": `${dayName} ${dateFormatted}`,
+          "Flight No/Day": "",
+          "From": "",
+          "STA": "",
+          "STD": "",
+          "To": "",
+          "Pick up Time": "",
+          "SDU Staff Assignment": ""
         });
-        const annText = annStaff.map(s => s.initials).join(" - ");
-        if (dayOffText) absText += `[ Day off: ${dayOffText} `;
-        if (annText) absText += `| Annual: ${annText} `;
-        if (absText) absText += `]`;
         
-        const dayOffCell = sheet.getCell(`H${dayRow.number}`);
-        dayOffCell.value = absText;
-        dayOffCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-        dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
-        dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
         shiftsToday.forEach((shift, idx) => {
           const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-          
-          let staffTokens: {text: string, type: string}[] = [];
-          assignments.forEach(a => {
-             const s = getStaff(a.staffId);
-             if (s) {
-                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
-                 staffTokens.push({ text: s.initials, type });
-             }
-          });
+          const staffInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
           
           const flightIds = shift.flightIds || [];
-          let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-          if (fObjs.length === 0) fObjs = [{} as Flight];
+          let fn = "", from = "", sta = "NS", std = "---", to = "";
           
-          const startRowNo = sheet.rowCount + 1;
+          if (flightIds.length > 0) {
+            const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+            if (fObjs.length > 0) {
+              fn = fObjs.map(f => f.flightNumber).join("/");
+              from = fObjs.map(f => f.from).join("-");
+              to = fObjs.map(f => f.to).join("-");
+              sta = fObjs[0].sta || "NS";
+              std = fObjs[0].std || "---";
+            }
+          }
           
-          fObjs.forEach((f, fIndex) => {
-             const rt = sheet.addRow([
-                fIndex === 0 ? (idx + 1).toString() : "",
-                f.flightNumber ? f.flightNumber.replace("/", " / ") : "",
-                f.from || "",
-                f.sta || "NS",
-                f.std || "---",
-                f.to || "",
-                fIndex === 0 ? (shift.pickupTime || "N.S") : "",
-                "" // staff will be added later
-             ]);
-             
-             rt.eachCell((cell) => {
-                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-                 cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-             });
-             
-             if (fIndex === 0) {
-                 const pickupCell = sheet.getCell(`G${rt.number}`);
-                 pickupCell.font = { bold: true, size: 10 };
-                 pickupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-             }
+          exportData.push({
+            "S/N": (idx + 1).toString(),
+            "Flight No/Day": fn,
+            "From": from,
+            "STA": sta,
+            "STD": std,
+            "To": to,
+            "Pick up Time": shift.pickupTime,
+            "SDU Staff Assignment": staffInitials
           });
-          
-          const endRowNo = sheet.rowCount;
-          
-          if (fObjs.length > 1) {
-              sheet.mergeCells(`A${startRowNo}:A${endRowNo}`);
-              sheet.mergeCells(`G${startRowNo}:G${endRowNo}`);
-              sheet.mergeCells(`H${startRowNo}:H${endRowNo}`);
-          }
-          
-          const staffCell = sheet.getCell(`H${startRowNo}`);
-          const richText: any[] = [];
-          
-          staffTokens.forEach((t, i) => {
-              let color = 'FF000000';
-              if (t.type === 'driver') color = 'FF15803D';
-              if (t.type === 'labour') color = 'FFB91C1C';
-              if (t.type === 'sec') color = 'FF7E22CE';
-              
-              if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
-              richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
-          });
-          
-          const shiftNote = prog.notes?.[shift.id] || shift.description || "";
-          if (shiftNote) {
-              if (richText.length > 0) richText.push({ text: "\n" });
-              richText.push({ text: shiftNote, font: { color: { argb: 'FF666666' }, italic: true } });
-          }
-          
-          if (richText.length > 0) {
-              staffCell.value = { richText };
-          }
-          staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-          staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         });
+        exportData.push({}); // Empty row separator
       });
       
-      sheet.addRow([]);
-      const fRow1 = sheet.addRow(["Prepared By: " + (profile?.preparedBy || "")]);
-      const fRow2 = sheet.addRow(["Revised By: " + (profile?.revisedBy || "")]);
+      const ws = XLSX.utils.json_to_sheet(exportData);
       
-      fRow1.getCell(1).font = { bold: true, size: 10 };
-      fRow2.getCell(1).font = { bold: true, size: 10 };
-
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `SkyOPS_Staff_Program_${startDate}.xlsx`);
+      const colWidths = [
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 8 }, 
+        { wch: 15 },
+        { wch: 50 },
+      ];
+      ws['!cols'] = colWidths;
+      
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Staff Program");
+      XLSX.writeFile(wb, `SkyOPS_Staff_Program_${startDate}.xlsx`);
     } catch (err) {
       console.error(err);
       alert("Failed to export Excel report.");
@@ -1282,23 +1147,21 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const generateStaffPdfReport = async () => {
+  const generateStaffPdfReport = () => {
     setIsGeneratingStaffPdf(true);
     try {
-      const profile = await db.getUserProfile();
-      const preparedBy = profile?.preparedBy || "";
-      const revisedBy = profile?.revisedBy || "";
+      const doc = new jsPDF("l", "mm", "a4");
       
-      const doc = new jsPDF("l", "mm", "a3"); // Changed from a4 to a3
-      
-      doc.setFontSize(14); // Increased font size
+      doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
       const title = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
-      doc.text(title, 210, 10, { align: "center" }); // Centered for A3 (420 width / 2)
+      doc.text(title, 148, 10, { align: "center" });
 
       try {
-        if (profile?.companyLogo) doc.addImage(profile.companyLogo, "PNG", 5, 2, 15, 15);
-        if (profile?.skyopsLogo) doc.addImage(profile.skyopsLogo, "PNG", 400, 2, 15, 15);
+        const cLogo = localStorage.getItem("skyops_company_logo");
+        const sLogo = localStorage.getItem("skyops_skyops_logo");
+        if (cLogo) doc.addImage(cLogo, "PNG", 5, 2, 15, 15);
+        if (sLogo) doc.addImage(sLogo, "PNG", 277, 2, 15, 15);
       } catch (e) { }
       
       const tableRows: any[] = [];
@@ -1308,252 +1171,121 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
+        tableRows.push([
+          { content: `${dayName} ${dateFormatted}`, colSpan: 9, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
+        ]);
+        
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
-        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+        const offDuty = prog.offDuty || [];
+        const absenceTextLines: string[] = [];
         
         const categories = {
-          "Day off": [] as string[],
-          "Annual": [] as string[],
-          "Lieu": [] as string[],
-          "Sick Leave": [] as string[],
-          "SSH Support": [] as string[]
+          "Traffic Day OFF": [],
+          "SEC Day OFF": [],
+          "Worker Day OFF": [],
+          "Annual": [],
+          "Lieu": [],
+          "SSH Support": []
         };
-
-        offStaff.forEach((s) => {
-          const leave = leaveMapByStaff[s.id]?.find(
-            (l) => l.startDate <= prog.dateString! && l.endDate >= prog.dateString!
-          );
-          
-          let isRosterOutOfContract = false;
-          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
-          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
-
-          let mappedCat = "";
-          if (leave) {
-            if (leave.type === "Annual leave") mappedCat = "Annual";
-            else if (leave.type === "Roster leave") mappedCat = "Lieu";
-            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
-            else mappedCat = "Day off";
-          } else if (isRosterOutOfContract) {
-            mappedCat = "Lieu";
-          } else {
-            if (s.type === "Local") mappedCat = "Day off";
-          }
-
-          if (mappedCat === "Day off") {
-             // Treat all as "Day off" without mentioning labour or worker
-             mappedCat = "Day off";
-          }
-
-          if (mappedCat && (categories as any)[mappedCat]) {
-            (categories as any)[mappedCat].push(s.initials);
+        
+        offDuty.forEach(od => {
+          const st = getStaff(od.staffId);
+          if (st) {
+             let mappedCat = od.type as string;
+             if (mappedCat === "DAYS OFF") mappedCat = "Traffic Day OFF";
+             else if (mappedCat === "ANNUAL LEAVE") mappedCat = "Annual";
+             else if (mappedCat === "ROSTER LEAVE") mappedCat = "Lieu";
+             else mappedCat = "Worker Day OFF";
+             
+             (categories as any)[mappedCat] = ((categories as any)[mappedCat] || []).concat(st.initials);
           }
         });
-
-        const absenceTextLines: string[] = [];
+        
         Object.entries(categories).forEach(([k, v]) => {
            if (v.length > 0) {
               const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
+              absenceTextLines.push(`${k}: ${v.join("-")}${note ? ` (${note})` : ''}`);
            }
         });
         
-        const combinedAbsenceText = absenceTextLines.join(" | ");
-        
-        let headerText = `${dayName} ${dateFormatted}`;
-
-        tableRows.push([
-          { content: headerText, colSpan: 3, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } },
-          { content: combinedAbsenceText ? `[ ${combinedAbsenceText} ]` : "", colSpan: 5, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "right" } }
-        ]);
+        const combinedAbsenceText = absenceTextLines.join("\n");
           
         if (shiftsToday.length === 0) {
            tableRows.push([
-             { content: "No shifts", colSpan: 8, styles: { halign: "center" } }
+             { content: "No shifts", colSpan: 8, styles: { halign: "center" } },
+             { content: combinedAbsenceText, styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle" } }
            ]);
         } else {
-             shiftsToday.forEach((shift, idx) => {
+           shiftsToday.forEach((shift, idx) => {
              const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-             const staffTokens = assignments.map(a => {
-                 const s = getStaff(a.staffId);
-                 if (!s) return null;
-                 let type = "traffic";
-                 if (s.isSecurity) type = "sec";
-                 else if (s.isLabour) type = "labour";
-                 else if (s.isDriver) type = "driver";
-                 return { text: s.initials, type };
-             }).filter(Boolean) as {text: string, type: string}[];
+             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join("\n");
              
-             let pureInitials = staffTokens.map(t => t.text).join("-");
-             
-             const shiftNote = prog.notes?.[shift.id] || shift.description || "";
-             if (shiftNote) {
-                 if (pureInitials) pureInitials += `\n`;
-                 pureInitials += `(${shiftNote})`;
+             if (prog.notes?.[shift.id]) {
+                pureInitials += `\n[${prog.notes[shift.id]}]`;
              }
              
              const flightIds = shift.flightIds || [];
-             let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-             if (fObjs.length === 0) {
-                 fObjs = [{ flightNumber: "", from: "", to: "", sta: "NS", std: "---" } as Flight];
+             let fn = "", from = "", sta = "NS", std = "---", to = "";
+             
+             if (flightIds.length > 0) {
+               const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+               if (fObjs.length > 0) {
+                 fn = fObjs.map(f => f.flightNumber).join("\n");
+                 from = fObjs.map(f => f.from).join("\n");
+                 to = fObjs.map(f => f.to).join("\n");
+                 sta = fObjs[0].sta || "NS";
+                 std = fObjs[0].std || "---";
+               }
              }
              
-             const shiftColor = idx % 2 === 0 ? [255, 255, 255] : [245, 248, 255];
-             const shiftBorder = 0.6;
-             const flightBorder = 0.1;
+             const rowData: any[] = [
+               (idx + 1).toString(),
+               fn,
+               from,
+               sta,
+               std,
+               to,
+               shift.pickupTime || "N.S",
+               pureInitials
+             ];
              
-             fObjs.forEach((f, fIdx) => {
-                 const isFirstFlight = fIdx === 0;
-                 const isLastFlight = fIdx === fObjs.length - 1;
-                 
-                 const rowStyles = { 
-                    fillColor: shiftColor, 
-                    lineWidth: { top: flightBorder, bottom: isLastFlight ? shiftBorder : flightBorder, left: flightBorder, right: flightBorder },
-                    valign: "middle" as const
-                 };
-                 
-                 if (isFirstFlight) {
-                     tableRows.push([
-                         { content: (idx + 1).toString(), rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
-                         { content: f.flightNumber || "", styles: rowStyles },
-                         { content: f.from || "", styles: rowStyles },
-                         { content: f.sta || "NS", styles: rowStyles },
-                         { content: f.std || "---", styles: rowStyles },
-                         { content: f.to || "", styles: rowStyles },
-                         { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", fontSize: 9, fillColor: [248, 250, 252], lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
-                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: staffTokens, customNote: shiftNote } as any
-                     ]);
-                 } else {
-                     tableRows.push([
-                         { content: f.flightNumber || "", styles: rowStyles },
-                         { content: f.from || "", styles: rowStyles },
-                         { content: f.sta || "NS", styles: rowStyles },
-                         { content: f.std || "---", styles: rowStyles },
-                         { content: f.to || "", styles: rowStyles }
-                     ]);
-                 }
-             });
+             if (idx === 0) {
+                rowData.push({
+                   content: combinedAbsenceText,
+                   rowSpan: shiftsToday.length,
+                   styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle", fontSize: 6 }
+                });
+             }
+             
+             tableRows.push(rowData);
            });
         }
       });
       
       autoTable(doc, {
         startY: 18,
-        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)"]],
+        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)", ""]],
         body: tableRows,
         theme: "grid",
-        margin: { top: 2, right: 3, bottom: 2, left: 3 },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 9 },
-        styles: { fontSize: 9, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        margin: { top: 5, right: 5, bottom: 5, left: 5 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 7 },
+        styles: { fontSize: 6, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
         columnStyles: {
-            0: { cellWidth: 15 },
-            1: { cellWidth: 45 },
-            2: { cellWidth: 20 },
-            3: { cellWidth: 20 },
-            4: { cellWidth: 20 },
-            5: { cellWidth: 20 },
-            6: { cellWidth: 35 },
-            7: { cellWidth: 'auto' }
+            0: { cellWidth: 8 },
+            1: { cellWidth: 20 },
+            2: { cellWidth: 15 },
+            3: { cellWidth: 15 },
+            4: { cellWidth: 15 },
+            5: { cellWidth: 15 },
+            6: { cellWidth: 20 },
+            7: { cellWidth: 'auto', fontStyle: 'bold' },
+            8: { cellWidth: 60 }
         },
-        willDrawCell: (data) => {
-            if (data.column.index === 7 && data.cell.section === 'body') {
-                if (!data.cell.raw || typeof data.cell.raw !== 'object' || !(data.cell.raw as any).customInitials) return;
-                // Save lines generated by autoTable's height calculation
-                (data.cell.raw as any)._lines = [...data.cell.text];
-                // Clear text so we draw it manually in didDrawCell
-                data.cell.text = [];
-            }
-        },
-        didDrawCell: (data) => {
-            if (data.column.index === 7 && data.cell.section === 'body') {
-                const raw = data.cell.raw as any;
-                if (!raw || !raw._lines) return;
-                
-                const lines = raw._lines as string[];
-                const customInitials = raw.customInitials as { text: string, type: string }[] || [];
-                const customNote = raw.customNote as string;
-                
-                doc.setFontSize(data.cell.styles.fontSize);
-                const lineHeight = doc.getLineHeight() * ((data.cell.styles as any).lineHeightFactor || 1.15);
-                const contentHeight = lines.length * lineHeight;
-                
-                // padding properties are part of the cell object in jspdf-autotable
-                const topPadding = typeof data.cell.padding === 'function' ? data.cell.padding('top') : (data.cell.padding as any).top || 0;
-                const leftPadding = typeof data.cell.padding === 'function' ? data.cell.padding('left') : (data.cell.padding as any).left || 0;
-                
-                let cursorY = data.cell.y + topPadding;
-                if (data.cell.styles.valign === 'middle') {
-                    cursorY = data.cell.y + (data.cell.height / 2) - (contentHeight / 2) + (lineHeight / 2);
-                } else {
-                    cursorY += (lineHeight / 2);
-                }
-                
-                for (let i = 0; i < lines.length; i++) {
-                    let line = lines[i];
-                    const textWidth = doc.getTextWidth(line);
-                    let startX = data.cell.x + leftPadding;
-                    if (data.cell.styles.halign === 'center') {
-                        startX = data.cell.x + (data.cell.width / 2) - (textWidth / 2);
-                    }
-                    
-                    let cursorX = startX;
-                    const words = line.split(/(\s+|-|\(|\))/g);
-                    
-                    for (const word of words) {
-                        if (!word) continue;
-                        
-                        let color = [0, 0, 0];
-                        
-                        const token = customInitials.find(t => t.text === word);
-                        if (token) {
-                            switch(token.type) {
-                                case 'driver': color = [21, 128, 61]; break; // Dark Green (green-700)
-                                case 'labour': color = [185, 28, 28]; break; // Dark Red (red-700)
-                                case 'sec': color = [126, 34, 206]; break; // Dark Purple (purple-700)
-                                default: color = [0, 0, 0]; break;
-                            }
-                            doc.setFont("helvetica", "bold");
-                        } else {
-                            if (customNote && customNote.includes(word) && word.trim() !== "-" && word.trim() !== "") {
-                                color = [100, 100, 100];
-                                doc.setFont("helvetica", "italic");
-                            } else {
-                                doc.setFont("helvetica", "bold");
-                                if (line.trim().startsWith("(")) {
-                                    color = [100, 100, 100];
-                                    doc.setFont("helvetica", "italic");
-                                }
-                            }
-                        }
-                        
-                        doc.setTextColor(color[0], color[1], color[2]);
-                        doc.text(word, cursorX, cursorY, { baseline: 'middle' });
-                        cursorX += doc.getTextWidth(word);
-                    }
-                    cursorY += lineHeight;
-                }
-            }
-        }
       });
-      
-      const finalY = (doc as any).lastAutoTable.finalY || 100;
-      if (finalY > doc.internal.pageSize.getHeight() - 12) {
-          doc.addPage();
-          doc.setFontSize(8);
-          doc.setTextColor(0, 0, 0);
-          doc.text(`Prepared By : ${preparedBy}`, 14, 15);
-          doc.text(`Revised By : ${revisedBy}`, 14, 22);
-      } else {
-          doc.setFontSize(8);
-          doc.setTextColor(0, 0, 0);
-          doc.text(`Prepared By : ${preparedBy}`, 14, finalY + 6);
-          doc.text(`Revised By : ${revisedBy}`, 14, finalY + 12);
-      }
       
       doc.save(`SkyOPS_Staff_Program_${startDate}.pdf`);
     } catch (err) {
@@ -1614,27 +1346,11 @@ export const ProgramDisplay: React.FC<Props> = ({
       const newPrograms = [...programs];
       const prog = newPrograms.find((p) => p.dateString === targetDate);
       if (!prog) return;
-
-      const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
-
-      if (!currentShiftId.startsWith("ABSENCE")) {
+      if (currentShiftId !== "ABSENCE") {
         const staffObj = staff.find((s) => s.id === staffId);
         const isDriver = staffObj?.isDriver;
 
-        // If dropped onto the same shift it was already in, move it to the front
-        if (currentShiftId === targetShiftId) {
-          const existingIdx = prog.assignments.findIndex(
-            (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-          );
-          if (existingIdx !== -1) {
-            const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
-            prog.assignments[existingIdx].manualSortIndex = minSort - 1;
-            onUpdatePrograms(newPrograms);
-          }
-          return;
-        }
-
-        if (!isDriver || isTargetAbsence) {
+        if (!isDriver || targetShiftId === "ABSENCE") {
           const oldIdx = prog.assignments.findIndex(
             (a) => a.staffId === staffId && a.shiftId === currentShiftId,
           );
@@ -1642,62 +1358,18 @@ export const ProgramDisplay: React.FC<Props> = ({
             prog.assignments.splice(oldIdx, 1);
           }
         }
-      } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
-        // Dragging out of a leave category into either a working shift OR another leave category
-        const leavesToDelete = leaveRequests.filter(l => 
-          l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
-        );
-        if (leavesToDelete.length > 0) {
-          Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
-             if (onUpdateLeaves) {
-                 const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
-                 onUpdateLeaves(remaining);
-             }
-          });
-        }
       }
-      
-      if (!isTargetAbsence) {
+      if (targetShiftId !== "ABSENCE") {
         const exists = prog.assignments.some(
           (a) => a.staffId === staffId && a.shiftId === targetShiftId,
         );
         if (!exists) {
-          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
           prog.assignments.push({
             id: Math.random().toString(36).substr(2, 9),
             staffId,
             shiftId: targetShiftId,
             flightId: "",
             role: role || "OPS",
-            manualSortIndex: maxSort + 1
-          });
-        }
-      } else if (targetShiftId !== "ABSENCE") {
-        // Handle dropping into a specific absence category
-        const cat = targetShiftId.replace("ABSENCE_", "");
-        let type: any = null;
-        if (cat === "ANNUAL LEAVE") type = "Annual leave";
-        if (cat === "SICK LEAVE") type = "Sick leave";
-        if (cat === "ROSTER LEAVE") type = "Roster leave";
-        if (cat === "DAYS OFF") type = "Day off";
-        
-        if (type) {
-          const newLeaveId = Math.random().toString(36).substr(2, 9);
-          const req = {
-            id: newLeaveId,
-            staffId,
-            type,
-            startDate: targetDate,
-            endDate: targetDate,
-            notes: "Assigned visually",
-            createdAt: new Date().toISOString()
-          };
-          db.upsertLeave(req as any).then(() => {
-            if (onUpdateLeaves) {
-                // Remove previous overlapping leaves from same day to prevent duplicates
-                const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
-                onUpdateLeaves([...prevLeaves, req as any]);
-            }
           });
         }
       }
@@ -1773,7 +1445,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (restHours !== null && restHours < minRestHours) {
       return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
-
     const target = staffStats[s.id]?.target ?? 5;
 
     const diff = daysWorked - target;
@@ -3074,18 +2745,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                         }
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
-                              Absence and Rest Registry
-                            </h4>
-                            <button
-                              onClick={() => setUnlockAbsences(!unlockAbsences)}
-                              className={`p-1 rounded ${unlockAbsences ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-500"} hover:opacity-80 transition-all`}
-                              title={unlockAbsences ? "Lock absences" : "Unlock absences to reassign"}
-                            >
-                              {unlockAbsences ? <Unlock size={12} /> : <Lock size={12} />}
-                            </button>
-                          </div>
+                          <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
+                            Absence and Rest Registry
+                          </h4>
                           <span className="text-[9px] font-bold text-slate-400 italic">
                             Drag here to unassign
                           </span>
@@ -3113,13 +2775,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                  }}
-                                  onDrop={(e) => {
-                                    e.stopPropagation();
-                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
-                                  }}
                                   className={
                                     isCatModified
                                       ? "bg-indigo-50/70 border-l-4 border-indigo-400"
@@ -3147,11 +2802,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             null,
                                           );
                                           const isLocked =
-                                            !unlockAbsences && (
-                                              cat === "ROSTER LEAVE" ||
-                                              cat === "ANNUAL LEAVE" ||
-                                              isRequestedDayOff
-                                            );
+                                            cat === "ROSTER LEAVE" ||
+                                            cat === "ANNUAL LEAVE" ||
+                                            isRequestedDayOff;
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
@@ -3164,7 +2817,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   handleDragStart(
                                                     e,
                                                     s.id,
-                                                    `ABSENCE_${cat}`,
+                                                    "ABSENCE",
                                                     prog.dateString!,
                                                     s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
                                                     s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
