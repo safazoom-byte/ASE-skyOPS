@@ -83,6 +83,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
+  const [shiftEditModal, setShiftEditModal] = useState<{dateString: string, shiftId: string} | null>(null);
+  const [addStaffForm, setAddStaffForm] = useState<{ staffId: string; role: string }>({ staffId: "", role: "OPS" });
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -1646,6 +1648,232 @@ export const ProgramDisplay: React.FC<Props> = ({
     onUpdatePrograms(newPrograms);
   };
 
+  const handleDragStart = (
+    e: React.DragEvent,
+    staffId: string,
+    currentShiftId: string,
+    date: string,
+    role: string,
+  ) => {
+    e.dataTransfer.setData(
+      "text/plain",
+      JSON.stringify({ staffId, currentShiftId, date, role }),
+    );
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const executeMove = (
+    staffId: string,
+    currentShiftId: string,
+    date: string,
+    role: string,
+    targetShiftId: string,
+    targetDate: string,
+  ) => {
+    const newPrograms = programs.map((p) => ({
+      ...p,
+      assignments: Array.isArray(p.assignments)
+        ? p.assignments.map((a) => ({ ...a }))
+        : [],
+    }));
+
+    let newLeaveRequests = leaveRequests ? [...leaveRequests] : [];
+    let newManualSettings = manualAssignments ? [...manualAssignments] : [];
+
+    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
+    const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
+    if (progIndex === -1 || sourceProgIndex === -1) return;
+
+    const prog = newPrograms[progIndex];
+    const sourceProg = newPrograms[sourceProgIndex];
+    const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
+    const st = staff.find((s) => s.id === staffId);
+    if (!st) return;
+
+    const ops = {
+      deleteLeaves: [] as string[],
+      upsertLeaves: [] as any[],
+    };
+
+    // --- REMOVAL FROM SOURCE ---
+    if (!currentShiftId.startsWith("ABSENCE")) {
+      if (currentShiftId === targetShiftId && date === targetDate) {
+        const existingIdx = prog.assignments.findIndex(
+          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+        );
+        if (existingIdx !== -1) {
+          const minSort = Math.min(
+            0,
+            ...prog.assignments.map((a) => a.manualSortIndex || 0),
+          );
+          prog.assignments[existingIdx] = {
+            ...prog.assignments[existingIdx],
+            manualSortIndex: minSort - 1,
+          };
+          onUpdatePrograms(newPrograms);
+        }
+        return;
+      }
+
+      const removeIdxs = sourceProg.assignments
+        .map((a, idx) => (a.staffId === staffId ? idx : -1))
+        .filter((idx) => idx !== -1)
+        .reverse();
+
+      removeIdxs.forEach((idx) => {
+        sourceProg.assignments.splice(idx, 1);
+      });
+
+      newManualSettings = newManualSettings.filter(
+        (ma) => !(ma.staffId === staffId && (ma.shiftId === currentShiftId || currentShiftId === "OFFDUTY")),
+      );
+    } else if (
+      currentShiftId.startsWith("ABSENCE_") &&
+      (targetShiftId !== currentShiftId || date !== targetDate)
+    ) {
+      const leavesToDelete = newLeaveRequests.filter(
+        (l) =>
+          l.staffId === staffId && l.startDate <= date && l.endDate >= date,
+      );
+      if (leavesToDelete.length > 0) {
+        leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
+        newLeaveRequests = newLeaveRequests.filter(
+          (l) => !leavesToDelete.includes(l),
+        );
+      }
+    }
+
+    // --- INSERTION INTO TARGET ---
+    if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
+      const leavesToDelete = newLeaveRequests.filter(
+        (l) => l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+      );
+      leavesToDelete.forEach((l) => ops.deleteLeaves.push(l.id));
+      newLeaveRequests = newLeaveRequests.filter((l) => !leavesToDelete.includes(l));
+
+      const duplicateIdxs = prog.assignments
+        .map((a, idx) => (a.staffId === staffId && a.shiftId !== targetShiftId ? idx : -1))
+        .filter((idx) => idx !== -1)
+        .reverse();
+
+      duplicateIdxs.forEach((idx) => {
+        prog.assignments.splice(idx, 1);
+      });
+
+      const exists = prog.assignments.some(
+        (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+      );
+      if (!exists) {
+        const maxSort = Math.max(
+          0,
+          ...prog.assignments.map((a) => a.manualSortIndex || 0),
+        );
+        prog.assignments.push({
+          id: Math.random().toString(36).substring(2, 11),
+          staffId,
+          shiftId: targetShiftId,
+          flightId: "",
+          role: role || "OPS",
+          manualSortIndex: maxSort + 1,
+        });
+
+        const manualExists = newManualSettings.some(
+          (ma) => ma.staffId === staffId && ma.shiftId === targetShiftId
+        );
+        if (!manualExists) {
+          newManualSettings.push({
+            staffId,
+            shiftId: targetShiftId,
+            roles: [role || "OPS"],
+          });
+        }
+      }
+    } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
+      const cat = targetShiftId.replace("ABSENCE_", "");
+      let type: any = null;
+      if (cat === "ANNUAL LEAVE") type = "Annual leave";
+      else if (cat === "SICK LEAVE") type = "Sick leave";
+      else if (cat === "ROSTER LEAVE") type = "Roster leave";
+      else if (cat === "DAYS OFF") type = "Day off";
+      else if (cat === "STANDBY (RESERVE)") type = "Standby (Reserve)";
+
+      if (type === "Roster leave" && st.type === "Local") {
+        return;
+      }
+
+      if (type) {
+        const overlapping = newLeaveRequests.filter(
+          (l) =>
+            l.staffId === staffId &&
+            l.startDate <= targetDate &&
+            l.endDate >= targetDate,
+        );
+        overlapping.forEach((l) => ops.deleteLeaves.push(l.id));
+        newLeaveRequests = newLeaveRequests.filter(
+          (l) => !overlapping.includes(l),
+        );
+
+        const newLeaveId = Math.random().toString(36).substring(2, 11);
+        const req: any = {
+          id: newLeaveId,
+          staffId,
+          type,
+          startDate: targetDate,
+          endDate: targetDate,
+          status: "approved",
+          notes: "Assigned visually",
+          createdAt: new Date().toISOString(),
+        };
+
+        newLeaveRequests.push(req);
+        ops.upsertLeaves.push(req);
+      }
+    }
+
+    if (onUpdateLeaves) {
+      onUpdateLeaves(newLeaveRequests);
+    }
+    if (onUpdateManualAssignments) {
+      onUpdateManualAssignments(newManualSettings);
+    }
+    onUpdatePrograms(newPrograms);
+
+    if (ops.deleteLeaves.length > 0) {
+      Promise.all(ops.deleteLeaves.map((id) => db.deleteLeave(id))).catch(console.error);
+    }
+    if (ops.upsertLeaves.length > 0) {
+      Promise.all(ops.upsertLeaves.map((req) => db.upsertLeave(req))).catch(console.error);
+    }
+  };
+
+  const handleDrop = (
+    e: React.DragEvent,
+    targetShiftId: string,
+    targetDate: string,
+  ) => {
+    e.preventDefault();
+    const data = e.dataTransfer.getData("text/plain");
+    if (!data) return;
+
+    try {
+      const { staffId, currentShiftId, date, role } = JSON.parse(data);
+      executeMove(staffId, currentShiftId, date, role, targetShiftId, targetDate);
+    } catch (err) {
+      console.error("Drop failed", err);
+    }
+  };
+
+  const handleTargetContainerTap = (targetShiftId: string, targetDate: string) => {
+    if (!targetShiftId.startsWith("ABSENCE") && targetShiftId !== "OFFDUTY") {
+      setShiftEditModal({ dateString: targetDate, shiftId: targetShiftId });
+    }
+  };
+
   const staffStats = React.useMemo(() => {
     const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
     
@@ -2681,6 +2909,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 return (
                                   <tr
                                     key={shift.id}
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) =>
+                                      handleDrop(e, shift.id, prog.dateString!)
+                                    }
+                                    onClick={() => handleTargetContainerTap(shift.id, prog.dateString!)}
                                     className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""}`}
                                   >
                                     <td
@@ -2827,7 +3060,27 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             return (
                                               <div
                                                 key={a.id}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2" : ""}`}
+                                                draggable={true}
+                                                onDragStart={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDragStart(
+                                                    e,
+                                                    st.id,
+                                                    shift.id,
+                                                    prog.dateString!,
+                                                    a.role || (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ" ? "SL" :
+                                                    st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ" ? "LC" :
+                                                    st.isRamp ? "RMP" :
+                                                    st.isLostFound ? "LF" :
+                                                    st.isLabour ? "LBR" :
+                                                    st.isSecurity ? "SEC" :
+                                                    "OPS")
+                                                  );
+                                                }}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-transform flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "border-indigo-400 border-2" : ""}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {rest !== null &&
@@ -2969,6 +3222,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
+                        onDragOver={handleDragOver}
+                        onDrop={(e) =>
+                          handleDrop(e, "ABSENCE_DAYS OFF", prog.dateString!)
+                        }
                         className={`border-t-4 border-slate-100 transition-colors`}
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
@@ -3004,6 +3261,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
+                                  onDragOver={handleDragOver}
+                                  onDrop={(e) =>
+                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!)
+                                  }
                                   className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
@@ -3029,7 +3290,23 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase flex items-center gap-1 group ${colorClass}`}
+                                                draggable={true}
+                                                onDragStart={(e) => {
+                                                  handleDragStart(
+                                                    e,
+                                                    s.id,
+                                                    `ABSENCE_${cat}`,
+                                                    prog.dateString!,
+                                                    s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
+                                                    s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
+                                                    s.isRamp ? "RMP" :
+                                                    s.isLostFound ? "LF" :
+                                                    s.isLabour ? "LBR" :
+                                                    s.isSecurity ? "SEC" :
+                                                    "OPS"
+                                                  );
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase cursor-move hover:scale-105 transition-transform flex items-center gap-1 group ${colorClass}`}
                                               >
                                                 <span>{s.initials}</span>
                                               </div>
@@ -3096,6 +3373,267 @@ export const ProgramDisplay: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {shiftEditModal && (() => {
+        const modalProg = programs.find(p => p.dateString === shiftEditModal.dateString);
+        const modalShift = shifts.find(s => s.id === shiftEditModal.shiftId);
+        if (!modalProg || !modalShift) return null;
+
+        const assignedList = modalProg.assignments.filter(a => a.shiftId === modalShift.id);
+        const alreadyWorkingIds = new Set(modalProg.assignments.map(a => a.staffId));
+        const onLeaveIds = new Set(
+          leaveRequests
+            ? leaveRequests
+                .filter(l => l.startDate <= shiftEditModal.dateString && l.endDate >= shiftEditModal.dateString)
+                .map(l => l.staffId)
+            : []
+        );
+        const availableStaff = staff.filter(s => !alreadyWorkingIds.has(s.id) && !onLeaveIds.has(s.id));
+
+        const handleModalRemoveStaff = (staffId: string) => {
+          const newPrograms = programs.map(p => {
+            if (p.dateString === shiftEditModal.dateString) {
+              return {
+                ...p,
+                assignments: p.assignments.filter(a => !(a.staffId === staffId && a.shiftId === modalShift.id))
+              };
+            }
+            return p;
+          });
+          onUpdatePrograms(newPrograms);
+
+          if (onUpdateManualAssignments) {
+            const newManual = manualAssignments.filter(
+              ma => !(ma.staffId === staffId && ma.shiftId === modalShift.id)
+            );
+            onUpdateManualAssignments(newManual);
+          }
+        };
+
+        const handleModalUpdateRole = (staffId: string, role: string) => {
+          const newPrograms = programs.map(p => {
+            if (p.dateString === shiftEditModal.dateString) {
+              return {
+                ...p,
+                assignments: p.assignments.map(a => {
+                  if (a.staffId === staffId && a.shiftId === modalShift.id) {
+                    return { ...a, role };
+                  }
+                  return a;
+                })
+              };
+            }
+            return p;
+          });
+          onUpdatePrograms(newPrograms);
+
+          if (onUpdateManualAssignments) {
+            const newManual = manualAssignments.map(ma => {
+              if (ma.staffId === staffId && ma.shiftId === modalShift.id) {
+                return { ...ma, roles: [role] };
+              }
+              return ma;
+            });
+            onUpdateManualAssignments(newManual);
+          }
+        };
+
+        const handleAddStaffToShift = () => {
+          if (!addStaffForm.staffId) return;
+          const newPrograms = programs.map(p => {
+            if (p.dateString === shiftEditModal.dateString) {
+              const maxSort = Math.max(0, ...p.assignments.map(a => a.manualSortIndex || 0));
+              return {
+                ...p,
+                assignments: [
+                  ...p.assignments,
+                  {
+                    id: Math.random().toString(36).substring(2, 11),
+                    staffId: addStaffForm.staffId,
+                    shiftId: modalShift.id,
+                    flightId: "",
+                    role: addStaffForm.role || "OPS",
+                    manualSortIndex: maxSort + 1
+                  }
+                ]
+              };
+            }
+            return p;
+          });
+          onUpdatePrograms(newPrograms);
+
+          if (onUpdateManualAssignments) {
+            const manualExists = manualAssignments.some(
+              ma => ma.staffId === addStaffForm.staffId && ma.shiftId === modalShift.id
+            );
+            if (!manualExists) {
+              onUpdateManualAssignments([
+                ...manualAssignments,
+                {
+                  staffId: addStaffForm.staffId,
+                  shiftId: modalShift.id,
+                  roles: [addStaffForm.role || "OPS"]
+                }
+              ]);
+            }
+          }
+          setAddStaffForm({ ...addStaffForm, staffId: "" });
+        };
+
+        const formattedDate = shiftEditModal.dateString;
+
+        return (
+          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300 max-h-[90vh]">
+              <div className="bg-slate-900 p-5 flex items-center justify-between border-b border-slate-800 text-white">
+                <div>
+                  <h3 className="font-black italic uppercase tracking-wider text-lg flex items-center gap-2">
+                    <Clock size={18} className="text-indigo-400" />
+                    Edit Shift Assignments
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 uppercase tracking-widest font-bold">
+                    Shift Configuration: {modalShift.pickupTime} - {modalShift.endTime} | {formattedDate}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShiftEditModal(null)}
+                  className="p-1.5 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-6">
+                <div>
+                  <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-3">
+                    Currently Assigned Staff ({assignedList.length} / {modalShift.maxStaff})
+                  </h4>
+                  {assignedList.length === 0 ? (
+                    <div className="text-center py-4 px-2 border-2 border-dashed border-slate-100 rounded-2xl text-xs text-slate-400 font-medium">
+                      No personnel currently assigned to this shift.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {assignedList.map((a) => {
+                        const st = staff.find((s) => s.id === a.staffId);
+                        if (!st) return null;
+                        return (
+                          <div key={a.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-slate-100/70 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <span className="w-9 h-9 flex items-center justify-center bg-indigo-50 text-indigo-700 font-bold uppercase rounded-lg text-xs leading-none">
+                                {st.initials}
+                              </span>
+                              <div>
+                                <p className="text-xs font-black text-slate-800">{st.name}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                  Type: {st.type}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={a.role || "OPS"}
+                                onChange={(e) => handleModalUpdateRole(st.id, e.target.value)}
+                                className="text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 font-bold"
+                              >
+                                <option value="OPS">OPS</option>
+                                <option value="SL">Shift Leader (SL)</option>
+                                <option value="LC">Load Control (LC)</option>
+                                <option value="RMP">Ramp (RMP)</option>
+                                <option value="LF">Lost & Found (LF)</option>
+                                <option value="LBR">Labour (LBR)</option>
+                                <option value="SEC">Security (SEC)</option>
+                              </select>
+                              <button
+                                onClick={() => handleModalRemoveStaff(st.id)}
+                                className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-600 rounded-lg transition-colors"
+                                title="Remove Staff"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 pt-5">
+                  <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-3">
+                    Assign New Staff
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
+                        Select Staff Member
+                      </label>
+                      <select
+                        value={addStaffForm.staffId}
+                        onChange={(e) => setAddStaffForm({ ...addStaffForm, staffId: e.target.value })}
+                        className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 font-medium"
+                      >
+                        <option value="">-- Choose Staff --</option>
+                        {availableStaff.map((s) => {
+                          const quals = [
+                            s.isShiftLeader ? "SL" : "",
+                            s.isLoadControl ? "LC" : "",
+                            s.isRamp ? "RMP" : "",
+                            s.isLostFound ? "LF" : "",
+                            s.isLabour ? "LBR" : "",
+                            s.isSecurity ? "SEC" : ""
+                          ].filter(Boolean).join(", ");
+                          return (
+                            <option key={s.id} value={s.id}>
+                              {s.initials} - {s.name} {quals ? `(${quals})` : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
+                        Role
+                      </label>
+                      <select
+                        value={addStaffForm.role}
+                        onChange={(e) => setAddStaffForm({ ...addStaffForm, role: e.target.value })}
+                        className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 font-bold"
+                      >
+                        <option value="OPS">Operations (OPS)</option>
+                        <option value="SL">Shift Leader (SL)</option>
+                        <option value="LC">Load Control (LC)</option>
+                        <option value="RMP">Ramp (RMP)</option>
+                        <option value="LF">Lost & Found (LF)</option>
+                        <option value="LBR">Labour (LBR)</option>
+                        <option value="SEC">Security (SEC)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    disabled={!addStaffForm.staffId}
+                    onClick={handleAddStaffToShift}
+                    className="w-full mt-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl font-black uppercase tracking-widest italic transition-all text-xs flex items-center justify-center gap-2"
+                  >
+                    Add Staff Member
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button
+                  onClick={() => setShiftEditModal(null)}
+                  className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
