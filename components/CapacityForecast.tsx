@@ -46,7 +46,7 @@ export const CapacityForecast: React.FC<Props> = ({
     const endDateStr = end.toISOString().split("T")[0];
 
     // 1. Calculate Supply (Available Shifts)
-    const activeStaff = staff.filter((s) => s.isActive !== false && !(s.isDriver || s.isLabour || s.isSecurity));
+    const activeStaff = staff.filter((s) => s.isActive !== false && !(s.isDriver || s.isLabour || s.isSecurity || s.isAccountant));
     const localStaff = activeStaff.filter((s) => s.type === "Local");
     const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
 

@@ -544,7 +544,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         ));
         const nonLabourCount = assignments.filter((a) => {
           const st = getStaff(a.staffId);
-          return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+          return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
         }).length;
         const flightStrs =
           (shift.flightIds || [])
@@ -575,7 +575,8 @@ export const ProgramDisplay: React.FC<Props> = ({
             if (role === "Labour") roleKey = "LBR";
             if (role === "Security") roleKey = "SEC";
             if (role === "Driver") roleKey = "DRV";
-
+            if (role === "Accountant") roleKey = "ACC";
+ 
             const fulfilledCount = assignments.filter((a) => {
               const st = getStaff(a.staffId);
               if (!st) return false;
@@ -598,6 +599,8 @@ export const ProgramDisplay: React.FC<Props> = ({
               if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
                 return true;
               if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
+                return true;
+              if ((roleKey === "ACC" || roleKey === "Accountant") && st.isAccountant)
                 return true;
               return false;
             }).length;
@@ -940,7 +943,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                     ? "OPS"
                     : targetRole === "Lost and Found"
                       ? "LF"
-                      : targetRole;
+                      : targetRole === "Accountant"
+                        ? "ACC"
+                        : targetRole;
 
           // If looking for a specialist role, strictly enforce the profile flag
           if (roleCode === "LC" && !(st.isLoadControl || st.initials.toUpperCase() === "SK-ATZ")) return false;
@@ -949,6 +954,9 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && !st.isOps) return false;
           if (roleCode === "LF" && !st.isLostFound) return false;
           if ((roleCode === "Labour" || roleCode === "LBR") && !st.isLabour) return false;
+          if ((roleCode === "Driver" || roleCode === "DRV") && !st.isDriver) return false;
+          if ((roleCode === "Security" || roleCode === "SEC") && !st.isSecurity) return false;
+          if ((roleCode === "Accountant" || roleCode === "ACC") && !st.isAccountant) return false;
 
           if (a.role === roleCode || a.role === targetRole) return true;
 
@@ -961,6 +969,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
           if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
           if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
+          if ((roleCode === "Accountant" || roleCode === "ACC") && st.isAccountant) return true;
 
           return false;
         };
@@ -1234,7 +1243,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           assignments.forEach(a => {
              const s = getStaff(a.staffId);
              if (s) {
-                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
+                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : s.isAccountant ? 'acc' : 'reg';
                  staffTokens.push({ text: s.initials, type });
              }
           });
@@ -1281,8 +1290,9 @@ export const ProgramDisplay: React.FC<Props> = ({
           const richText: any[] = [];
           
           const normalTokens = staffTokens.filter(t => t.type === 'reg');
+          const accountantTokens = staffTokens.filter(t => t.type === 'acc');
           const labourTokens = staffTokens.filter(t => t.type === 'labour');
-          const line1Tokens = [...normalTokens, ...labourTokens];
+          const line1Tokens = [...normalTokens, ...accountantTokens, ...labourTokens];
 
           const securityTokens = staffTokens.filter(t => t.type === 'sec');
           const driverTokens = staffTokens.filter(t => t.type === 'driver');
@@ -1294,6 +1304,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   if (t.type === 'driver') color = 'FF15803D';
                   if (t.type === 'labour') color = 'FFB91C1C';
                   if (t.type === 'sec') color = 'FF7E22CE';
+                  if (t.type === 'acc') color = 'FF1D4ED8';
                   
                   if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
                   richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
@@ -1329,9 +1340,10 @@ export const ProgramDisplay: React.FC<Props> = ({
           const note = prog.notes?.[`ABSENCE_${absItem.category}`];
           const fullStaffText = `${initialsText}${note ? ` (${note})` : ""}`;
 
+          const mergedLabel = absItem.label === "DAY OFF" ? "" : absItem.label;
           const absRow = sheet.addRow([
-            "OFF",             // S/N
-            absItem.label,     // Flight No/Day
+            mergedLabel,       // Merged A-F
+            "",                // Flight No/Day
             "",                // From
             "",                // STA
             "",                // STD
@@ -1364,7 +1376,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             }
           });
           
-          sheet.mergeCells(absRow.number, 2, absRow.number, 6);
+          sheet.mergeCells(absRow.number, 1, absRow.number, 6);
 
           // Dynamic row height for the absence row
           const estimatedLines = Math.max(1, Math.ceil(fullStaffText.length / 55));

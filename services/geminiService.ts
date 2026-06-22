@@ -468,6 +468,7 @@ export const generateAIProgram = async (
             const isLBRKey = roleKey === "LBR" || roleKey === "Labour";
             const isSECKey = roleKey === "SEC" || roleKey === "Security";
             const isDRVKey = roleKey === "DRV" || roleKey === "Driver";
+            const isACCKey = roleKey === "ACC" || roleKey === "Accountant";
 
             if (isLCKey && !(s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ")) return false;
             if (isSLKey && !(s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ")) return false;
@@ -477,14 +478,16 @@ export const generateAIProgram = async (
             if (isLBRKey && !s.isLabour) return false;
             if (isSECKey && !s.isSecurity) return false;
             if (isDRVKey && !s.isDriver) return false;
+            if (isACCKey && !s.isAccountant) return false;
 
             // Highly restricted roles shouldn't fulfill general or different skill slots
             if (!isLBRKey && s.isLabour) return false;
             if (!isSECKey && s.isSecurity) return false;
             if (!isDRVKey && s.isDriver) return false;
+            if (!isACCKey && s.isAccountant) return false;
           } else {
-            // General slots - strictly exclude Labour, Security, and Driver
-            if (s.isLabour || s.isDriver || s.isSecurity) return false;
+            // General slots - strictly exclude Labour, Security, Driver, and Accountant
+            if (s.isLabour || s.isDriver || s.isSecurity || s.isAccountant) return false;
           }
 
           return true;
@@ -558,6 +561,7 @@ export const generateAIProgram = async (
           if (role === "Labour") roleKey = "LBR";
           if (role === "Security") roleKey = "SEC";
           if (role === "Driver") roleKey = "DRV";
+          if (role === "Accountant") roleKey = "ACC";
 
           for (let i = 0; i < count; i++) {
             // Check if someone ALREADY on this shift can fulfill this role
@@ -575,6 +579,7 @@ export const generateAIProgram = async (
               if (roleKey === "LBR" && !st.isLabour) return false;
               if (roleKey === "SEC" && !st.isSecurity) return false;
               if (roleKey === "DRV" && !st.isDriver) return false;
+              if (roleKey === "ACC" && !st.isAccountant) return false;
 
               if (
                 a.role === roleKey ||
@@ -591,6 +596,7 @@ export const generateAIProgram = async (
               if (roleKey === "LBR" && st.isLabour) return true;
               if (roleKey === "SEC" && st.isSecurity) return true;
               if (roleKey === "DRV" && st.isDriver) return true;
+              if (roleKey === "ACC" && st.isAccountant) return true;
               return false;
             }).length;
 

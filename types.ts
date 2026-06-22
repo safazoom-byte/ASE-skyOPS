@@ -6,7 +6,8 @@ export type Skill =
   | "Operations"
   | "Labour"
   | "Security"
-  | "Driver";
+  | "Driver"
+  | "Accountant";
 export type ProficiencyLevel = "Yes" | "No";
 export type StaffCategory = "Local" | "Roster";
 export type WorkPattern = string;
@@ -48,6 +49,7 @@ export interface Staff {
   isLabour: boolean;
   isSecurity: boolean;
   isDriver: boolean;
+  isAccountant: boolean;
   powerRate: number; // 50-100
   maxShiftsPerWeek: number;
   workFromDate?: string;

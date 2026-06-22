@@ -35,4 +35,5 @@ export const AVAILABLE_SKILLS: Skill[] = [
   "Labour",
   "Security",
   "Driver",
+  "Accountant",
 ];

@@ -60,7 +60,7 @@ export const StationStatistics: React.FC<Props> = ({
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
     // EXCLUDE specific roles from station statistics and filter active staff:
-    const filteredStaff = staff.filter(s => s.isActive !== false && !(s.isDriver || s.isLabour || s.isSecurity));
+    const filteredStaff = staff.filter(s => s.isActive !== false && !(s.isDriver || s.isLabour || s.isSecurity || s.isAccountant));
 
     const totalLocal = filteredStaff.filter((s) => s.type === "Local").length;
     const activeStaff: Staff[] = [];
@@ -176,6 +176,7 @@ export const StationStatistics: React.FC<Props> = ({
         Labour: 0,
         Security: 0,
         Driver: 0,
+        Accountant: 0,
       };
 
       AVAILABLE_SKILLS.forEach((skill) => {
