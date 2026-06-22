@@ -10,8 +10,10 @@ import {
   Edit3,
   CalendarDays,
   Sparkles,
+  FileCheck,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL } from "../constants";
+import { FlightComparatorModal } from "./FlightComparatorModal";
 
 interface Props {
   flights: Flight[];
@@ -44,6 +46,7 @@ export const FlightManager: React.FC<Props> = ({
 
   const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState<Partial<Flight>>({});
+  const [showComparator, setShowComparator] = useState(false);
 
   useEffect(() => {
     if (!newFlight.date && startDate) {
@@ -164,6 +167,15 @@ export const FlightManager: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+          <button
+            onClick={() => setShowComparator(true)}
+            className="flex-1 px-5 py-4 lg:px-8 lg:py-5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl lg:rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-slate-900/20 group border border-slate-700"
+          >
+            <FileCheck size={16} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest italic">
+              Compare Schedule
+            </span>
+          </button>
           <button
             onClick={onOpenScanner}
             className="flex-1 px-5 py-4 lg:px-8 lg:py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl lg:rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-indigo-600/20 group"
@@ -458,6 +470,20 @@ export const FlightManager: React.FC<Props> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {showComparator && (
+        <FlightComparatorModal
+          currentFlights={flights}
+          startDate={startDate}
+          endDate={endDate}
+          onClose={() => setShowComparator(false)}
+          onApplyChanges={(added, updated, deletedIds) => {
+            added.forEach(f => onAdd(f));
+            updated.forEach(f => onUpdate(f));
+            deletedIds.forEach(id => onDelete(id));
+          }}
+        />
       )}
     </div>
   );

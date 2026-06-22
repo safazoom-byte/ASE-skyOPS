@@ -59,11 +59,14 @@ export const StationStatistics: React.FC<Props> = ({
     const duration =
       Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    const totalLocal = staff.filter((s) => s.type === "Local").length;
+    // EXCLUDE specific roles from station statistics:
+    const filteredStaff = staff.filter(s => !(s.isDriver || s.isLabour || s.isSecurity));
+
+    const totalLocal = filteredStaff.filter((s) => s.type === "Local").length;
     const activeStaff: Staff[] = [];
     const inactiveStaff: Staff[] = [];
 
-    staff.forEach((s) => {
+    filteredStaff.forEach((s) => {
       const credits = calculateCredits(s, startDate, duration, leaveRequests);
       if (credits > 0) activeStaff.push(s);
       else inactiveStaff.push(s);
@@ -75,7 +78,7 @@ export const StationStatistics: React.FC<Props> = ({
       let available = 0;
       let supply = 0;
       let need = 0;
-      staff.forEach((s) => {
+      filteredStaff.forEach((s) => {
         if (hasSkill(s, skill)) {
           const credits = calculateCredits(
             s,
@@ -98,7 +101,7 @@ export const StationStatistics: React.FC<Props> = ({
       return { skill, available, supply, need, ok: supply >= need };
     });
 
-    staff.forEach(
+    filteredStaff.forEach(
       (s) =>
         (totalAvailableShifts += calculateCredits(
           s,
@@ -110,10 +113,10 @@ export const StationStatistics: React.FC<Props> = ({
 
     // 2. Role Composition (Local vs Roster Breakdown)
     const roleComposition = AVAILABLE_SKILLS.map((skill) => {
-      const localCount = staff.filter(
+      const localCount = filteredStaff.filter(
         (s) => s.type === "Local" && hasSkill(s, skill),
       ).length;
-      const rosterCount = staff.filter(
+      const rosterCount = filteredStaff.filter(
         (s) => s.type === "Roster" && hasSkill(s, skill),
       ).length;
       const total = localCount + rosterCount;
@@ -133,7 +136,7 @@ export const StationStatistics: React.FC<Props> = ({
 
       let rosterAvailable = 0;
       // Calculate generic roster availability for the day
-      staff
+      filteredStaff
         .filter((s) => s.type === "Roster")
         .forEach((s) => {
           const onLeave = leaveRequests.some(
@@ -172,7 +175,7 @@ export const StationStatistics: React.FC<Props> = ({
       };
 
       AVAILABLE_SKILLS.forEach((skill) => {
-        const count = staff.filter((s) => {
+        const count = filteredStaff.filter((s) => {
           if (!hasSkill(s, skill)) return false;
 
           // Check leave
@@ -219,9 +222,9 @@ export const StationStatistics: React.FC<Props> = ({
 
     return {
       duration,
-      totalStaff: staff.length,
+      totalStaff: filteredStaff.length,
       totalLocal,
-      totalRoster: staff.length - totalLocal,
+      totalRoster: filteredStaff.length - totalLocal,
       activeCount: activeStaff.length,
       inactiveStaff,
       totalAvailableShifts,

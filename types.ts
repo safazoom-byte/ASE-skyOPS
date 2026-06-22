@@ -91,6 +91,7 @@ export interface Assignment {
   flightId: string;
   role: string; // Changed from Skill to string to support combined roles like 'SL+LC'
   shiftId?: string;
+  manualSortIndex?: number;
 }
 
 export interface OffDutyRecord {
@@ -134,6 +135,10 @@ export interface UserProfile {
   maxStaff: number;
   maxShifts: number;
   isActive: boolean;
+  companyLogo?: string;
+  skyopsLogo?: string;
+  preparedBy?: string;
+  revisedBy?: string;
 }
 
 export interface AuditLog {

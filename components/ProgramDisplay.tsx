@@ -30,7 +30,10 @@ import {
   Trash2,
   Eye,
   Lock,
+  Unlock,
   ShieldCheck,
+  MessageSquare,
+  X,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -50,6 +53,7 @@ interface Props {
   minRestHours: number;
   onUpdatePrograms: (p: DailyProgram[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
+  onUpdateLeaves?: (l: LeaveRequest[]) => void;
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -66,6 +70,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   minRestHours,
   onUpdatePrograms,
   onRestoreVersion,
+  onUpdateLeaves,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -75,6 +80,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<
     "Daily" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
+  const [unlockAbsences, setUnlockAbsences] = useState(false);
+  const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
     () => {
@@ -226,12 +233,17 @@ export const ProgramDisplay: React.FC<Props> = ({
     }, 0);
   };
 
-  const activePrograms = programs
-    .filter((p) => {
-      if (!p.dateString) return false;
-      return p.dateString >= startDate && p.dateString <= endDate;
-    })
-    .sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+  const activePrograms = React.useMemo(() => {
+    const map = new Map<string, DailyProgram>();
+    programs.forEach((p) => {
+      if (p.dateString && p.dateString >= startDate && p.dateString <= endDate) {
+        map.set(p.dateString, p);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) =>
+      (a.dateString || "").localeCompare(b.dateString || "")
+    );
+  }, [programs, startDate, endDate]);
 
   const leaveMapByStaff = React.useMemo(() => {
     const map: Record<string, LeaveRequest[]> = {};
@@ -528,9 +540,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         const assignments = sortAssignments(prog.assignments.filter(
           (a) => a.shiftId === shift.id,
         ));
-        const nonLabourCount = assignments.filter(
-          (a) => !getStaff(a.staffId)?.isLabour,
-        ).length;
+        const nonLabourCount = assignments.filter((a) => {
+          const st = getStaff(a.staffId);
+          return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+        }).length;
         const flightStrs =
           (shift.flightIds || [])
             .map((fid) => {
@@ -576,6 +589,10 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (roleKey === "OPS" && st.isOps) return true;
               if (roleKey === "LF" && st.isLostFound) return true;
               if ((roleKey === "LBR" || roleKey === "Labour") && st.isLabour)
+                return true;
+              if ((roleKey === "DRV" || roleKey === "Driver") && st.isDriver)
+                return true;
+              if ((roleKey === "SEC" || roleKey === "Security") && st.isSecurity)
                 return true;
               return false;
             }).length;
@@ -937,6 +954,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (roleCode === "OPS" && st.isOps) return true;
           if (roleCode === "LF" && st.isLostFound) return true;
           if ((roleCode === "Labour" || roleCode === "LBR") && st.isLabour) return true;
+          if ((roleCode === "Driver" || roleCode === "DRV") && st.isDriver) return true;
+          if ((roleCode === "Security" || roleCode === "SEC") && st.isSecurity) return true;
 
           return false;
         };
@@ -952,6 +971,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         const rmp = getStaffForRole("Ramp");
         const ops = getStaffForRole("Operations");
         const lf = getStaffForRole("Lost and Found");
+        const drv = getStaffForRole("Driver");
+        const sec = getStaffForRole("Security");
+        
         roleMatrixData.push([
           dateLabel,
           `${s.pickupTime}-${s.endTime}`,
@@ -960,6 +982,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           rmp,
           ops,
           lf,
+          drv,
+          sec,
         ]);
         roleMatrixMeta.push({
           slReq:
@@ -980,12 +1004,20 @@ export const ProgramDisplay: React.FC<Props> = ({
             (s.roleCounts?.["Lost and Found"] ||
               (s.roleCounts as any)?.["LF"] ||
               0) > 0,
+          drvReq:
+            (s.roleCounts?.["Driver"] ||
+              (s.roleCounts as any)?.["DRV"] ||
+              0) > 0,
+          secReq:
+            (s.roleCounts?.["Security"] ||
+              (s.roleCounts as any)?.["SEC"] ||
+              0) > 0,
         });
       });
     });
     autoTable(doc, {
       startY: 20,
-      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF"]],
+      head: [["DATE", "SHIFT", "SL", "LC", "RMP", "OPS", "LF", "DRV", "SEC"]],
       body: roleMatrixData,
       theme: "grid",
       headStyles: { fillColor: [0, 0, 0] },
@@ -1065,80 +1097,236 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
-  const generateStaffExcelReport = () => {
+  const generateStaffExcelReport = async () => {
     setIsGeneratingExcel(true);
     try {
-      const exportData: any[] = [];
+      const ExcelJS = await import("exceljs");
+      const { saveAs } = await import("file-saver");
       
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Staff Program", {
+        pageSetup: {
+          paperSize: 9, 
+          orientation: 'landscape',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          margins: { left: 0.2, right: 0.2, top: 0.5, bottom: 0.5, header: 0, footer: 0 }
+        }
+      });
+      
+      const profile = await db.getUserProfile();
+      
+      sheet.columns = [
+        { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 },
+        { width: 10 }, { width: 10 }, { width: 15 }, { width: 60 }
+      ];
+
+      const row1 = sheet.addRow([]);
+      row1.height = 45;
+      
+      sheet.mergeCells('B1:G1');
+      const titleCell = sheet.getCell('B1');
+      titleCell.value = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
+      titleCell.font = { name: 'Arial', size: 15, bold: true };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      if (profile?.companyLogo) {
+        const base64Data = profile.companyLogo.split(';base64,')[1];
+        const extMatch = profile.companyLogo.match(/image\/(jpeg|png)/);
+        const extension = extMatch ? extMatch[1] : 'png';
+        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
+        sheet.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      }
+      
+      if (profile?.skyopsLogo) {
+        const base64Data = profile.skyopsLogo.split(';base64,')[1];
+        const extMatch = profile.skyopsLogo.match(/image\/(jpeg|png)/);
+        const extension = extMatch ? extMatch[1] : 'png';
+        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
+        sheet.addImage(imgId, { tl: { col: 7.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      }
+
+      const headers = ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
+      const headerRow = sheet.addRow(headers);
+      headerRow.height = 25;
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+        cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      });
+
       activePrograms.forEach(prog => {
         const d = new Date(prog.dateString || startDate);
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
-        exportData.push({
-          "S/N": `${dayName} ${dateFormatted}`,
-          "Flight No/Day": "",
-          "From": "",
-          "STA": "",
-          "STD": "",
-          "To": "",
-          "Pick up Time": "",
-          "SDU Staff Assignment": ""
+        const dayRow = sheet.addRow([`${dayName} ${dateFormatted}`, "", "", "", "", "", "", ""]);
+        sheet.mergeCells(`A${dayRow.number}:G${dayRow.number}`);
+        const dayHeaderCell = sheet.getCell(`A${dayRow.number}`);
+        dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+        dayHeaderCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'left' };
+        
+        const categories = {
+          "Day off": [] as string[],
+          "Annual": [] as string[],
+          "Lieu": [] as string[],
+          "Sick Leave": [] as string[]
+        };
+
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+
+        offStaff.forEach(s => {
+          const leave = hasLeaveOnDate(s.id, prog.dateString!);
+          let isRosterOutOfContract = false;
+          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          
+          let mappedCat = "";
+          if (leave) {
+            if (leave.type === "Annual leave") mappedCat = "Annual";
+            else if (leave.type === "Roster leave") mappedCat = "Lieu";
+            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
+            else mappedCat = "Day off";
+          } else if (isRosterOutOfContract) {
+            mappedCat = "Lieu";
+          } else {
+            if (s.type === "Local") mappedCat = "Day off";
+          }
+
+          if (mappedCat === "Day off") {
+             mappedCat = "Day off";
+          }
+
+          if (mappedCat && (categories as any)[mappedCat]) {
+            (categories as any)[mappedCat].push(s.initials);
+          }
+        });
+
+        const absenceTextLines: string[] = [];
+        Object.entries(categories).forEach(([k, v]) => {
+           if (v.length > 0) {
+              const note = prog.notes?.[`ABSENCE_${k}`];
+              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
+           }
         });
         
+        const absText = absenceTextLines.length > 0 ? `[\n${absenceTextLines.join("\n")}\n]` : "";
+        
+        const dayOffCell = sheet.getCell(`H${dayRow.number}`);
+        dayOffCell.value = absText;
+        dayOffCell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
+        dayOffCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+        dayOffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+        dayOffCell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+
+        // Auto-fit height estimation due to Excel merged cells limitation preventing auto-fit
+        if (absText.length > 0) {
+           let totalLines = 2; // For the brackets [ ]
+           absenceTextLines.forEach(line => {
+             totalLines += Math.max(1, Math.ceil(line.length / 45));
+           });
+           const requiredHeight = Math.max(30, totalLines * 15);
+           dayRow.height = requiredHeight;
+        } else {
+           dayRow.height = 20;
+        }
+
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
         shiftsToday.forEach((shift, idx) => {
           const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-          const staffInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join(" - ");
+          
+          let staffTokens: {text: string, type: string}[] = [];
+          assignments.forEach(a => {
+             const s = getStaff(a.staffId);
+             if (s) {
+                 const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : 'reg';
+                 staffTokens.push({ text: s.initials, type });
+             }
+          });
           
           const flightIds = shift.flightIds || [];
-          let fn = "", from = "", sta = "NS", std = "---", to = "";
+          let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+          if (fObjs.length === 0) fObjs = [{} as Flight];
           
-          if (flightIds.length > 0) {
-            const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-            if (fObjs.length > 0) {
-              fn = fObjs.map(f => f.flightNumber).join("/");
-              from = fObjs.map(f => f.from).join("-");
-              to = fObjs.map(f => f.to).join("-");
-              sta = fObjs[0].sta || "NS";
-              std = fObjs[0].std || "---";
-            }
+          const startRowNo = sheet.rowCount + 1;
+          
+          fObjs.forEach((f, fIndex) => {
+             const rt = sheet.addRow([
+                fIndex === 0 ? (idx + 1).toString() : "",
+                f.flightNumber ? f.flightNumber.replace("/", " / ") : "",
+                f.from || "",
+                f.sta || "NS",
+                f.std || "---",
+                f.to || "",
+                fIndex === 0 ? (shift.pickupTime || "N.S") : "",
+                "" // staff will be added later
+             ]);
+             
+             rt.eachCell((cell) => {
+                 cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                 cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+             });
+             
+             if (fIndex === 0) {
+                 const pickupCell = sheet.getCell(`G${rt.number}`);
+                 pickupCell.font = { bold: true, size: 10 };
+                 pickupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+             }
+          });
+          
+          const endRowNo = sheet.rowCount;
+          
+          if (fObjs.length > 1) {
+              sheet.mergeCells(`A${startRowNo}:A${endRowNo}`);
+              sheet.mergeCells(`G${startRowNo}:G${endRowNo}`);
+              sheet.mergeCells(`H${startRowNo}:H${endRowNo}`);
           }
           
-          exportData.push({
-            "S/N": (idx + 1).toString(),
-            "Flight No/Day": fn,
-            "From": from,
-            "STA": sta,
-            "STD": std,
-            "To": to,
-            "Pick up Time": shift.pickupTime,
-            "SDU Staff Assignment": staffInitials
+          const staffCell = sheet.getCell(`H${startRowNo}`);
+          const richText: any[] = [];
+          
+          staffTokens.forEach((t, i) => {
+              let color = 'FF000000';
+              if (t.type === 'driver') color = 'FF15803D';
+              if (t.type === 'labour') color = 'FFB91C1C';
+              if (t.type === 'sec') color = 'FF7E22CE';
+              
+              if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
+              richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
           });
+          
+          const shiftNote = prog.notes?.[shift.id] || shift.description || "";
+          if (shiftNote) {
+              if (richText.length > 0) richText.push({ text: "\n" });
+              richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
+          }
+          
+          if (richText.length > 0) {
+              staffCell.value = { richText };
+          }
+          staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         });
-        exportData.push({}); // Empty row separator
       });
       
-      const ws = XLSX.utils.json_to_sheet(exportData);
+      sheet.addRow([]);
+      const fRow1 = sheet.addRow(["Prepared By: " + (profile?.preparedBy || "")]);
+      const fRow2 = sheet.addRow(["Revised By: " + (profile?.revisedBy || "")]);
       
-      const colWidths = [
-        { wch: 20 },
-        { wch: 15 },
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 8 }, 
-        { wch: 15 },
-        { wch: 50 },
-      ];
-      ws['!cols'] = colWidths;
-      
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Staff Program");
-      XLSX.writeFile(wb, `SkyOPS_Staff_Program_${startDate}.xlsx`);
+      fRow1.getCell(1).font = { bold: true, size: 10 };
+      fRow2.getCell(1).font = { bold: true, size: 10 };
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `SkyOPS_Staff_Program_${startDate}.xlsx`);
     } catch (err) {
       console.error(err);
       alert("Failed to export Excel report.");
@@ -1147,21 +1335,23 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
-  const generateStaffPdfReport = () => {
+  const generateStaffPdfReport = async () => {
     setIsGeneratingStaffPdf(true);
     try {
-      const doc = new jsPDF("l", "mm", "a4");
+      const profile = await db.getUserProfile();
+      const preparedBy = profile?.preparedBy || "";
+      const revisedBy = profile?.revisedBy || "";
       
-      doc.setFontSize(10);
+      const doc = new jsPDF("l", "mm", "a3"); // Changed from a4 to a3
+      
+      doc.setFontSize(14); // Increased font size
       doc.setFont("helvetica", "bold");
       const title = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
-      doc.text(title, 148, 10, { align: "center" });
+      doc.text(title, 210, 10, { align: "center" }); // Centered for A3 (420 width / 2)
 
       try {
-        const cLogo = localStorage.getItem("skyops_company_logo");
-        const sLogo = localStorage.getItem("skyops_skyops_logo");
-        if (cLogo) doc.addImage(cLogo, "PNG", 5, 2, 15, 15);
-        if (sLogo) doc.addImage(sLogo, "PNG", 277, 2, 15, 15);
+        if (profile?.companyLogo) doc.addImage(profile.companyLogo, "PNG", 5, 2, 15, 15);
+        if (profile?.skyopsLogo) doc.addImage(profile.skyopsLogo, "PNG", 400, 2, 15, 15);
       } catch (e) { }
       
       const tableRows: any[] = [];
@@ -1171,121 +1361,256 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
-        tableRows.push([
-          { content: `${dayName} ${dateFormatted}`, colSpan: 9, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } }
-        ]);
-        
         const shiftsToday = shifts
           .filter((s) => s.pickupDate === prog.dateString)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
-        const offDuty = prog.offDuty || [];
-        const absenceTextLines: string[] = [];
-        
         const categories = {
-          "Traffic Day OFF": [],
-          "SEC Day OFF": [],
-          "Worker Day OFF": [],
-          "Annual": [],
-          "Lieu": [],
-          "SSH Support": []
+          "Day off": [] as string[],
+          "Annual": [] as string[],
+          "Lieu": [] as string[],
+          "Sick Leave": [] as string[],
+          "SSH Support": [] as string[]
         };
-        
-        offDuty.forEach(od => {
-          const st = getStaff(od.staffId);
-          if (st) {
-             let mappedCat = od.type as string;
-             if (mappedCat === "DAYS OFF") mappedCat = "Traffic Day OFF";
-             else if (mappedCat === "ANNUAL LEAVE") mappedCat = "Annual";
-             else if (mappedCat === "ROSTER LEAVE") mappedCat = "Lieu";
-             else mappedCat = "Worker Day OFF";
-             
-             (categories as any)[mappedCat] = ((categories as any)[mappedCat] || []).concat(st.initials);
+
+        const workingIds = new Set(prog.assignments.map((a) => a.staffId));
+        const offStaff = staff.filter((s) => !workingIds.has(s.id));
+
+        offStaff.forEach((s) => {
+          const leave = leaveMapByStaff[s.id]?.find(
+            (l) => l.startDate <= prog.dateString! && l.endDate >= prog.dateString!
+          );
+          
+          let isRosterOutOfContract = false;
+          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+
+          let mappedCat = "";
+          if (leave) {
+            if (leave.type === "Annual leave") mappedCat = "Annual";
+            else if (leave.type === "Roster leave") mappedCat = "Lieu";
+            else if (leave.type === "Sick leave") mappedCat = "Sick Leave";
+            else mappedCat = "Day off";
+          } else if (isRosterOutOfContract) {
+            mappedCat = "Lieu";
+          } else {
+            if (s.type === "Local") mappedCat = "Day off";
+          }
+
+          if (mappedCat === "Day off") {
+             // Treat all as "Day off" without mentioning labour or worker
+             mappedCat = "Day off";
+          }
+
+          if (mappedCat && (categories as any)[mappedCat]) {
+            (categories as any)[mappedCat].push(s.initials);
           }
         });
-        
+
+        const absenceTextLines: string[] = [];
         Object.entries(categories).forEach(([k, v]) => {
            if (v.length > 0) {
               const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join("-")}${note ? ` (${note})` : ''}`);
+              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
            }
         });
         
-        const combinedAbsenceText = absenceTextLines.join("\n");
+        const combinedAbsenceText = absenceTextLines.join(" | ");
+        
+        let headerText = `${dayName} ${dateFormatted}`;
+
+        tableRows.push([
+          { content: headerText, colSpan: 3, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "left" } },
+          { content: combinedAbsenceText ? `[ ${combinedAbsenceText} ]` : "", colSpan: 5, styles: { fillColor: [79, 129, 189], textColor: [255,255,255], fontStyle: "bold", halign: "right" } }
+        ]);
           
         if (shiftsToday.length === 0) {
            tableRows.push([
-             { content: "No shifts", colSpan: 8, styles: { halign: "center" } },
-             { content: combinedAbsenceText, styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle" } }
+             { content: "No shifts", colSpan: 8, styles: { halign: "center" } }
            ]);
         } else {
-           shiftsToday.forEach((shift, idx) => {
+             shiftsToday.forEach((shift, idx) => {
              const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
-             let pureInitials = assignments.map(a => getStaff(a.staffId)?.initials).filter(Boolean).join("\n");
+             const staffTokens = assignments.map(a => {
+                 const s = getStaff(a.staffId);
+                 if (!s) return null;
+                 let type = "traffic";
+                 if (s.isSecurity) type = "sec";
+                 else if (s.isLabour) type = "labour";
+                 else if (s.isDriver) type = "driver";
+                 return { text: s.initials, type };
+             }).filter(Boolean) as {text: string, type: string}[];
              
-             if (prog.notes?.[shift.id]) {
-                pureInitials += `\n[${prog.notes[shift.id]}]`;
+             let pureInitials = staffTokens.map(t => t.text).join("-");
+             
+             const shiftNote = prog.notes?.[shift.id] || shift.description || "";
+             if (shiftNote) {
+                 if (pureInitials) pureInitials += `\n`;
+                 pureInitials += `${shiftNote}`;
              }
              
              const flightIds = shift.flightIds || [];
-             let fn = "", from = "", sta = "NS", std = "---", to = "";
-             
-             if (flightIds.length > 0) {
-               const fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-               if (fObjs.length > 0) {
-                 fn = fObjs.map(f => f.flightNumber).join("\n");
-                 from = fObjs.map(f => f.from).join("\n");
-                 to = fObjs.map(f => f.to).join("\n");
-                 sta = fObjs[0].sta || "NS";
-                 std = fObjs[0].std || "---";
-               }
+             let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+             if (fObjs.length === 0) {
+                 fObjs = [{ flightNumber: "", from: "", to: "", sta: "NS", std: "---" } as Flight];
              }
              
-             const rowData: any[] = [
-               (idx + 1).toString(),
-               fn,
-               from,
-               sta,
-               std,
-               to,
-               shift.pickupTime || "N.S",
-               pureInitials
-             ];
+             const shiftColor = idx % 2 === 0 ? [255, 255, 255] : [245, 248, 255];
+             const shiftBorder = 0.6;
+             const flightBorder = 0.1;
              
-             if (idx === 0) {
-                rowData.push({
-                   content: combinedAbsenceText,
-                   rowSpan: shiftsToday.length,
-                   styles: { textColor: [200, 0, 0], fontStyle: "bold", halign: "center", valign: "middle", fontSize: 6 }
-                });
-             }
-             
-             tableRows.push(rowData);
+             fObjs.forEach((f, fIdx) => {
+                 const isFirstFlight = fIdx === 0;
+                 const isLastFlight = fIdx === fObjs.length - 1;
+                 
+                 const rowStyles = { 
+                    fillColor: shiftColor, 
+                    lineWidth: { top: flightBorder, bottom: isLastFlight ? shiftBorder : flightBorder, left: flightBorder, right: flightBorder },
+                    valign: "middle" as const
+                 };
+                 
+                 if (isFirstFlight) {
+                     tableRows.push([
+                         { content: (idx + 1).toString(), rowSpan: fObjs.length, styles: { ...rowStyles, lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
+                         { content: f.flightNumber || "", styles: rowStyles },
+                         { content: f.from || "", styles: rowStyles },
+                         { content: f.sta || "NS", styles: rowStyles },
+                         { content: f.std || "---", styles: rowStyles },
+                         { content: f.to || "", styles: rowStyles },
+                         { content: shift.pickupTime || "N.S", rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", fontSize: 9, fillColor: [248, 250, 252], lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } } },
+                         { content: pureInitials, rowSpan: fObjs.length, styles: { ...rowStyles, fontStyle: "bold", lineWidth: { top: flightBorder, bottom: shiftBorder, left: flightBorder, right: flightBorder } }, customInitials: staffTokens, customNote: shiftNote } as any
+                     ]);
+                 } else {
+                     tableRows.push([
+                         { content: f.flightNumber || "", styles: rowStyles },
+                         { content: f.from || "", styles: rowStyles },
+                         { content: f.sta || "NS", styles: rowStyles },
+                         { content: f.std || "---", styles: rowStyles },
+                         { content: f.to || "", styles: rowStyles }
+                     ]);
+                 }
+             });
            });
         }
       });
       
       autoTable(doc, {
         startY: 18,
-        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)", ""]],
+        head: [["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment\n(staff initials)"]],
         body: tableRows,
         theme: "grid",
-        margin: { top: 5, right: 5, bottom: 5, left: 5 },
-        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 7 },
-        styles: { fontSize: 6, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        margin: { top: 2, right: 3, bottom: 2, left: 3 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 9 },
+        styles: { fontSize: 9, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
         columnStyles: {
-            0: { cellWidth: 8 },
-            1: { cellWidth: 20 },
-            2: { cellWidth: 15 },
-            3: { cellWidth: 15 },
-            4: { cellWidth: 15 },
-            5: { cellWidth: 15 },
-            6: { cellWidth: 20 },
-            7: { cellWidth: 'auto', fontStyle: 'bold' },
-            8: { cellWidth: 60 }
+            0: { cellWidth: 15 },
+            1: { cellWidth: 45 },
+            2: { cellWidth: 20 },
+            3: { cellWidth: 20 },
+            4: { cellWidth: 20 },
+            5: { cellWidth: 20 },
+            6: { cellWidth: 35 },
+            7: { cellWidth: 'auto' }
         },
+        willDrawCell: (data) => {
+            if (data.column.index === 7 && data.cell.section === 'body') {
+                if (!data.cell.raw || typeof data.cell.raw !== 'object' || !(data.cell.raw as any).customInitials) return;
+                // Save lines generated by autoTable's height calculation
+                (data.cell.raw as any)._lines = [...data.cell.text];
+                // Clear text so we draw it manually in didDrawCell
+                data.cell.text = [];
+            }
+        },
+        didDrawCell: (data) => {
+            if (data.column.index === 7 && data.cell.section === 'body') {
+                const raw = data.cell.raw as any;
+                if (!raw || !raw._lines) return;
+                
+                const lines = raw._lines as string[];
+                const customInitials = raw.customInitials as { text: string, type: string }[] || [];
+                const customNote = raw.customNote as string;
+                
+                doc.setFontSize(data.cell.styles.fontSize);
+                const lineHeight = doc.getLineHeight() * ((data.cell.styles as any).lineHeightFactor || 1.15);
+                const contentHeight = lines.length * lineHeight;
+                
+                // padding properties are part of the cell object in jspdf-autotable
+                const topPadding = typeof data.cell.padding === 'function' ? data.cell.padding('top') : (data.cell.padding as any).top || 0;
+                const leftPadding = typeof data.cell.padding === 'function' ? data.cell.padding('left') : (data.cell.padding as any).left || 0;
+                
+                let cursorY = data.cell.y + topPadding;
+                if (data.cell.styles.valign === 'middle') {
+                    cursorY = data.cell.y + (data.cell.height / 2) - (contentHeight / 2) + (lineHeight / 2);
+                } else {
+                    cursorY += (lineHeight / 2);
+                }
+                
+                let reachedNoteRegion = false;
+                
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i];
+                    
+                    const normalizedLine = line.replace(/[\s\(\)]/g, '');
+                    const normalizedNote = customNote ? customNote.replace(/[\s\(\)]/g, '') : '';
+                    if (normalizedLine.length > 0 && normalizedNote && normalizedNote.includes(normalizedLine)) {
+                        reachedNoteRegion = true;
+                    }
+
+                    const textWidth = doc.getTextWidth(line);
+                    let startX = data.cell.x + leftPadding;
+                    if (data.cell.styles.halign === 'center') {
+                        startX = data.cell.x + (data.cell.width / 2) - (textWidth / 2);
+                    }
+                    
+                    let cursorX = startX;
+                    const words = line.split(/(\s+|-|\(|\))/g);
+                    
+                    for (const word of words) {
+                        if (!word) continue;
+                        
+                        let color = [0, 0, 0];
+                        let isBold = true;
+                        
+                        if (reachedNoteRegion) {
+                            color = [255, 0, 0];
+                            isBold = true;
+                        } else {
+                            const token = customInitials.find(t => t.text === word);
+                            if (token) {
+                                switch(token.type) {
+                                    case 'driver': color = [21, 128, 61]; break; // Dark Green
+                                    case 'labour': color = [185, 28, 28]; break; // Dark Red
+                                    case 'sec': color = [126, 34, 206]; break; // Dark Purple
+                                    default: color = [0, 0, 0]; break;
+                                }
+                            }
+                        }
+                        
+                        doc.setFont("helvetica", isBold ? "bold" : "normal");
+                        doc.setTextColor(color[0], color[1], color[2]);
+                        doc.text(word, cursorX, cursorY, { baseline: 'middle' });
+                        cursorX += doc.getTextWidth(word);
+                    }
+                    cursorY += lineHeight;
+                }
+            }
+        }
       });
+      
+      const finalY = (doc as any).lastAutoTable.finalY || 100;
+      if (finalY > doc.internal.pageSize.getHeight() - 12) {
+          doc.addPage();
+          doc.setFontSize(8);
+          doc.setTextColor(0, 0, 0);
+          doc.text(`Prepared By : ${preparedBy}`, 14, 15);
+          doc.text(`Revised By : ${revisedBy}`, 14, 22);
+      } else {
+          doc.setFontSize(8);
+          doc.setTextColor(0, 0, 0);
+          doc.text(`Prepared By : ${preparedBy}`, 14, finalY + 6);
+          doc.text(`Revised By : ${revisedBy}`, 14, finalY + 12);
+      }
       
       doc.save(`SkyOPS_Staff_Program_${startDate}.pdf`);
     } catch (err) {
@@ -1296,6 +1621,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
+  const [shiftEditModal, setShiftEditModal] = React.useState<{dateString: string, shiftId: string} | null>(null);
+
   const handleDragStart = (
     e: React.DragEvent,
     staffId: string,
@@ -1304,7 +1631,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     role: string,
   ) => {
     e.dataTransfer.setData(
-      "application/json",
+      "text/plain",
       JSON.stringify({ staffId, currentShiftId, date, role }),
     );
     e.dataTransfer.effectAllowed = "move";
@@ -1321,13 +1648,127 @@ export const ProgramDisplay: React.FC<Props> = ({
     note: string
   ) => {
     if (!onUpdatePrograms) return;
+    const newPrograms = programs.map((p) => {
+      if (p.dateString === dateString) {
+        return {
+          ...p,
+          notes: {
+            ...(p.notes || {}),
+            [targetId]: note,
+          },
+        };
+      }
+      return p;
+    });
+
+    onUpdatePrograms(newPrograms);
+  };
+
+  const executeMove = (
+    staffId: string,
+    currentShiftId: string,
+    date: string,
+    role: string,
+    targetShiftId: string,
+    targetDate: string,
+  ) => {
+    if (date !== targetDate) return;
     const newPrograms = [...programs];
-    const prog = newPrograms.find((p) => p.dateString === dateString);
-    if (!prog) return;
+    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
+    if (progIndex === -1) return;
+    
+    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
+    newPrograms[progIndex] = prog;
 
-    if (!prog.notes) prog.notes = {};
-    prog.notes[targetId] = note;
+    const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
 
+    if (!currentShiftId.startsWith("ABSENCE")) {
+      const staffObj = staff.find((s) => s.id === staffId);
+      const isDriver = staffObj?.isDriver;
+
+      // If dropped onto the same shift it was already in, move it to the front
+      if (currentShiftId === targetShiftId) {
+        const existingIdx = prog.assignments.findIndex(
+          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+        );
+        if (existingIdx !== -1) {
+          const minSort = Math.min(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          prog.assignments[existingIdx].manualSortIndex = minSort - 1;
+          onUpdatePrograms(newPrograms);
+        }
+        return;
+      }
+
+      const oldIdx = prog.assignments.findIndex(
+        (a) => a.staffId === staffId && a.shiftId === currentShiftId,
+      );
+      if (oldIdx !== -1) {
+        prog.assignments.splice(oldIdx, 1);
+      }
+    } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
+      // Dragging out of a leave category into either a working shift OR another leave category
+      const leavesToDelete = leaveRequests.filter(l => 
+        l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
+      );
+      if (leavesToDelete.length > 0) {
+        Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
+           if (onUpdateLeaves) {
+               const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
+               onUpdateLeaves(remaining);
+           }
+        });
+      }
+    }
+    
+    if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
+      const exists = prog.assignments.some(
+        (a) => a.staffId === staffId && a.shiftId === targetShiftId,
+      );
+      if (!exists) {
+        const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+        prog.assignments.push({
+          id: Math.random().toString(36).substr(2, 9),
+          staffId,
+          shiftId: targetShiftId,
+          flightId: "",
+          role: role || "OPS",
+          manualSortIndex: maxSort + 1
+        });
+      }
+    } else if (isTargetAbsence && targetShiftId !== "ABSENCE") {
+      // Handle dropping into a specific absence category
+      const cat = targetShiftId.replace("ABSENCE_", "");
+      let type: any = null;
+      if (cat === "ANNUAL LEAVE") type = "Annual leave";
+      if (cat === "SICK LEAVE") type = "Sick leave";
+      if (cat === "ROSTER LEAVE") type = "Roster leave";
+      if (cat === "DAYS OFF") type = "Day off";
+      
+      const st = staff.find(s => s.id === staffId);
+      if (type === "Roster leave" && st?.type === "Local") {
+        return;
+      }
+      
+      if (type) {
+        const newLeaveId = Math.random().toString(36).substr(2, 9);
+        const req = {
+          id: newLeaveId,
+          staffId,
+          type,
+          startDate: targetDate,
+          endDate: targetDate,
+          notes: "Assigned visually",
+          createdAt: new Date().toISOString()
+        };
+        db.upsertLeave(req as any).then(() => {
+          if (onUpdateLeaves) {
+              // Remove previous overlapping leaves from same day to prevent duplicates
+              const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
+              onUpdateLeaves([...prevLeaves, req as any]);
+          }
+        });
+      }
+    }
     onUpdatePrograms(newPrograms);
   };
 
@@ -1337,46 +1778,33 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetDate: string,
   ) => {
     e.preventDefault();
-    const data = e.dataTransfer.getData("application/json");
+    const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
 
     try {
       const { staffId, currentShiftId, date, role } = JSON.parse(data);
-      if (date !== targetDate) return;
-      const newPrograms = [...programs];
-      const prog = newPrograms.find((p) => p.dateString === targetDate);
-      if (!prog) return;
-      if (currentShiftId !== "ABSENCE") {
-        const staffObj = staff.find((s) => s.id === staffId);
-        const isDriver = staffObj?.isDriver;
-
-        if (!isDriver || targetShiftId === "ABSENCE") {
-          const oldIdx = prog.assignments.findIndex(
-            (a) => a.staffId === staffId && a.shiftId === currentShiftId,
-          );
-          if (oldIdx !== -1) {
-            prog.assignments.splice(oldIdx, 1);
-          }
-        }
-      }
-      if (targetShiftId !== "ABSENCE") {
-        const exists = prog.assignments.some(
-          (a) => a.staffId === staffId && a.shiftId === targetShiftId,
-        );
-        if (!exists) {
-          prog.assignments.push({
-            id: Math.random().toString(36).substr(2, 9),
-            staffId,
-            shiftId: targetShiftId,
-            flightId: "",
-            role: role || "OPS",
-          });
-        }
-      }
-      onUpdatePrograms(newPrograms);
+      executeMove(staffId, currentShiftId, date, role, targetShiftId, targetDate);
     } catch (err) {
       console.error("Drop failed", err);
     }
+  };
+
+  const handleTargetContainerTap = (targetShiftId: string, targetDate: string) => {
+    if (!targetShiftId.startsWith("ABSENCE") && targetShiftId !== "OFFDUTY") {
+      setShiftEditModal({ dateString: targetDate, shiftId: targetShiftId });
+    }
+  };
+
+  const [staffActionModal, setStaffActionModal] = React.useState<{
+    staffId: string;
+    currentShiftId: string;
+    date: string;
+    role: string;
+  } | null>(null);
+
+  const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
+    e.stopPropagation();
+    setStaffActionModal({ staffId, currentShiftId, date, role });
   };
 
   const staffStats = React.useMemo(() => {
@@ -1445,6 +1873,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (restHours !== null && restHours < minRestHours) {
       return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
+
     const target = staffStats[s.id]?.target ?? 5;
 
     const diff = daysWorked - target;
@@ -2363,9 +2792,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     .map((fid) => getFlight(fid)?.flightNumber)
                                     .filter(Boolean)
                                     .join(" / ") || "NIL";
-                                const nonLabourCount = assignments.filter(
-                                  (a) => !getStaff(a.staffId)?.isLabour,
-                                ).length;
+                                const nonLabourCount = assignments.filter((a) => {
+                                  const st = getStaff(a.staffId);
+                                  return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+                                }).length;
                                 const isFull = nonLabourCount >= shift.maxStaff;
                                 const isOver = nonLabourCount > shift.maxStaff;
 
@@ -2414,7 +2844,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     onDrop={(e) =>
                                       handleDrop(e, shift.id, prog.dateString!)
                                     }
-                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""}`}
+                                    onClick={() => handleTargetContainerTap(shift.id, prog.dateString!)}
+                                    className={`hover:bg-slate-50 transition-colors ${isShiftModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : isCriticalMissing ? "bg-rose-50/50" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
                                   >
                                     <td
                                       className={`px-4 py-3 text-center font-bold ${isCriticalMissing ? "text-rose-500" : "text-slate-400"}`}
@@ -2590,7 +3021,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     a.role,
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
+                                                onClick={(e) => {
+                                                  if (
+                                                    manualAssignments &&
+                                                    manualAssignments.some(
+                                                      (ma) =>
+                                                        ma.staffId === st.id &&
+                                                        ma.shiftId === shift.id,
+                                                    )
+                                                  ) return;
+                                                  handleStaffItemTap(e, st.id, shift.id, prog.dateString!, a.role);
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{st.initials}</span>
                                                 {manualAssignments &&
@@ -2718,14 +3160,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           </div>
                                         )}
                                         
-                                        <div className="mt-1">
-                                          <input 
-                                              type="text"
-                                              placeholder="Shift note..."
-                                              value={prog.notes?.[shift.id] || ''}
-                                              onChange={(e) => handleUpdateNote(prog.dateString!, shift.id, e.target.value)}
-                                              className="w-full text-[10px] p-1 bg-white border border-slate-200 rounded text-slate-700 outline-none focus:border-indigo-400 placeholder:text-slate-300 transition-colors"
-                                          />
+                                        <div className="mt-1 flex flex-col gap-1">
+                                          <button 
+                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
+                                              className="w-full flex items-center justify-center gap-1.5 text-[10px] p-1.5 bg-slate-50 border border-slate-200 border-dashed rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-colors font-semibold"
+                                          >
+                                              <MessageSquare size={12} />
+                                              {prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
+                                          </button>
+                                          {prog.notes?.[shift.id] && (
+                                              <div className="text-[10px] text-red-600 font-bold p-1.5 bg-red-50 border border-red-100 rounded break-words whitespace-pre-wrap">
+                                                  <strong>Note: </strong> {prog.notes[shift.id]}
+                                              </div>
+                                          )}
                                         </div>
                                       </div>
                                     </td>
@@ -2738,18 +3185,34 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
-                        className="border-t-4 border-slate-100"
+                        className={`border-t-4 border-slate-100 transition-colors ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
                         onDragOver={handleDragOver}
                         onDrop={(e) =>
                           handleDrop(e, "ABSENCE", prog.dateString!)
                         }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTargetContainerTap("ABSENCE", prog.dateString!);
+                        }}
                       >
                         <div className="px-6 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                          <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
-                            Absence and Rest Registry
-                          </h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-black uppercase text-slate-500 tracking-widest">
+                              Absence and Rest Registry
+                            </h4>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUnlockAbsences(!unlockAbsences);
+                              }}
+                              className={`p-1 rounded ${unlockAbsences ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-500"} hover:opacity-80 transition-all`}
+                              title={unlockAbsences ? "Lock absences" : "Unlock absences to reassign"}
+                            >
+                              {unlockAbsences ? <Unlock size={12} /> : <Lock size={12} />}
+                            </button>
+                          </div>
                           <span className="text-[9px] font-bold text-slate-400 italic">
-                            Drag here to unassign
+                            Drag or tap here to unassign
                           </span>
                         </div>
                         <table className="w-full text-left border-collapse">
@@ -2775,11 +3238,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                               return (
                                 <tr
                                   key={cat}
-                                  className={
-                                    isCatModified
-                                      ? "bg-indigo-50/70 border-l-4 border-indigo-400"
-                                      : ""
-                                  }
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                  }}
+                                  onDrop={(e) => {
+                                    e.stopPropagation();
+                                    handleDrop(e, `ABSENCE_${cat}`, prog.dateString!);
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTargetContainerTap(`ABSENCE_${cat}`, prog.dateString!);
+                                  }}
+                                  className={`transition-colors ${isCatModified ? "bg-indigo-50/70 border-l-4 border-indigo-400" : ""} ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-indigo-50" : ""}`}
                                 >
                                   <td className="px-4 py-3 font-bold align-top">
                                     {cat}
@@ -2802,9 +3272,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             null,
                                           );
                                           const isLocked =
-                                            cat === "ROSTER LEAVE" ||
-                                            cat === "ANNUAL LEAVE" ||
-                                            isRequestedDayOff;
+                                            !unlockAbsences && (
+                                              cat === "ROSTER LEAVE" ||
+                                              cat === "ANNUAL LEAVE" ||
+                                              isRequestedDayOff
+                                            );
                                           return (
                                             <React.Fragment key={s.id}>
                                               <div
@@ -2817,7 +3289,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   handleDragStart(
                                                     e,
                                                     s.id,
-                                                    "ABSENCE",
+                                                    `ABSENCE_${cat}`,
                                                     prog.dateString!,
                                                     s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
                                                     s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
@@ -2829,7 +3301,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     "OPS"
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
+                                                onClick={(e) => {
+                                                  if (isLocked) return;
+                                                  handleStaffItemTap(e, s.id, `ABSENCE_${cat}`, prog.dateString!, s.isShiftLeader || s.initials.toUpperCase() === "SK-ATZ" ? "SL" :
+                                                    s.isLoadControl || s.initials.toUpperCase() === "SK-ATZ" ? "LC" :
+                                                    s.isRamp ? "RMP" :
+                                                    s.isLostFound ? "LF" :
+                                                    s.isLabour ? "LBR" :
+                                                    s.isSecurity ? "SEC" :
+                                                    s.isDriver ? "DRV" :
+                                                    "OPS"
+                                                  );
+                                                }}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{s.initials}</span>
                                                 {isLocked ? (
@@ -2861,6 +3345,222 @@ export const ProgramDisplay: React.FC<Props> = ({
                 })}
             </>
           )}
+        </div>
+      )}
+
+      {shiftEditModal && (() => {
+        const progIdx = programs.findIndex(p => p.dateString === shiftEditModal.dateString);
+        if (progIdx === -1) return null;
+        const prog = programs[progIdx];
+        const shift = shifts.find(s => s.id === shiftEditModal.shiftId);
+        if (!shift) return null;
+
+        const currentAssignments = prog.assignments.filter(a => a.shiftId === shift.id);
+        const nonLabourWorkerCount = currentAssignments.filter(a => {
+           const st = staff.find(s => s.id === a.staffId);
+           return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+        }).length;
+        const workingIds = new Set(prog.assignments.map(a => a.staffId));
+        const offStaff = staff.filter(s => !workingIds.has(s.id));
+
+        const addStaff = (staffId: string) => {
+          const newPrograms = [...programs];
+          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
+          newProg.assignments.push({
+            id: Math.random().toString(36).substr(2, 9),
+            staffId,
+            shiftId: shift.id,
+            flightId: "",
+            role: "OPS",
+            manualSortIndex: maxSort + 1
+          });
+          newPrograms[progIdx] = newProg;
+          onUpdatePrograms(newPrograms);
+        };
+
+        const removeStaff = (staffId: string) => {
+          const newPrograms = [...programs];
+          const newProg = { ...newPrograms[progIdx] };
+          newProg.assignments = newProg.assignments.filter(
+            a => !(a.staffId === staffId && a.shiftId === shift.id)
+          );
+          newPrograms[progIdx] = newProg;
+          onUpdatePrograms(newPrograms);
+        };
+
+        return (
+          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh] animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+              <div className="bg-indigo-600 p-4 flex items-center justify-between">
+                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
+                  Shift at {shift.pickupTime} <span className="text-indigo-200">({nonLabourWorkerCount}/{shift.maxStaff})</span>
+                </h3>
+                <button
+                  onClick={() => setShiftEditModal(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Currently Assigned</h4>
+                {currentAssignments.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic mb-4">No staff assigned.</p>
+                ) : (
+                  <div className="space-y-2 mb-4">
+                    {currentAssignments.map(a => {
+                      const st = staff.find(s => s.id === a.staffId);
+                      if (!st) return null;
+                      return (
+                        <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                          <span className="font-bold text-sm text-slate-700">{st.name}</span>
+                          <button
+                            onClick={() => removeStaff(st.id)}
+                            className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pt-4 border-t border-slate-100">Add Staff</h4>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addStaff(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select available staff...</option>
+                  {offStaff.map(st => (
+                    <option key={st.id} value={st.id}>
+                      {st.name} ({st.initials})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {staffActionModal && (() => {
+        const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
+        const st = staff.find(s => s.id === staffActionModal.staffId);
+        if (progIdx === -1 || !st) return null;
+        
+        return (
+          <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+              <div className="bg-indigo-600 p-4 flex items-center justify-between">
+                <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
+                  Move Staff
+                </h3>
+                <button
+                  onClick={() => setStaffActionModal(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg">
+                    {st.initials}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-sm">{st.name}</h4>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Current: {staffActionModal.currentShiftId.startsWith("ABSENCE_") 
+                        ? staffActionModal.currentShiftId.replace("ABSENCE_", "") 
+                        : (shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime ? `Shift at ${shifts.find(s => s.id === staffActionModal.currentShiftId)?.pickupTime}` : staffActionModal.currentShiftId)}
+                    </p>
+                  </div>
+                </div>
+
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Move To</label>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 mb-4"
+                  onChange={(e) => {
+                    executeMove(
+                      staffActionModal.staffId,
+                      staffActionModal.currentShiftId,
+                      staffActionModal.date,
+                      staffActionModal.role,
+                      e.target.value,
+                      staffActionModal.date
+                    );
+                    setStaffActionModal(null);
+                  }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select destination...</option>
+                  <optgroup label="Shifts">
+                    {shifts.filter(s => s.pickupDate === staffActionModal.date)
+                      .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime))
+                      .map(s => (
+                      <option key={s.id} value={s.id} disabled={s.id === staffActionModal.currentShiftId}>Shift at {s.pickupTime}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Absences">
+                    <option value="ABSENCE_ANNUAL LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ANNUAL LEAVE"}>Annual Leave</option>
+                    <option value="ABSENCE_SICK LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_SICK LEAVE"}>Sick Leave</option>
+                    <option value="ABSENCE_ROSTER LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ROSTER LEAVE" || st.type === "Local"}>Roster Leave</option>
+                    <option value="ABSENCE_STANDBY (RESERVE)" disabled={staffActionModal.currentShiftId === "ABSENCE_STANDBY (RESERVE)"}>Standby (Reserve)</option>
+                  </optgroup>
+                  <optgroup label="Action">
+                    <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Remove from Shift / Send Off-Duty</option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {noteModal && (
+        <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+            <div className="bg-indigo-600 p-4 flex items-center justify-between">
+              <h3 className="font-black italic uppercase tracking-widest text-white leading-none flex items-center gap-2">
+                <MessageSquare size={16} />
+                Shift Note
+              </h3>
+            </div>
+            <div className="p-5">
+              <textarea
+                autoFocus
+                className="w-full text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 placeholder:text-slate-300 transition-all resize-none h-32"
+                placeholder="Enter shift note here..."
+                value={noteModal.currentNote}
+                onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
+              />
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 justify-end">
+              <button
+                onClick={() => setNoteModal(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl font-bold transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  handleUpdateNote(noteModal.dateString, noteModal.shiftId, noteModal.currentNote);
+                  setNoteModal(null);
+                }}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
