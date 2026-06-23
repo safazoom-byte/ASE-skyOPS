@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL } from "../constants";
 import { FlightComparatorModal } from "./FlightComparatorModal";
+import { DuplicatePeriodModal } from "./DuplicatePeriodModal";
 
 interface Props {
   flights: Flight[];
@@ -48,6 +49,7 @@ export const FlightManager: React.FC<Props> = ({
   const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState<Partial<Flight>>({});
   const [showComparator, setShowComparator] = useState(false);
+  const [showDuplicatePeriod, setShowDuplicatePeriod] = useState(false);
 
   useEffect(() => {
     if (!newFlight.date && startDate) {
@@ -168,6 +170,15 @@ export const FlightManager: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+          <button
+            onClick={() => setShowDuplicatePeriod(true)}
+            className="flex-1 px-5 py-4 lg:px-8 lg:py-5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl lg:rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-slate-900/20 group border border-slate-700"
+          >
+            <Copy size={16} className="text-blue-400 group-hover:scale-110 transition-transform" />
+            <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest italic">
+              Duplicate Period
+            </span>
+          </button>
           <button
             onClick={() => setShowComparator(true)}
             className="flex-1 px-5 py-4 lg:px-8 lg:py-5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl lg:rounded-2xl flex items-center justify-center gap-3 transition-all shadow-xl shadow-slate-900/20 group border border-slate-700"
@@ -495,6 +506,17 @@ export const FlightManager: React.FC<Props> = ({
             added.forEach(f => onAdd(f));
             updated.forEach(f => onUpdate(f));
             deletedIds.forEach(id => onDelete(id));
+          }}
+        />
+      )}
+
+      {showDuplicatePeriod && (
+        <DuplicatePeriodModal
+          flights={flights}
+          onClose={() => setShowDuplicatePeriod(false)}
+          onDuplicate={(newFlights) => {
+            newFlights.forEach(f => onAdd(f));
+            setShowDuplicatePeriod(false);
           }}
         />
       )}
