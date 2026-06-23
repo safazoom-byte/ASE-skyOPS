@@ -18,7 +18,17 @@ export default defineConfig(({ mode }) => {
     build: {
       target: "esnext",
       outDir: "dist",
-      sourcemap: false
+      sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            xlsx: ['xlsx'],
+            exceljs: ['exceljs'],
+            pdf: ['jspdf', 'jspdf-autotable'],
+            icons: ['lucide-react']
+          }
+        }
+      }
     },
     server: {
       port: 3000,
