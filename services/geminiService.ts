@@ -230,6 +230,7 @@ export const generateAIProgram = async (
   constraintsLog: string,
   config: { numDays: number; minRestHours: number; startDate: string },
 ): Promise<BuildResult> => {
+  data.staff = data.staff.filter((s) => s.isActive !== false);
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
   programEnd.setDate(programStart.getDate() + config.numDays - 1);

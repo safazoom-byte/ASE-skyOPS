@@ -11,6 +11,7 @@ import {
   CalendarDays,
   Sparkles,
   FileCheck,
+  Copy,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL } from "../constants";
 import { FlightComparatorModal } from "./FlightComparatorModal";
@@ -354,16 +355,28 @@ export const FlightManager: React.FC<Props> = ({
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => startInlineEdit(flight)}
-                            className="p-2 text-slate-300 hover:text-indigo-600"
+                            className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"
+                            title="Edit"
                           >
                             <Edit3 size={14} />
+                          </button>
+                          <button
+                            onClick={() => {
+                               const duplicate: Flight = { ...flight, id: Math.random().toString(36).substr(2, 9) };
+                               onAdd(duplicate);
+                            }}
+                            className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
                           </button>
                           <button
                             onClick={() => {
                               if (confirm("Delete flight?"))
                                 onDelete(flight.id);
                             }}
-                            className="p-2 text-slate-300 hover:text-rose-600"
+                            className="p-2 text-slate-300 hover:text-rose-600 transition-colors"
+                            title="Delete"
                           >
                             <Trash2 size={14} />
                           </button>

@@ -185,12 +185,19 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const activeStaff = React.useMemo(() => staff.filter((s) => s.isActive !== false), [staff]);
 
-  const getStaff = (id: string) => staff.find((s) => s.id === id);
+  const getStaff = (id: string) => activeStaff.find((s) => s.id === id);
   const getFlight = (id: string) => flights.find((f) => f.id === id);
   const getShift = (id: string) => shifts.find((s) => s.id === id);
 
   const sortAssignments = (assignments: any[]) => {
     return [...assignments].sort((a, b) => {
+      // Respect manual sort index completely if they differ
+      const aSort = a.manualSortIndex || 0;
+      const bSort = b.manualSortIndex || 0;
+      if (aSort !== bSort) {
+        return aSort - bSort;
+      }
+
       const stA = getStaff(a.staffId);
       const stB = getStaff(b.staffId);
       const score = (assig: any, st: any) => {
@@ -464,7 +471,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
 
       const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
+      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
       const pdfCategories: Record<string, string[]> = {
         "DAYS OFF": [],
         "ROSTER LEAVE": [],
@@ -684,7 +691,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.addPage();
     doc.setFontSize(16);
     doc.text("Weekly Personnel Utilization Audit (Local)", 14, 15);
-    const localStaff = staff.filter((s) => s.type === "Local");
+    const localStaff = activeStaff.filter((s) => s.type === "Local");
     const localAuditData = localStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
@@ -740,7 +747,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.setFontSize(16);
     doc.setTextColor(0, 0, 0);
     doc.text("Weekly Personnel Utilization Audit (Roster)", 14, 15);
-    const rosterStaff = staff.filter((s) => s.type === "Roster");
+    const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
     const rosterAuditData = rosterStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
@@ -1075,7 +1082,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       doc.text("Requested Shifts (Pre-Assigned)", 14, 15);
 
       const requestedShiftsData = manualAssignments.map((ma) => {
-        const st = staff.find((s) => s.id === ma.staffId);
+        const st = activeStaff.find((s) => s.id === ma.staffId);
         const sh = shifts.find((s) => s.id === ma.shiftId);
         const staffName = st ? `${st.initials} - ${st.name}` : ma.staffId;
         const shiftDetails = sh
@@ -1193,7 +1200,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
 
         offStaff.forEach(s => {
           const leave = hasLeaveOnDate(s.id, prog.dateString!);
@@ -1442,7 +1449,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
@@ -1767,7 +1774,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
 
     if (!currentShiftId.startsWith("ABSENCE")) {
-      const staffObj = staff.find((s) => s.id === staffId);
+      const staffObj = activeStaff.find((s) => s.id === staffId);
       const isDriver = staffObj?.isDriver;
 
       // If dropped onto the same shift it was already in, move it to the front
@@ -1828,7 +1835,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (cat === "ROSTER LEAVE") type = "Roster leave";
       if (cat === "DAYS OFF") type = "Day off";
       
-      const st = staff.find(s => s.id === staffId);
+      const st = activeStaff.find(s => s.id === staffId);
       if (type === "Roster leave" && st?.type === "Local") {
         return;
       }
@@ -2678,7 +2685,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const workingIds = new Set(
                     prog.assignments.map((a) => a.staffId),
                   );
-                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
+                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
                   const categories: Record<
                     string,
                     {
@@ -3457,11 +3464,11 @@ export const ProgramDisplay: React.FC<Props> = ({
 
         const currentAssignments = prog.assignments.filter(a => a.shiftId === shift.id);
         const nonLabourWorkerCount = currentAssignments.filter(a => {
-           const st = staff.find(s => s.id === a.staffId);
+           const st = activeStaff.find(s => s.id === a.staffId);
            return st && !st.isLabour && !st.isDriver && !st.isSecurity;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = activeStaff.filter(s => !workingIds.has(s.id) && !(s.isDriver || s.isLabour || s.isSecurity));
+        const offStaff = activeStaff.filter(s => !workingIds.has(s.id));
 
         const addStaff = (staffId: string) => {
           const newPrograms = [...programs];
@@ -3510,7 +3517,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 ) : (
                   <div className="space-y-2 mb-4">
                     {currentAssignments.map(a => {
-                      const st = staff.find(s => s.id === a.staffId);
+                      const st = activeStaff.find(s => s.id === a.staffId);
                       if (!st) return null;
                       return (
                         <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
@@ -3553,7 +3560,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
       {staffActionModal && (() => {
         const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
-        const st = staff.find(s => s.id === staffActionModal.staffId);
+        const st = activeStaff.find(s => s.id === staffActionModal.staffId);
         if (progIdx === -1 || !st) return null;
         
         return (
