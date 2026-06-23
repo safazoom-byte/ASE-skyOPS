@@ -554,11 +554,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         }).length;
         const flightStrs =
           (shift.flightIds || [])
-            .map((fid) => {
-              const f = getFlight(fid);
-              return f ? f.flightNumber : "";
-            })
+            .map((fid) => getFlight(fid))
             .filter(Boolean)
+            .sort((a, b) => (a!.sta || "23:59").localeCompare(b!.sta || "23:59"))
+            .map((f) => f!.flightNumber)
             .join(" / ") || "NIL";
 
         const personnelStrs = assignments
@@ -1256,6 +1255,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           const flightIds = shift.flightIds || [];
           let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+          fObjs.sort((a, b) => (a.sta || "23:59").localeCompare(b.sta || "23:59"));
           if (fObjs.length === 0) fObjs = [{} as Flight];
           
           const startRowNo = sheet.rowCount + 1;
@@ -1544,6 +1544,7 @@ export const ProgramDisplay: React.FC<Props> = ({
              
              const flightIds = shift.flightIds || [];
              let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
+             fObjs.sort((a, b) => (a.sta || "23:59").localeCompare(b.sta || "23:59"));
              if (fObjs.length === 0) {
                  fObjs = [{ flightNumber: "", from: "", to: "", sta: "NS", std: "---" } as Flight];
              }
@@ -2881,12 +2882,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 ));
                                 const flightStrs =
                                   (shift.flightIds || [])
-                                    .map((fid) => getFlight(fid)?.flightNumber)
+                                    .map((fid) => getFlight(fid))
                                     .filter(Boolean)
+                                    .sort((a, b) => (a!.sta || "23:59").localeCompare(b!.sta || "23:59"))
+                                    .map((f) => f!.flightNumber)
                                     .join(" / ") || "NIL";
                                 const nonLabourCount = assignments.filter((a) => {
                                   const st = getStaff(a.staffId);
-                                  return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+                                  return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
                                 }).length;
                                 const isFull = nonLabourCount >= shift.maxStaff;
                                 const isOver = nonLabourCount > shift.maxStaff;
@@ -3466,7 +3469,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const currentAssignments = prog.assignments.filter(a => a.shiftId === shift.id);
         const nonLabourWorkerCount = currentAssignments.filter(a => {
            const st = activeStaff.find(s => s.id === a.staffId);
-           return st && !st.isLabour && !st.isDriver && !st.isSecurity;
+           return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
         const offStaff = activeStaff.filter(s => !workingIds.has(s.id));
