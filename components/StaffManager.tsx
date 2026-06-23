@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Staff, Skill, StaffCategory } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
-import * as XLSX from "xlsx";
 import {
   Users,
   Edit2,
@@ -18,6 +17,10 @@ import {
   Zap,
   Search,
   Power,
+  Plane,
+  HardHat,
+  Calculator,
+  Truck,
 } from "lucide-react";
 
 interface Props {
@@ -37,10 +40,16 @@ export const StaffManager: React.FC<Props> = ({
   defaultMaxShifts,
   onOpenScanner,
 }) => {
+  const isTraffic = (s: Staff) =>
+    !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver;
+
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [showWipeConfirm, setShowWipeConfirm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "timeline">("grid");
+  const [categoryFilter, setCategoryFilter] = useState<
+    "all" | "traffic" | "security" | "labour" | "accountant" | "drivers"
+  >("all");
   const [editingDuration, setEditingDuration] = useState<Staff | null>(null);
   const [editPeriods, setEditPeriods] = useState<
     { start: string; end: string }[]
@@ -109,15 +118,27 @@ export const StaffManager: React.FC<Props> = ({
   };
 
   const filteredStaff = useMemo(() => {
-    if (!searchTerm) return staff;
+    let result = staff;
+    if (categoryFilter !== "all") {
+      if (categoryFilter === "traffic") result = result.filter(isTraffic);
+      else if (categoryFilter === "security")
+        result = result.filter((s) => s.isSecurity);
+      else if (categoryFilter === "labour")
+        result = result.filter((s) => s.isLabour);
+      else if (categoryFilter === "accountant")
+        result = result.filter((s) => s.isAccountant);
+      else if (categoryFilter === "drivers")
+        result = result.filter((s) => s.isDriver);
+    }
+    if (!searchTerm) return result;
     const lower = searchTerm.toLowerCase();
-    return staff.filter(
+    return result.filter(
       (s) =>
         s.name.toLowerCase().includes(lower) ||
         s.initials.toLowerCase().includes(lower) ||
         s.type.toLowerCase().includes(lower),
     );
-  }, [staff, searchTerm]);
+  }, [staff, searchTerm, categoryFilter]);
 
   const handleNewStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,7 +269,12 @@ export const StaffManager: React.FC<Props> = ({
     const field = skillMap[skill];
     if (!field) return;
 
-    const exclusiveSkills: (keyof Staff)[] = ["isDriver", "isLabour", "isSecurity", "isAccountant"];
+    const exclusiveSkills: (keyof Staff)[] = [
+      "isDriver",
+      "isLabour",
+      "isSecurity",
+      "isAccountant",
+    ];
     const allSkills = Object.values(skillMap);
 
     const updateState = (currentState: any) => {
@@ -256,17 +282,17 @@ export const StaffManager: React.FC<Props> = ({
       const nextState = { ...currentState, [field]: newValue };
 
       if (newValue) {
-         if (exclusiveSkills.includes(field)) {
-             // If turning ON an exclusive skill, turn OFF all other skills
-             allSkills.forEach(s => {
-                 if (s !== field) nextState[s] = false;
-             });
-         } else {
-             // If turning ON a normal skill, turn OFF all exclusive skills
-             exclusiveSkills.forEach(s => {
-                 nextState[s] = false;
-             });
-         }
+        if (exclusiveSkills.includes(field)) {
+          // If turning ON an exclusive skill, turn OFF all other skills
+          allSkills.forEach((s) => {
+            if (s !== field) nextState[s] = false;
+          });
+        } else {
+          // If turning ON a normal skill, turn OFF all exclusive skills
+          exclusiveSkills.forEach((s) => {
+            nextState[s] = false;
+          });
+        }
       }
       return nextState;
     };
@@ -295,7 +321,7 @@ export const StaffManager: React.FC<Props> = ({
     return !!member[field];
   };
 
-  const exportStaffCSV = () => {
+  const exportStaffCSV = async () => {
     if (!staff || !staff.length) return;
     const data = staff.map((s) => ({
       "Full Name": s.name,
@@ -315,11 +341,78 @@ export const StaffManager: React.FC<Props> = ({
       Driver: s.isDriver ? "Yes" : "No",
       Accountant: s.isAccountant ? "Yes" : "No",
     }));
+    const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "ManPower");
     XLSX.writeFile(workbook, "SkyOPS_ManPower_Registry.xlsx");
   };
+
+  const getStats = (filterFn: (s: Staff) => boolean) => {
+    const list = staff.filter(filterFn);
+    return {
+      active: list.filter((s) => s.isActive !== false).length,
+      inactive: list.filter((s) => s.isActive === false).length,
+      total: list.length,
+    };
+  };
+
+  const personnelStats = [
+    {
+      id: "all" as const,
+      label: "All Personnel",
+      icon: <Users size={20} />,
+      stats: getStats((s) => true),
+      color: "text-slate-600",
+      border: "border-slate-200",
+      bg: "bg-slate-50",
+    },
+    {
+      id: "traffic" as const,
+      label: "Normal (Traffic)",
+      icon: <Plane size={20} />,
+      stats: getStats((s) => isTraffic(s)),
+      color: "text-blue-600",
+      border: "border-blue-200",
+      bg: "bg-blue-50",
+    },
+    {
+      id: "security" as const,
+      label: "Security",
+      icon: <Shield size={20} />,
+      stats: getStats((s) => s.isSecurity),
+      color: "text-purple-600",
+      border: "border-purple-200",
+      bg: "bg-purple-50",
+    },
+    {
+      id: "labour" as const,
+      label: "Labour",
+      icon: <HardHat size={20} />,
+      stats: getStats((s) => s.isLabour),
+      color: "text-rose-600",
+      border: "border-rose-200",
+      bg: "bg-rose-50",
+    },
+    {
+      id: "accountant" as const,
+      label: "Accountant",
+      icon: <Calculator size={20} />,
+      stats: getStats((s) => s.isAccountant),
+      color: "text-emerald-600",
+      border: "border-emerald-200",
+      bg: "bg-emerald-50",
+    },
+    {
+      id: "drivers" as const,
+      label: "Drivers",
+      icon: <Truck size={20} />,
+      stats: getStats((s) => s.isDriver),
+      color: "text-amber-600",
+      border: "border-amber-200",
+      bg: "bg-amber-50",
+    },
+  ];
 
   return (
     <div className="space-y-8 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
@@ -335,7 +428,7 @@ export const StaffManager: React.FC<Props> = ({
             </h3>
             <p className="text-slate-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mt-1 md:mt-2 flex items-center justify-center md:justify-start gap-2">
               <ShieldCheck size={14} className="text-emerald-500" />{" "}
-              {staff.length} Active Agents
+              {staff.length} Total Registered Agents
             </p>
           </div>
         </div>
@@ -353,6 +446,59 @@ export const StaffManager: React.FC<Props> = ({
             <Eraser size={18} /> Wipe
           </button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {personnelStats.map((stat) => {
+          const isActive = categoryFilter === stat.id;
+          return (
+            <button
+              key={stat.id}
+              onClick={() => setCategoryFilter(isActive ? "all" : stat.id)}
+              className={`text-left bg-white border ${isActive ? "ring-2 ring-blue-500 shadow-md transform scale-105" : "ring-0 shadow-sm"} ${stat.border} rounded-3xl p-5 hover:shadow-md transition-all relative overflow-hidden group focus:outline-none`}
+            >
+              <div
+                className={`absolute top-0 right-0 w-24 h-24 ${stat.bg} rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform ${isActive ? "scale-110 opacity-70" : ""}`}
+              ></div>
+              <div className="flex items-center gap-3 mb-4">
+                <div
+                  className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center`}
+                >
+                  {stat.icon}
+                </div>
+                <h4
+                  className={`text-[10px] md:text-xs font-black uppercase tracking-wider ${isActive ? "text-blue-700" : "text-slate-700"} leading-tight`}
+                >
+                  {stat.label}
+                </h4>
+              </div>
+
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">
+                    {stat.stats.total}
+                  </div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    Total
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 items-end">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                    <ShieldCheck size={10} />
+                    {stat.stats.active} Active
+                  </div>
+                  {stat.stats.inactive > 0 && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md">
+                      <Power size={10} />
+                      {stat.stats.inactive} Inactive
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <div className="max-w-4xl mx-auto">
@@ -466,7 +612,10 @@ export const StaffManager: React.FC<Props> = ({
               <div className="space-y-4 pt-6 border-t border-slate-50">
                 <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex flex-col gap-1">
                   <span>Discipline Matrix</span>
-                  <span className="text-[8px] font-medium text-slate-400 normal-case">Note: Security role only performs security tasks and is assigned upon request.</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">
+                    Note: Security role only performs security tasks and is
+                    assigned upon request.
+                  </span>
                 </p>
                 <div className="flex flex-wrap gap-2 md:gap-3">
                   {AVAILABLE_SKILLS.map((skill) => {
@@ -563,7 +712,9 @@ export const StaffManager: React.FC<Props> = ({
                         <span
                           className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${member.isActive === false ? "text-rose-500" : isRoster ? "text-amber-600" : "text-blue-600"}`}
                         >
-                          {member.isActive === false ? "DEACTIVATED" : `${member.type} AGENT`}
+                          {member.isActive === false
+                            ? "DEACTIVATED"
+                            : `${member.type} AGENT`}
                         </span>
                       </div>
                     </div>
@@ -674,7 +825,11 @@ export const StaffManager: React.FC<Props> = ({
                           });
                         }}
                         className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center transition-all shrink-0 ${member.isActive === false ? "bg-emerald-100 text-emerald-600 hover:bg-emerald-500 hover:text-white" : "bg-slate-100 text-slate-500 hover:bg-red-500 hover:text-white"}`}
-                        title={member.isActive === false ? "Activate member" : "Deactivate member"}
+                        title={
+                          member.isActive === false
+                            ? "Activate member"
+                            : "Deactivate member"
+                        }
                       >
                         <Power size={16} />
                       </button>
@@ -1028,11 +1183,19 @@ export const StaffManager: React.FC<Props> = ({
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setEditingStaff({ ...editingStaff, isActive: editingStaff.isActive !== false ? false : true })}
+                    onClick={() =>
+                      setEditingStaff({
+                        ...editingStaff,
+                        isActive:
+                          editingStaff.isActive !== false ? false : true,
+                      })
+                    }
                     className={`px-5 py-4 border rounded-2xl flex-1 font-black text-xs flex items-center justify-center gap-2 transition-all ${editingStaff.isActive !== false ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"}`}
                   >
                     <Power size={14} />
-                    {editingStaff.isActive !== false ? "ACTIVE ON ROSTER" : "DEACTIVATED"}
+                    {editingStaff.isActive !== false
+                      ? "ACTIVE ON ROSTER"
+                      : "DEACTIVATED"}
                   </button>
                 </div>
               </div>
@@ -1069,7 +1232,10 @@ export const StaffManager: React.FC<Props> = ({
               <div className="space-y-3">
                 <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase flex flex-col gap-1">
                   <span>Discipline Access</span>
-                  <span className="text-[8px] font-medium text-slate-400 normal-case">Note: Security role only performs security tasks and is assigned upon request.</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">
+                    Note: Security role only performs security tasks and is
+                    assigned upon request.
+                  </span>
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_SKILLS.map((skill) => {

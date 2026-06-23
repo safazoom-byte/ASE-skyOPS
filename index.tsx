@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { polyfill } from "mobile-drag-drop";
@@ -58,19 +58,21 @@ import {
   ProgramVersion,
   UserProfile,
 } from "./types";
-import { FlightManager } from "./components/FlightManager";
-import { StaffManager } from "./components/StaffManager";
-import { ShiftManager } from "./components/ShiftManager";
-import { ProgramDisplay } from "./components/ProgramDisplay";
-import { ProgramChat } from "./components/ProgramChat";
-import { ProgramScanner } from "./components/ProgramScanner";
-import { GithubSync } from "./components/GithubSync";
-import { CapacityForecast } from "./components/CapacityForecast";
-import { StationStatistics } from "./components/StationStatistics";
-import { CommandCenter } from "./components/CommandCenter";
-import { Auth } from "./components/Auth";
-import { SkyOpsLogo } from "./components/Logo";
-import { PreRosterModal } from "./components/PreRosterModal";
+
+const FlightManager = React.lazy(() => import("./components/FlightManager").then(m => ({ default: m.FlightManager })));
+const StaffManager = React.lazy(() => import("./components/StaffManager").then(m => ({ default: m.StaffManager })));
+const ShiftManager = React.lazy(() => import("./components/ShiftManager").then(m => ({ default: m.ShiftManager })));
+const ProgramDisplay = React.lazy(() => import("./components/ProgramDisplay").then(m => ({ default: m.ProgramDisplay })));
+const ProgramChat = React.lazy(() => import("./components/ProgramChat").then(m => ({ default: m.ProgramChat })));
+const ProgramScanner = React.lazy(() => import("./components/ProgramScanner").then(m => ({ default: m.ProgramScanner })));
+const GithubSync = React.lazy(() => import("./components/GithubSync").then(m => ({ default: m.GithubSync })));
+const CapacityForecast = React.lazy(() => import("./components/CapacityForecast").then(m => ({ default: m.CapacityForecast })));
+const StationStatistics = React.lazy(() => import("./components/StationStatistics").then(m => ({ default: m.StationStatistics })));
+const CommandCenter = React.lazy(() => import("./components/CommandCenter").then(m => ({ default: m.CommandCenter })));
+const Auth = React.lazy(() => import("./components/Auth").then(m => ({ default: m.Auth })));
+const SkyOpsLogo = React.lazy(() => import("./components/Logo").then(m => ({ default: m.SkyOpsLogo })));
+const PreRosterModal = React.lazy(() => import("./components/PreRosterModal").then(m => ({ default: m.PreRosterModal })));
+
 import { generateAIProgram } from "./services/geminiService";
 import { db, supabase, auth } from "./services/supabaseService";
 import { Session } from "@supabase/supabase-js";
@@ -807,6 +809,7 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
+        <Suspense fallback={<div className="flex h-[50vh] items-center justify-center w-full"><Loader2 className="w-12 h-12 text-blue-500 animate-spin" /></div>}>
         {activeTab === "command" && userProfile?.role === "master" && (
           <CommandCenter currentUser={userProfile} />
         )}
@@ -1562,6 +1565,7 @@ const App: React.FC = () => {
             />
           </div>
         )}
+        </Suspense>
       </main>
 
       {/* Mobile Footer Navigation */}
@@ -1599,41 +1603,41 @@ const App: React.FC = () => {
         ))}
       </nav>
 
-      <ProgramChat
-        data={{ flights, staff, shifts, programs }}
-        onUpdate={setPrograms}
-      />
-
-      <PreRosterModal
-        isOpen={isPreRosterModalOpen}
-        onClose={() => setIsPreRosterModalOpen(false)}
-        onConfirm={confirmGenerateProgram}
-        staff={staff}
-        shifts={shifts}
-        startDate={startDate}
-        endDate={endDate}
-      />
-
-      {showScanner && (
-        <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-[3rem] w-full max-w-5xl h-[85vh] overflow-hidden shadow-2xl flex flex-col relative animate-in zoom-in-95 duration-300">
-            <button
-              onClick={() => setShowScanner(false)}
-              className="absolute top-6 right-6 z-10 p-3 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
-            >
-              <X size={20} />
-            </button>
-            <ProgramScanner
-              onDataExtracted={handleDataExtracted}
-              startDate={startDate}
-              numDays={programDuration}
-              initialTarget={
-                scannerTarget === "all" ? undefined : scannerTarget
-              }
-            />
+      <Suspense fallback={null}>
+        <ProgramChat
+          data={{ flights, staff, shifts, programs }}
+          onUpdate={setPrograms}
+        />
+        <PreRosterModal
+          isOpen={isPreRosterModalOpen}
+          onClose={() => setIsPreRosterModalOpen(false)}
+          onConfirm={confirmGenerateProgram}
+          staff={staff}
+          shifts={shifts}
+          startDate={startDate}
+          endDate={endDate}
+        />
+        {showScanner && (
+          <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-[3rem] w-full max-w-5xl h-[85vh] overflow-hidden shadow-2xl flex flex-col relative animate-in zoom-in-95 duration-300">
+              <button
+                onClick={() => setShowScanner(false)}
+                className="absolute top-6 right-6 z-10 p-3 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+              >
+                <X size={20} />
+              </button>
+              <ProgramScanner
+                onDataExtracted={handleDataExtracted}
+                startDate={startDate}
+                numDays={programDuration}
+                initialTarget={
+                  scannerTarget === "all" ? undefined : scannerTarget
+                }
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Suspense>
     </div>
   );
 };

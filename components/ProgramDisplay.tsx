@@ -10,9 +10,6 @@ import {
   ProgramVersion,
   ManualAssignment,
 } from "../types";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
 import {
   FileDown,
   CalendarDays,
@@ -346,8 +343,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     return parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
   };
 
-  const generateFullReport = () => {
+  const generateFullReport = async () => {
     setIsGeneratingPdf(true);
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF("l", "mm", "a4");
 
     // --- 1. DAILY PROGRAM PAGES ---
@@ -1416,6 +1415,8 @@ export const ProgramDisplay: React.FC<Props> = ({
       const preparedBy = profile?.preparedBy || "";
       const revisedBy = profile?.revisedBy || "";
       
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
       const doc = new jsPDF("l", "mm", "a3"); // Changed from a4 to a3
       
       doc.setFontSize(14); // Increased font size

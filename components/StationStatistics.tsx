@@ -17,8 +17,6 @@ import {
   Palmtree,
   Star,
 } from "lucide-react";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 
 interface Props {
   staff: Staff[];
@@ -242,8 +240,10 @@ export const StationStatistics: React.FC<Props> = ({
     };
   }, [staff, shifts, leaveRequests, startDate, endDate]);
 
-  const downloadPDF = () => {
+  const downloadPDF = async () => {
     if (!stats) return;
+    const { jsPDF } = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default;
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
 

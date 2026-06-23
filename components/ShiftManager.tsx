@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { ShiftConfig, Flight, Skill, Staff, LeaveRequest } from "../types";
 import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from "../constants";
-import * as XLSX from "xlsx";
 import { FlightModalDialog } from "./FlightModalDialog";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {

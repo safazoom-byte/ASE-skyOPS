@@ -12,7 +12,6 @@ import {
   LeaveRequest,
   IncomingDuty,
 } from "../types";
-import * as XLSX from "xlsx";
 import {
   FileUp,
   AlertCircle,
@@ -449,12 +448,14 @@ export const ProgramScanner: React.FC<Props> = ({
         const data = evt.target?.result;
         let rows: any[][];
         if (file.name.match(/\.(xlsx|xls)$/i)) {
+          const XLSX = await import("xlsx");
           const workbook = XLSX.read(data, { type: "binary" });
           rows = XLSX.utils.sheet_to_json(
             workbook.Sheets[workbook.SheetNames[0]],
             { header: 1 },
           ) as any[][];
         } else {
+          const XLSX = await import("xlsx");
           const workbook = XLSX.read(data, { type: "string" });
           rows = XLSX.utils.sheet_to_json(
             workbook.Sheets[workbook.SheetNames[0]],
@@ -481,10 +482,11 @@ export const ProgramScanner: React.FC<Props> = ({
     else reader.readAsText(file);
   };
 
-  const handlePasteSubmit = () => {
+  const handlePasteSubmit = async () => {
     if (!pastedText.trim()) return;
     setIsScanning(true);
     try {
+      const XLSX = await import("xlsx");
       const workbook = XLSX.read(pastedText, { type: "string" });
       const rows = XLSX.utils.sheet_to_json(
         workbook.Sheets[workbook.SheetNames[0]],
