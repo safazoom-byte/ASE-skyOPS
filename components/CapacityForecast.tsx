@@ -60,7 +60,7 @@ export const CapacityForecast: React.FC<Props> = ({
     localStaff.forEach((s) => {
       // Calculate leave overlap
       let leaveDays = 0;
-      const sLeaves = leaveRequests.filter((l) => l.staffId === s.id);
+      const sLeaves = leaveRequests.filter((l) => l.staffId === s.id && l.type !== "Day off");
 
       sLeaves.forEach((l) => {
         const lStart = new Date(l.startDate);
@@ -96,7 +96,7 @@ export const CapacityForecast: React.FC<Props> = ({
 
       // Also deduct leaves for Roster staff if they exist
       let leaveDays = 0;
-      const sLeaves = leaveRequests.filter((l) => l.staffId === s.id);
+      const sLeaves = leaveRequests.filter((l) => l.staffId === s.id && l.type !== "Day off");
       sLeaves.forEach((l) => {
         const lStart = new Date(l.startDate);
         const lEnd = new Date(l.endDate);
