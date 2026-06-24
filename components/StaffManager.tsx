@@ -343,6 +343,26 @@ export const StaffManager: React.FC<Props> = ({
     }));
     const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // Auto-fit columns
+    if (data.length > 0) {
+      const keys = Object.keys(data[0]);
+      const objectMaxLength = keys.map((key) => key.length);
+
+      for (let i = 0; i < data.length; i++) {
+        const values = Object.values(data[i]);
+        for (let j = 0; j < values.length; j++) {
+          const valLen = values[j] ? values[j].toString().length : 0;
+          if (valLen > objectMaxLength[j]) {
+            objectMaxLength[j] = valLen;
+          }
+        }
+      }
+
+      const wscols = objectMaxLength.map((w) => ({ width: w + 2 }));
+      worksheet["!cols"] = wscols;
+    }
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "ManPower");
     XLSX.writeFile(workbook, "SkyOPS_ManPower_Registry.xlsx");

@@ -1422,21 +1422,31 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (shiftNote) minLines += 1;
           estimatedLines = Math.max(minLines, estimatedLines);
 
-          const totalHeightNeeded = Math.max(25, estimatedLines * 18 + 10);
+          const totalHeightNeeded = Math.max(30, estimatedLines * 22 + 15);
           const perRowHeight = totalHeightNeeded / Math.max(1, fObjs.length);
           
           addedRows.forEach(row => {
-              row.height = Math.max(25, perRowHeight);
+              row.height = Math.max(30, perRowHeight);
           });
         });
 
+        let absStartRow = -1;
+        let absEndRow = -1;
+
         // Add absence/leave rows right below the day's physical shifts (Option B - Beside Day Shift)
-        absenceRowsData.forEach((absItem) => {
+        absenceRowsData.forEach((absItem, idx) => {
           const initialsText = absItem.initials.join(" - ");
           const note = prog.notes?.[`ABSENCE_${absItem.category}`];
           const fullStaffText = `${initialsText}${note ? ` (${note})` : ""}`;
 
-          const mergedLabel = absItem.label === "DAY OFF" ? "" : absItem.label;
+          const mergedLabel = idx === 0 ? `${dayName} ${dateFormatted}` : "";
+          let actualLabel = "";
+          if (absItem.label === "DAY OFF") actualLabel = "Days Off";
+          else if (absItem.label === "ANNUAL LEAVE") actualLabel = "Annual leave";
+          else if (absItem.label === "ROSTER LEAVE") actualLabel = "Roster Leave";
+          else if (absItem.label === "SICK LEAVE") actualLabel = "Sick Leave";
+          else actualLabel = absItem.label;
+
           const absRow = sheet.addRow([
             mergedLabel,       // Merged A-F
             "",                // Flight No/Day
@@ -1444,9 +1454,12 @@ export const ProgramDisplay: React.FC<Props> = ({
             "",                // STA
             "",                // STD
             "",                // To
-            "OFF-DUTY",        // Pickup Time
+            actualLabel,       // Pickup Time -> "Days Off" etc.
             fullStaffText      // SDU Staff Assignment
           ]);
+
+          if (idx === 0) absStartRow = absRow.number;
+          absEndRow = absRow.number;
 
           absRow.eachCell((cell, colNumber) => {
             cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
@@ -1472,12 +1485,14 @@ export const ProgramDisplay: React.FC<Props> = ({
             }
           });
           
-          sheet.mergeCells(absRow.number, 1, absRow.number, 6);
-
           // Dynamic row height for the absence row
           const estimatedLines = Math.max(1, Math.ceil(fullStaffText.length / 55));
-          absRow.height = Math.max(22, estimatedLines * 16 + 6);
+          absRow.height = Math.max(28, estimatedLines * 22 + 10);
         });
+
+        if (absStartRow !== -1 && absEndRow !== -1) {
+          sheet.mergeCells(absStartRow, 1, absEndRow, 6);
+        }
       });
       
       sheet.addRow([]);
@@ -2653,17 +2668,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         ))}
       </div>
 
-      {(activeTab === "Daily" || activeTab === "Matrix") && (
-        <div className="flex justify-center px-2 mt-4">
-          <button
-            onClick={handleMarkAllCopied}
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center gap-2"
-          >
-            <CheckCircle2 size={16} />
-            All Modifications Copied
-          </button>
-        </div>
-      )}
+
 
       {showHistory && (
         <div className="bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 shadow-xl animate-in slide-in-from-top-4">
