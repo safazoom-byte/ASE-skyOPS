@@ -245,6 +245,47 @@ const App: React.FC = () => {
   }, [startDate, programDuration]);
 
   useEffect(() => {
+    if (!programs.length || !startDate || !endDate) return;
+    
+    // Check if we need to backfill missing dates (e.g., if AI skipped a day)
+    let hasMissing = false;
+    const start = new Date(`${startDate}T12:00:00Z`);
+    const end = new Date(`${endDate}T12:00:00Z`);
+    const dateSet = new Set(programs.map(p => p.dateString));
+    
+    let current = new Date(start);
+    while (current <= end) {
+      const dStr = current.toISOString().split("T")[0];
+      if (!dateSet.has(dStr)) {
+        hasMissing = true;
+        break;
+      }
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    
+    if (hasMissing) {
+      setPrograms(prev => {
+        const newPrograms = [...prev];
+        let d = new Date(start);
+        let idx = 0;
+        while (d <= end) {
+          const dStr = d.toISOString().split("T")[0];
+          if (!newPrograms.some(p => p.dateString === dStr)) {
+            newPrograms.push({
+              day: idx,
+              dateString: dStr,
+              assignments: []
+            });
+          }
+          d.setUTCDate(d.getUTCDate() + 1);
+          idx++;
+        }
+        return newPrograms.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+      });
+    }
+  }, [programs, startDate, endDate]);
+
+  useEffect(() => {
     localStorage.setItem(UI_PREF_KEYS.START_DATE, startDate);
     localStorage.setItem(UI_PREF_KEYS.END_DATE, endDate);
     localStorage.setItem(UI_PREF_KEYS.REST_HOURS, minRestHours.toString());
