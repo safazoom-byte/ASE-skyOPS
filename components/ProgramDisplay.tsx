@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   MessageSquare,
   X,
+  Edit3,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -1864,6 +1865,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const [shiftEditModal, setShiftEditModal] = React.useState<{dateString: string, shiftId: string} | null>(null);
+  const [isShiftBulkEditMode, setIsShiftBulkEditMode] = React.useState(false);
+  const [shiftBulkEditText, setShiftBulkEditText] = React.useState("");
 
   const handleDragStart = (
     e: React.DragEvent,
@@ -3669,6 +3672,36 @@ export const ProgramDisplay: React.FC<Props> = ({
           onUpdatePrograms(newPrograms);
         };
 
+        const handleSaveBulkEdit = () => {
+          const initialsArray = shiftBulkEditText.split(/[\s,-]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+          const matchedStaffIds = initialsArray.map(initial => {
+            const st = activeStaff.find(s => s.initials.toUpperCase() === initial);
+            return st ? st.id : null;
+          }).filter(Boolean) as string[];
+
+          const newPrograms = [...programs];
+          const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
+          
+          newProg.assignments = newProg.assignments.filter(a => a.shiftId !== shift.id);
+          
+          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          matchedStaffIds.forEach((staffId, i) => {
+            newProg.assignments.push({
+              id: Math.random().toString(36).substr(2, 9),
+              staffId,
+              shiftId: shift.id,
+              flightId: "",
+              role: "OPS",
+              manualSortIndex: maxSort + 1 + i
+            });
+          });
+
+          newPrograms[progIdx] = newProg;
+          onUpdatePrograms(newPrograms);
+          setIsShiftBulkEditMode(false);
+          setShiftBulkEditText("");
+        };
+
         return (
           <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
             <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh] animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
@@ -3676,55 +3709,111 @@ export const ProgramDisplay: React.FC<Props> = ({
                 <h3 className="font-black italic uppercase tracking-widest text-white leading-none">
                   Shift at {shift.pickupTime} <span className="text-indigo-200">({nonLabourWorkerCount}/{shift.maxStaff})</span>
                 </h3>
-                <button
-                  onClick={() => setShiftEditModal(null)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
-                >
-                  <X size={16} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!isShiftBulkEditMode) {
+                        const currentInitials = currentAssignments.map(a => {
+                          const st = activeStaff.find(s => s.id === a.staffId);
+                          return st ? st.initials : "";
+                        }).filter(Boolean).join(" - ");
+                        setShiftBulkEditText(currentInitials);
+                      }
+                      setIsShiftBulkEditMode(!isShiftBulkEditMode);
+                    }}
+                    className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${isShiftBulkEditMode ? "bg-white text-indigo-600" : "bg-indigo-500 hover:bg-indigo-400 text-white"}`}
+                    title="Bulk Edit Initials"
+                  >
+                    <Edit3 size={14} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShiftEditModal(null);
+                      setIsShiftBulkEditMode(false);
+                      setShiftBulkEditText("");
+                    }}
+                    className="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
               <div className="p-4 overflow-y-auto">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Currently Assigned</h4>
-                {currentAssignments.length === 0 ? (
-                  <p className="text-sm text-slate-400 italic mb-4">No staff assigned.</p>
-                ) : (
-                  <div className="space-y-2 mb-4">
-                    {currentAssignments.map(a => {
-                      const st = activeStaff.find(s => s.id === a.staffId);
-                      if (!st) return null;
-                      return (
-                        <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
-                          <span className="font-bold text-sm text-slate-700">{st.name}</span>
-                          <button
-                            onClick={() => removeStaff(st.id)}
-                            className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
+                {isShiftBulkEditMode ? (
+                  <div className="flex flex-col gap-3">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                      Edit Staff Initials
+                    </label>
+                    <p className="text-[10px] text-slate-500 mb-1 leading-tight">
+                      Type staff initials separated by spaces, commas, or dashes (e.g. <span className="font-mono text-slate-700">mz - MH - mk</span>).<br/>
+                      This will replace the entire shift assignment.
+                    </p>
+                    <textarea
+                      value={shiftBulkEditText}
+                      onChange={e => setShiftBulkEditText(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 resize-none h-32 uppercase"
+                      placeholder="e.g. mz - MH - mk"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => setIsShiftBulkEditMode(false)}
+                        className="flex-1 p-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveBulkEdit}
+                        className="flex-1 p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-colors shadow-lg shadow-indigo-200"
+                      >
+                        Save
+                      </button>
+                    </div>
                   </div>
-                )}
+                ) : (
+                  <>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Currently Assigned</h4>
+                    {currentAssignments.length === 0 ? (
+                      <p className="text-sm text-slate-400 italic mb-4">No staff assigned.</p>
+                    ) : (
+                      <div className="space-y-2 mb-4">
+                        {currentAssignments.map(a => {
+                          const st = activeStaff.find(s => s.id === a.staffId);
+                          if (!st) return null;
+                          return (
+                            <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
+                              <span className="font-bold text-sm text-slate-700">{st.name} <span className="text-slate-400 text-xs font-mono ml-1">({st.initials})</span></span>
+                              <button
+                                onClick={() => removeStaff(st.id)}
+                                className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pt-4 border-t border-slate-100">Add Staff</h4>
-                <select
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      addStaff(e.target.value);
-                      e.target.value = "";
-                    }
-                  }}
-                  defaultValue=""
-                >
-                  <option value="" disabled>Select available staff...</option>
-                  {offStaff.map(st => (
-                    <option key={st.id} value={st.id}>
-                      {st.name} ({st.initials})
-                    </option>
-                  ))}
-                </select>
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pt-4 border-t border-slate-100">Add Staff</h4>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          addStaff(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="" disabled>Select available staff...</option>
+                      {offStaff.map(st => (
+                        <option key={st.id} value={st.id}>
+                          {st.name} ({st.initials})
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
               </div>
             </div>
           </div>
