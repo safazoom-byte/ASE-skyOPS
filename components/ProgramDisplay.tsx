@@ -308,6 +308,38 @@ export const ProgramDisplay: React.FC<Props> = ({
     );
   }, [programs, startDate, endDate]);
 
+  const sortFlightsByTime = (flightIds: string[], shiftPickupTime: string) => {
+    return flightIds
+      .map((fid) => getFlight(fid))
+      .filter(Boolean)
+      .sort((a, b) => {
+        const getFlightTime = (f: any) => {
+          if (f?.sta && f.sta.trim() !== "" && f.sta.toUpperCase() !== "NS") {
+            return f.sta;
+          }
+          if (f?.std && f.std.trim() !== "" && f.std !== "---") {
+            return f.std;
+          }
+          return "";
+        };
+        const getMinutes = (fTime: string) => {
+          if (!fTime || fTime.toUpperCase().includes("NS") || fTime.includes("---")) return 9999;
+          const parts = fTime.split(":");
+          const fh = parseInt(parts[0]) || 0;
+          const fm = parseInt(parts[1]) || 0;
+          const ph = parseInt(shiftPickupTime.split(":")[0]) || 0;
+          let totalMins = fh * 60 + fm;
+          if (ph >= 12 && fh < 12) {
+            totalMins += 24 * 60;
+          }
+          return totalMins;
+        };
+        return getMinutes(getFlightTime(a)) - getMinutes(getFlightTime(b));
+      })
+      .map((f) => f!.flightNumber)
+      .join(" / ") || "NIL";
+  };
+
   const leaveMapByStaff = React.useMemo(() => {
     const map: Record<string, LeaveRequest[]> = {};
     leaveRequests.forEach((l) => {
@@ -614,13 +646,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           const st = getStaff(a.staffId);
           return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
         }).length;
-        const flightStrs =
-          (shift.flightIds || [])
-            .map((fid) => getFlight(fid))
-            .filter(Boolean)
-            .sort((a, b) => (a!.sta || "23:59").localeCompare(b!.sta || "23:59"))
-            .map((f) => f!.flightNumber)
-            .join(" / ") || "NIL";
+        const flightStrs = sortFlightsByTime(shift.flightIds || [], shift.pickupTime);
 
         const personnelStrs = assignments
           .map((a) => {
@@ -3006,24 +3032,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 const assignments = sortAssignments(prog.assignments.filter(
                                   (a) => a.shiftId === shift.id,
                                 ));
-                                const flightStrs =
-                                  (shift.flightIds || [])
-                                    .map((fid) => getFlight(fid))
-                                    .filter(Boolean)
-                                    .sort((a, b) => {
-                                      const getFlightTime = (f: any) => {
-                                        if (f?.sta && f.sta.trim() !== "" && f.sta.toUpperCase() !== "NS") {
-                                          return f.sta;
-                                        }
-                                        if (f?.std && f.std.trim() !== "" && f.std !== "---") {
-                                          return f.std;
-                                        }
-                                        return "23:59";
-                                      };
-                                      return getFlightTime(a).localeCompare(getFlightTime(b));
-                                    })
-                                    .map((f) => f!.flightNumber)
-                                    .join(" / ") || "NIL";
+                                const flightStrs = sortFlightsByTime(shift.flightIds || [], shift.pickupTime);
                                 const nonLabourCount = assignments.filter((a) => {
                                   const st = getStaff(a.staffId);
                                   return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
