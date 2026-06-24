@@ -49,9 +49,30 @@ export const auth = {
     const client = supabase;
     if (!client) return null;
     try {
-      const { data } = await client.auth.getSession();
-      return data.session;
-    } catch {
+      const { data, error } = await client.auth.getSession();
+      if (error) {
+        console.warn("Session fetch error:", error.message);
+        if (error.message.toLowerCase().includes("refresh token")) {
+          await client.auth.signOut().catch(() => {});
+          
+          if (typeof window !== "undefined") {
+            try {
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                  localStorage.removeItem(key);
+                }
+              }
+            } catch (e) {
+              // ignore localStorage errors
+            }
+          }
+        }
+        return null;
+      }
+      return data?.session || null;
+    } catch (e) {
+      console.warn("getSession exception:", e);
       return null;
     }
   },
