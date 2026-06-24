@@ -188,7 +188,64 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const sortAssignments = (assignments: any[]) => {
     return [...assignments].sort((a, b) => {
-      // Respect manual sort index completely if they differ
+      const stA = getStaff(a.staffId);
+      const stB = getStaff(b.staffId);
+      if (!stA && !stB) return 0;
+      if (!stA) return 1;
+      if (!stB) return -1;
+
+      // Group ranks: 1 = Traffic, 2 = Security, 3 = Labour
+      const getGroupRank = (st: any) => {
+        if (st.isLabour) return 3;
+        if (st.isSecurity) return 2;
+        return 1; // Traffic staff (includes other non-labour/non-security roles)
+      };
+
+      const rankA = getGroupRank(stA);
+      const rankB = getGroupRank(stB);
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      // Within Traffic group, keep Shift Leaders and Load Control first
+      if (rankA === 1) {
+        const getTrafficSubRank = (assig: any, st: any) => {
+          if (
+            assig.role === "SL" ||
+            assig.role === "Shift Leader" ||
+            st.isShiftLeader ||
+            st.initials.toUpperCase() === "SK-ATZ"
+          )
+            return 1;
+          if (
+            assig.role === "LC" ||
+            assig.role === "Load Control" ||
+            st.isLoadControl
+          )
+            return 2;
+          return 3;
+        };
+        const subRankA = getTrafficSubRank(a, stA);
+        const subRankB = getTrafficSubRank(b, stB);
+        if (subRankA !== subRankB) {
+          return subRankA - subRankB;
+        }
+      }
+
+      // Respect manual sort index if they differ
+      const aSort = a.manualSortIndex || 0;
+      const bSort = b.manualSortIndex || 0;
+      if (aSort !== bSort) {
+        return aSort - bSort;
+      }
+
+      // Fallback: alphabetical by initials
+      return (stA.initials || "").localeCompare(stB.initials || "");
+    });
+  };
+
+  const sortAssignmentsForPDF = (assignments: any[]) => {
+    return [...assignments].sort((a, b) => {
       const aSort = a.manualSortIndex || 0;
       const bSort = b.manualSortIndex || 0;
       if (aSort !== bSort) {
@@ -545,7 +602,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         .filter((s) => s.pickupDate === prog.dateString)
         .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       const tableData = shiftsToday.map((shift, idx) => {
-        const assignments = sortAssignments(prog.assignments.filter(
+        const assignments = sortAssignmentsForPDF(prog.assignments.filter(
           (a) => a.shiftId === shift.id,
         ));
         const nonLabourCount = assignments.filter((a) => {
@@ -1259,6 +1316,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           if (fObjs.length === 0) fObjs = [{} as Flight];
           
           const startRowNo = sheet.rowCount + 1;
+          const addedRows: any[] = [];
           
           fObjs.forEach((f, fIndex) => {
              const rt = sheet.addRow([
@@ -1271,6 +1329,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 fIndex === 0 ? (shift.pickupTime || "N.S") : "",
                 "" // staff will be added later
              ]);
+             addedRows.push(rt);
              
              rt.eachCell((cell) => {
                  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -1338,6 +1397,26 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
           staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+
+          let line1Text = line1Tokens.map(t => t.text).join(" - ");
+          let line2Text = line2Tokens.map(t => t.text).join(" - ");
+          
+          let estimatedLines = 0;
+          if (line1Text) estimatedLines += Math.ceil(line1Text.length / 40);
+          if (line2Text) estimatedLines += Math.ceil(line2Text.length / 40);
+          if (shiftNote) estimatedLines += Math.ceil(shiftNote.length / 40);
+          
+          let minLines = 1;
+          if (line1Text && line2Text) minLines += 1;
+          if (shiftNote) minLines += 1;
+          estimatedLines = Math.max(minLines, estimatedLines);
+
+          const totalHeightNeeded = Math.max(25, estimatedLines * 18 + 10);
+          const perRowHeight = totalHeightNeeded / Math.max(1, fObjs.length);
+          
+          addedRows.forEach(row => {
+              row.height = Math.max(25, perRowHeight);
+          });
         });
 
         // Add absence/leave rows right below the day's physical shifts (Option B - Beside Day Shift)
@@ -1506,7 +1585,7 @@ export const ProgramDisplay: React.FC<Props> = ({
            ]);
         } else {
              shiftsToday.forEach((shift, idx) => {
-             const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
+             const assignments = sortAssignmentsForPDF(prog.assignments.filter(a => a.shiftId === shift.id));
              const staffTokens = assignments.map(a => {
                  const s = getStaff(a.staffId);
                  if (!s) return null;
@@ -1835,7 +1914,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (cat === "ANNUAL LEAVE") type = "Annual leave";
       if (cat === "SICK LEAVE") type = "Sick leave";
       if (cat === "ROSTER LEAVE") type = "Roster leave";
-      if (cat === "DAYS OFF") type = "Day off";
+      if (cat === "DAYS OFF") type = null; // Do not lock/create leave when dragging to Days Off
       
       const st = activeStaff.find(s => s.id === staffId);
       if (type === "Roster leave" && st?.type === "Local") {
@@ -3346,6 +3425,28 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 .join(",");
                               const isCatModified = curCatIds !== refCatIds;
 
+                              const sortedItems = [...items].sort((a: any, b: any) => {
+                                const stA = a.staff;
+                                const stB = b.staff;
+                                if (!stA && !stB) return 0;
+                                if (!stA) return 1;
+                                if (!stB) return -1;
+
+                                const getGroupRank = (st: any) => {
+                                  if (st.isLabour) return 3;
+                                  if (st.isSecurity) return 2;
+                                  return 1; // Traffic staff (includes other non-labour/non-security roles)
+                                };
+
+                                const rankA = getGroupRank(stA);
+                                const rankB = getGroupRank(stB);
+                                if (rankA !== rankB) {
+                                  return rankA - rankB;
+                                }
+
+                                return (stA.initials || "").localeCompare(stB.initials || "");
+                              });
+
                               return (
                                 <tr
                                   key={cat}
@@ -3368,7 +3469,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   <td className="px-4 py-3">
                                     <div className="flex flex-col gap-2">
                                       <div className="flex flex-wrap items-center gap-1.5">
-                                        {items.map((item, idx) => {
+                                        {sortedItems.map((item, idx) => {
                                           const {
                                             staff: s,
                                             count,
@@ -3382,7 +3483,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             daysWorked,
                                             null,
                                           );
-                                          const isLocked =
+                                          const isLocked = !unlockAbsences && (item as any).isLeave;
+                                          const _dummy =
                                             !unlockAbsences && (
                                               cat === "ROSTER LEAVE" ||
                                               cat === "ANNUAL LEAVE" ||

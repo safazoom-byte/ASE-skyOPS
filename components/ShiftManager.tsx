@@ -483,7 +483,17 @@ export const ShiftManager: React.FC<Props> = ({
   useEffect(() => {
     if (!isAutoLinkEnabled || !flights.length || !filteredShifts.length) return;
 
-    filteredShifts.forEach((shift) => {
+    // Track flights assigned in this auto-link pass so they aren't duplicated
+    const assignedFlightIds = new Set<string>();
+
+    // Process shifts sorted by start time
+    const sortedShifts = [...filteredShifts].sort((a, b) => {
+      const aStart = new Date(`${a.pickupDate}T${a.pickupTime}`);
+      const bStart = new Date(`${b.pickupDate}T${b.pickupTime}`);
+      return aStart.getTime() - bStart.getTime();
+    });
+
+    sortedShifts.forEach((shift) => {
       const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
       let shiftEnd = new Date(
         `${shift.endDate || shift.pickupDate}T${shift.endTime}`,
@@ -494,6 +504,8 @@ export const ShiftManager: React.FC<Props> = ({
       }
 
       const linkedFlights = flights.filter((f) => {
+        if (assignedFlightIds.has(f.id)) return false;
+
         let isLinked = false;
 
         const staTime = f.sta ? new Date(`${f.date}T${f.sta}`) : null;
@@ -508,6 +520,10 @@ export const ShiftManager: React.FC<Props> = ({
           isLinked = true;
         if (stdTime && stdTime >= shiftStart && stdTime <= shiftEnd)
           isLinked = true;
+
+        if (isLinked) {
+          assignedFlightIds.add(f.id);
+        }
 
         return isLinked;
       });
