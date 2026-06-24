@@ -395,10 +395,14 @@ export const generateAIProgram = async (
   let validAssignmentsCount = 0;
   const staffLastEndTime = new Map<string, Date>();
   if (data.incomingDuties) {
+    const prevDay = new Date(config.startDate);
+    prevDay.setDate(prevDay.getDate() - 1);
+    const prevDayStr = prevDay.toISOString().split("T")[0];
+
     data.incomingDuties.forEach((d) => {
       staffLastEndTime.set(
         d.staffId,
-        new Date(`${d.date || config.startDate}T${d.shiftEndTime}`),
+        new Date(`${d.date || prevDayStr}T${d.shiftEndTime}`),
       );
     });
   }

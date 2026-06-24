@@ -365,7 +365,12 @@ export const ProgramDisplay: React.FC<Props> = ({
     const staffIncoming = incomingDutiesByStaff[staffId] || [];
     
     staffIncoming.forEach((d) => {
-      const dateStr = d.date || startDate;
+      let dateStr = d.date;
+      if (!dateStr) {
+        const pd = new Date(startDate);
+        pd.setDate(pd.getDate() - 1);
+        dateStr = pd.toISOString().split("T")[0];
+      }
       const dt = new Date(`${dateStr}T${d.shiftEndTime}`);
       if (dt <= currentShiftStart && (!lastEndTime || dt > lastEndTime)) {
         lastEndTime = dt;
@@ -893,17 +898,30 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
     const matrixHead = [["S/N", "AGENT", ...dateHeaders, "AUDIT"]];
 
+    const getStaffTypeRankPdf = (s: Staff) => {
+      if (s.isDriver) return 5;
+      if (s.isLabour) return 4;
+      if (s.isSecurity) return 3;
+      if (s.isAccountant) return 2;
+      return 1;
+    };
+
     const sortedMatrixStaffPdf = [...staff]
       .map((s) => ({
         ...s,
         totalHours: getStaffTotalHours(s.id),
       }))
-      .sort((a, b) => a.totalHours - b.totalHours);
+      .sort((a, b) => {
+        const rankA = getStaffTypeRankPdf(a);
+        const rankB = getStaffTypeRankPdf(b);
+        if (rankA !== rankB) return rankA - rankB;
+        return a.totalHours - b.totalHours;
+      });
 
     const matrixBody = sortedMatrixStaffPdf.map((s, idx) => {
       const row = [
         (idx + 1).toString(),
-        `${s.initials} (${s.type === "Local" ? "L" : "R"})`,
+        `${s.name} (${s.initials})`,
       ];
       let workedCount = 0;
       let excusedLeaves = 0;
@@ -2090,12 +2108,25 @@ export const ProgramDisplay: React.FC<Props> = ({
       const d = new Date(p.dateString || startDate);
       return `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
     });
+    const getStaffTypeRank = (s: Staff) => {
+      if (s.isDriver) return 5;
+      if (s.isLabour) return 4;
+      if (s.isSecurity) return 3;
+      if (s.isAccountant) return 2;
+      return 1;
+    };
+
     const sortedMatrixStaff = [...activeStaff]
       .map((s) => ({
         ...s,
         totalHours: getStaffTotalHours(s.id),
       }))
-      .sort((a, b) => a.totalHours - b.totalHours);
+      .sort((a, b) => {
+        const rankA = getStaffTypeRank(a);
+        const rankB = getStaffTypeRank(b);
+        if (rankA !== rankB) return rankA - rankB;
+        return a.totalHours - b.totalHours;
+      });
 
     return (
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden overflow-x-auto p-6 md:p-10 mb-8 animate-in slide-in-from-bottom-4">
@@ -2132,7 +2163,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                     {idx + 1}
                   </td>
                   <td className="px-4 py-2 font-bold border-r border-slate-100 whitespace-nowrap">
-                    {s.initials} ({s.type === "Local" ? "L" : "R"})
+                    {s.name} ({s.initials})
                   </td>
                   {activePrograms.map((p, i) => {
                     const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
