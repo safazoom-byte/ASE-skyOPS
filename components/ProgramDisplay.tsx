@@ -3674,17 +3674,21 @@ export const ProgramDisplay: React.FC<Props> = ({
 
         const handleSaveBulkEdit = () => {
           const initialsArray = shiftBulkEditText.split(/[\s,-]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
-          const matchedStaffIds = initialsArray.map(initial => {
+          const matchedStaffIds = [...new Set(initialsArray.map(initial => {
             const st = activeStaff.find(s => s.initials.toUpperCase() === initial);
             return st ? st.id : null;
-          }).filter(Boolean) as string[];
+          }).filter(Boolean) as string[])];
 
           const newPrograms = [...programs];
           const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
           
+          // Remove everyone from the current shift since we are replacing the entire shift
           newProg.assignments = newProg.assignments.filter(a => a.shiftId !== shift.id);
           
-          const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+          // Ensure the newly assigned staff are removed from any *other* shifts on this day
+          newProg.assignments = newProg.assignments.filter(a => !matchedStaffIds.includes(a.staffId));
+          
+          const maxSort = Math.max(0, ...newProg.assignments.map(a => a.manualSortIndex || 0));
           matchedStaffIds.forEach((staffId, i) => {
             newProg.assignments.push({
               id: Math.random().toString(36).substr(2, 9),
