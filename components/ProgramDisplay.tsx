@@ -1312,7 +1312,18 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           const flightIds = shift.flightIds || [];
           let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-          fObjs.sort((a, b) => (a.sta || "23:59").localeCompare(b.sta || "23:59"));
+          fObjs.sort((a, b) => {
+            const getFlightTime = (f: any) => {
+              if (f?.sta && f.sta.trim() !== "" && f.sta.toUpperCase() !== "NS") {
+                return f.sta;
+              }
+              if (f?.std && f.std.trim() !== "" && f.std !== "---") {
+                return f.std;
+              }
+              return "23:59";
+            };
+            return getFlightTime(a).localeCompare(getFlightTime(b));
+          });
           if (fObjs.length === 0) fObjs = [{} as Flight];
           
           const startRowNo = sheet.rowCount + 1;
@@ -2963,7 +2974,18 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   (shift.flightIds || [])
                                     .map((fid) => getFlight(fid))
                                     .filter(Boolean)
-                                    .sort((a, b) => (a!.sta || "23:59").localeCompare(b!.sta || "23:59"))
+                                    .sort((a, b) => {
+                                      const getFlightTime = (f: any) => {
+                                        if (f?.sta && f.sta.trim() !== "" && f.sta.toUpperCase() !== "NS") {
+                                          return f.sta;
+                                        }
+                                        if (f?.std && f.std.trim() !== "" && f.std !== "---") {
+                                          return f.std;
+                                        }
+                                        return "23:59";
+                                      };
+                                      return getFlightTime(a).localeCompare(getFlightTime(b));
+                                    })
                                     .map((f) => f!.flightNumber)
                                     .join(" / ") || "NIL";
                                 const nonLabourCount = assignments.filter((a) => {
