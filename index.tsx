@@ -13,6 +13,22 @@ polyfill({
 // Prevent scrolling while dragging on mobile
 window.addEventListener("touchmove", function () {}, { passive: false });
 
+// Global error handlers for Supabase Invalid Refresh Token stuck state
+window.addEventListener("error", (e) => {
+  if (e.message?.includes("Invalid Refresh Token")) {
+    e.preventDefault();
+    localStorage.clear();
+    window.location.reload();
+  }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  if (e.reason?.message?.includes("Invalid Refresh Token") || e.reason?.message?.includes("Refresh Token Not Found")) {
+    e.preventDefault();
+    localStorage.clear();
+    window.location.reload();
+  }
+});
+
 import {
   Plane,
   Users,
@@ -44,6 +60,7 @@ import {
   Timer,
   CheckCircle2,
   PieChart,
+  PlaneTakeoff,
 } from "lucide-react";
 import "./style.css";
 
@@ -68,6 +85,7 @@ import { GithubSync } from "./components/GithubSync";
 import { CapacityForecast } from "./components/CapacityForecast";
 import { StationStatistics } from "./components/StationStatistics";
 import { CommandCenter } from "./components/CommandCenter";
+import { AirlineManager } from "./components/AirlineManager";
 import { Auth } from "./components/Auth";
 import { SkyOpsLogo } from "./components/Logo";
 import { PreRosterModal } from "./components/PreRosterModal";
@@ -829,7 +847,7 @@ const App: React.FC = () => {
                 {tab}
               </button>
             ))}
-            {userProfile?.role === "master" && (
+            {(userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
               <button
                 onClick={() => setActiveTab("command")}
                 className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 ${activeTab === "command" ? "bg-emerald-600 text-white shadow-md" : "text-emerald-600 hover:bg-emerald-50"}`}
@@ -848,8 +866,8 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
-        {activeTab === "command" && userProfile?.role === "master" && (
-          <CommandCenter currentUser={userProfile} />
+        {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
+          <CommandCenter currentUser={userProfile} flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
         )}
         {activeTab === "dashboard" && (
           <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500">
@@ -1614,7 +1632,7 @@ const App: React.FC = () => {
           { id: "shifts", icon: Clock, label: "Shifts" },
           { id: "program", icon: CalendarDays, label: "Roster" },
           { id: "statistics", icon: PieChart, label: "Stats" },
-          ...(userProfile?.role === "master"
+          ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
             ? [{ id: "command", icon: Shield, label: "Cmd" }]
             : []),
         ].map((item) => (

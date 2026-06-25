@@ -11,9 +11,11 @@ import {
   Plus,
   Trash2,
   X,
+  PlaneTakeoff,
 } from "lucide-react";
-import { UserProfile, AuditLog } from "../types";
+import { UserProfile, AuditLog, Flight, ShiftConfig } from "../types";
 import { db } from "../services/supabaseService";
+import { AirlineManager } from "./AirlineManager";
 
 const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
   const [val, setVal] = useState(value);
@@ -36,20 +38,33 @@ const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
 
 interface CommandCenterProps {
   currentUser: UserProfile;
+  flights?: Flight[];
+  shifts?: ShiftConfig[];
+  startDate?: string;
+  endDate?: string;
 }
 
 export const CommandCenter: React.FC<CommandCenterProps> = ({
   currentUser,
+  flights = [],
+  shifts = [],
+  startDate,
+  endDate,
 }) => {
-  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system">("audit");
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines">("audit");
+  const [newAirportName, setNewAirportName] = useState("");
+  const [newAirportCode, setNewAirportCode] = useState("");
+
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [airports, setAirports] = useState<any[]>([]);
+  const [newUserAirportId, setNewUserAirportId] = useState("");
 
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserRole, setNewUserRole] = useState<"master" | "planner">(
+  const [newUserRole, setNewUserRole] = useState<"super_admin" | "admin" | "planner">(
     "planner",
   );
 
@@ -68,12 +83,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [fetchedLogs, fetchedUsers] = await Promise.all([
+      const [fetchedLogs, fetchedUsers, fetchedAirports] = await Promise.all([
         db.getAuditLogs(),
         db.getAllUserProfiles(),
+        db.getAirports(),
       ]);
       setLogs(fetchedLogs);
       setUsers(fetchedUsers);
+      setAirports(fetchedAirports);
     } catch (e) {
       console.error("Failed to load command center data", e);
     } finally {
@@ -130,6 +147,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       id: crypto.randomUUID(), // Will be updated when they actually sign in via Supabase Auth
       email: newUserEmail.trim(),
       role: newUserRole,
+      airport_id: currentUser.role === "admin" ? currentUser.airport_id : newUserAirportId,
       aiDailyLimit: 5,
       aiWeeklyLimit: 20,
       aiMonthlyLimit: 50,
@@ -183,12 +201,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   });
 
   const sortedUsersList = [...users].sort((a, b) => {
-    if (a.role === "master" && b.role !== "master") return -1;
-    if (a.role !== "master" && b.role === "master") return 1;
+    if ((a.role === "super_admin" || a.role === "admin") && (b.role === "planner")) return -1;
+    if ((a.role === "planner") && (b.role === "super_admin" || b.role === "admin")) return 1;
     return (a.email || "").localeCompare(b.email || "");
   });
 
-  if (currentUser.role !== "master") {
+  if (currentUser.role === "planner") {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
         <Lock size={48} className="mb-4 text-slate-300" />
@@ -202,12 +220,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-slate-950 text-white p-8 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600/10 blur-[100px] pointer-events-none"></div>
-        <div className="flex items-center gap-6 relative z-10">
-          <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
+        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 relative z-10 text-center sm:text-left">
+          <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex shrink-0 items-center justify-center shadow-lg shadow-emerald-600/20">
             <Shield size={32} className="text-white" />
           </div>
           <div>
-            <h3 className="text-3xl font-black uppercase italic tracking-tighter leading-none">
+            <h3 className="text-2xl sm:text-3xl font-black uppercase italic tracking-tighter leading-none">
               Command Center
             </h3>
             <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2">
@@ -216,22 +234,36 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
           </div>
         </div>
 
-        <div className="flex flex-wrap bg-slate-900 p-1 rounded-xl relative z-10 w-full md:w-auto mt-4 md:mt-0 justify-center">
+        <div className="flex overflow-x-auto sm:flex-wrap bg-slate-900 p-1.5 md:p-1 rounded-xl relative z-10 w-full mt-4 md:mt-0 justify-start md:justify-center gap-1 md:gap-0 hide-scrollbar">
           <button
             onClick={() => setActiveTab("audit")}
-            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Activity size={14} className="inline mr-1 md:mr-2" /> Black Box
           </button>
           <button
             onClick={() => setActiveTab("users")}
-            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Users size={14} className="inline mr-1 md:mr-2" /> Access & Quotas
           </button>
+          {currentUser.role === "super_admin" && (
+            <button
+              onClick={() => setActiveTab("airports")}
+              className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "airports" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            >
+              <Activity size={14} className="inline mr-1 md:mr-2" /> Airports
+            </button>
+          )}
+          <button
+            onClick={() => setActiveTab("airlines")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "airlines" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <PlaneTakeoff size={14} className="inline mr-1 md:mr-2" /> Airlines
+          </button>
           <button
             onClick={() => setActiveTab("system")}
-            className={`px-4 md:px-6 py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "system" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "system" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Settings size={14} className="inline mr-1 md:mr-2" /> System Settings
           </button>
@@ -244,11 +276,11 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         </div>
       ) : activeTab === "audit" ? (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
             <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
               System Audit Trail
             </h4>
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Search
                 size={16}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -258,7 +290,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 placeholder="Search logs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-64"
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
               />
             </div>
           </div>
@@ -322,9 +354,62 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             )}
           </div>
         </div>
-      ) : activeTab === "users" ? (
+      
+      ) : activeTab === "airports" && currentUser.role === "super_admin" ? (
         <div className="space-y-6">
-          <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <h4 className="font-bold text-slate-800 mb-6">Manage Airports</h4>
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <input
+                type="text"
+                placeholder="Airport Name"
+                value={newAirportName}
+                onChange={(e) => setNewAirportName(e.target.value)}
+                className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Airport Code (e.g. LHR)"
+                value={newAirportCode}
+                onChange={(e) => setNewAirportCode(e.target.value)}
+                className="w-full sm:w-32 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <button
+                onClick={async () => {
+                  if (newAirportName && newAirportCode) {
+                    const client = (await import('../services/supabaseService')).supabase;
+                    if (client) {
+                      const { data } = await client.from("airports").insert({ name: newAirportName, code: newAirportCode }).select();
+                      if (data) {
+                        setAirports([...airports, data[0]]);
+                        setNewAirportName("");
+                        setNewAirportCode("");
+                      }
+                    }
+                  }
+                }}
+                className="bg-emerald-600 text-white px-6 rounded-xl font-bold hover:bg-emerald-700"
+              >
+                Add
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              {airports.map(a => (
+                <div key={a.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <div>
+                    <h5 className="font-bold text-slate-800">{a.name}</h5>
+                    <span className="text-xs text-slate-500 font-mono">{a.code}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : activeTab === "users" ? (
+
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
             <div>
               <h4 className="font-bold text-slate-800">User Management</h4>
               <p className="text-xs text-slate-500 mt-1">
@@ -345,11 +430,11 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 key={user.id}
                 className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow"
               >
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex flex-col sm:flex-row gap-4 justify-between items-start mb-6">
                   <div className="flex items-center gap-4">
                     <div
                       className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-inner ${
-                        user.role === "master"
+                        (user.role === "super_admin" || user.role === "admin")
                           ? "bg-emerald-100 text-emerald-700"
                           : "bg-slate-100 text-slate-600"
                       }`}
@@ -362,7 +447,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       </h4>
                       <span
                         className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md ${
-                          user.role === "master"
+                          (user.role === "super_admin" || user.role === "admin")
                             ? "bg-emerald-100 text-emerald-700"
                             : "bg-slate-100 text-slate-600"
                         }`}
@@ -405,7 +490,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                     <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
                       Account Settings
                     </h5>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Role
@@ -415,7 +500,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           onChange={(e) =>
                             handleUpdateUser({
                               ...user,
-                              role: e.target.value as "master" | "planner",
+                              role: e.target.value as "super_admin" | "admin" | "planner",
                             })
                           }
                           disabled={
@@ -425,25 +510,70 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="planner">Planner</option>
-                          <option value="master">Master</option>
+                          <option value="admin">Admin</option>
+                          {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                          Max Staff
-                        </label>
-                        <input
-                          type="number"
-                          value={user.maxStaff}
-                          onChange={(e) =>
-                            handleUpdateUser({
-                              ...user,
-                              maxStaff: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
-                        />
-                      </div>
+                      
+                      {currentUser.role === "super_admin" && user.role !== "super_admin" ? (
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                            Airport Assignment
+                          </label>
+                          <select
+                            value={user.airport_id || ""}
+                            onChange={(e) =>
+                              handleUpdateUser({
+                                ...user,
+                                airport_id: e.target.value,
+                              })
+                            }
+                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          >
+                            <option value="">Select Airport...</option>
+                            {airports.map(a => (
+                              <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                            Max Staff
+                          </label>
+                          <input
+                            type="number"
+                            value={user.maxStaff}
+                            onChange={(e) =>
+                              handleUpdateUser({
+                                ...user,
+                                maxStaff: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          />
+                        </div>
+                      )}
+
+                      {currentUser.role === "super_admin" && user.role !== "super_admin" && (
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                            Max Staff
+                          </label>
+                          <input
+                            type="number"
+                            value={user.maxStaff}
+                            onChange={(e) =>
+                              handleUpdateUser({
+                                ...user,
+                                maxStaff: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          />
+                        </div>
+                      )}
+                      
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Max Shifts
@@ -467,7 +597,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                     <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-600/70 mb-3">
                       AI Quotas
                     </h5>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Daily
@@ -541,6 +671,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             ))}
           </div>
         </div>
+      ) : activeTab === "airlines" ? (
+        <AirlineManager flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
       ) : (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
@@ -697,18 +829,35 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 <select
                   value={newUserRole}
                   onChange={(e) =>
-                    setNewUserRole(e.target.value as "master" | "planner")
+                    setNewUserRole(e.target.value as "super_admin" | "admin" | "planner")
                   }
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 >
                   <option value="planner">Planner</option>
-                  <option value="master">Master</option>
+                  <option value="admin">Admin</option>
+                          {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                 </select>
               </div>
-              <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm">
-                <strong>Note:</strong> The user will be able to log in using
-                this email address. Their quotas and limits will be set to the
-                default values, which you can edit later.
+              {currentUser.role === "super_admin" && newUserRole !== "super_admin" && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Airport Assignment
+                  </label>
+                  <select
+                    value={newUserAirportId}
+                    onChange={(e) => setNewUserAirportId(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="">Select Airport...</option>
+                    {airports.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm leading-relaxed">
+                <strong>Important:</strong> To set up their password, the user must go to the login screen and use the <strong>Sign Up</strong> tab with this exact email address. Once they sign up, their pre-approved account and permissions will be automatically linked.
               </div>
             </div>
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">

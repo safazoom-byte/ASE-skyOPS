@@ -26,6 +26,8 @@ export interface Flight {
   to: string;
   sta?: string;
   std?: string;
+  eta?: string;
+  etd?: string;
   date: string; // Mandatory date string (YYYY-MM-DD)
   day: number; // Offset for roster logic
   type: "Arrival" | "Departure" | "Turnaround";
@@ -128,10 +130,23 @@ export interface ManualAssignment {
   roles: string[];
 }
 
+export interface Airport {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface Airline {
+  id: string;
+  name: string;
+  iata_code: string;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
-  role: "master" | "planner";
+  role: "super_admin" | "admin" | "planner";
+  airport_id?: string;
   aiDailyLimit: number;
   aiWeeklyLimit: number;
   aiMonthlyLimit: number;

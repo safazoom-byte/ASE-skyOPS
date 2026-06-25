@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { Copy, X, Calendar } from "lucide-react";
-import { Flight } from "../types";
+import React, { useState, useEffect } from "react";
+import { Copy, X, Calendar, PlaneTakeoff } from "lucide-react";
+import { Flight, Airline } from "../types";
+import { db } from "../services/supabaseService";
 
 interface Props {
   flights: Flight[];
@@ -16,6 +17,12 @@ export const DuplicatePeriodModal: React.FC<Props> = ({
   const [sourceStart, setSourceStart] = useState("");
   const [sourceEnd, setSourceEnd] = useState("");
   const [targetStart, setTargetStart] = useState("");
+  const [selectedAirline, setSelectedAirline] = useState<string>("ALL");
+  const [airlines, setAirlines] = useState<Airline[]>([]);
+
+  useEffect(() => {
+    db.getAirlines().then(setAirlines);
+  }, []);
 
   const handleDuplicate = () => {
     if (!sourceStart || !sourceEnd || !targetStart) return;
@@ -27,15 +34,25 @@ export const DuplicatePeriodModal: React.FC<Props> = ({
     // Get time difference in milliseconds between target and source start dates
     const diffTime = target.getTime() - start.getTime();
 
-    // Filter flights in the source period
+    // Filter flights in the source period and optionally by airline
     const flightsToDuplicate = flights.filter((f) => {
       if (!f.date) return false;
       const fDate = new Date(f.date);
-      return fDate >= start && fDate <= end;
+      const inDateRange = fDate >= start && fDate <= end;
+      
+      let matchesAirline = true;
+      if (selectedAirline !== "ALL") {
+        const airline = airlines.find(a => a.id === selectedAirline);
+        if (airline) {
+          matchesAirline = (f.flightNumber || "").toUpperCase().startsWith((airline.iata_code || "").toUpperCase());
+        }
+      }
+      
+      return inDateRange && matchesAirline;
     });
 
     if (flightsToDuplicate.length === 0) {
-      alert("No flights found in the selected source period.");
+      alert("No flights found matching the criteria.");
       return;
     }
 
@@ -106,6 +123,27 @@ export const DuplicatePeriodModal: React.FC<Props> = ({
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 pt-4 border-t border-slate-100">
+            <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+              <PlaneTakeoff size={14} /> Filter (Optional)
+            </h3>
+            <div className="space-y-2">
+              <label className="block text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                Specific Airline
+              </label>
+              <select
+                value={selectedAirline}
+                onChange={(e) => setSelectedAirline(e.target.value)}
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:border-indigo-500 transition-colors"
+              >
+                <option value="ALL">All Flights</option>
+                {airlines.map(a => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.iata_code})</option>
+                ))}
+              </select>
             </div>
           </div>
 

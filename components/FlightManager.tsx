@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Flight } from "../types";
+import { Flight, Airline } from "../types";
+import { db } from "../services/supabaseService";
 import {
   Trash2,
   Eraser,
@@ -36,6 +37,17 @@ export const FlightManager: React.FC<Props> = ({
   onDelete,
   onOpenScanner,
 }) => {
+  const [airlines, setAirlines] = useState<Airline[]>([]);
+
+  useEffect(() => {
+    db.getAirlines().then(setAirlines);
+  }, []);
+
+  const getAirlineForFlight = (flightNumber: string) => {
+    if (!flightNumber) return null;
+    return airlines.find(a => (flightNumber || "").toUpperCase().startsWith((a.iata_code || "").toUpperCase()));
+  };
+
   const [newFlight, setNewFlight] = useState<Partial<Flight>>({
     flightNumber: "",
     from: "",
@@ -273,6 +285,39 @@ export const FlightManager: React.FC<Props> = ({
           </div>
           <div className="space-y-1 md:space-y-2">
             <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center">
+              ETA / ETD
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                maxLength={5}
+                placeholder="ETA"
+                className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none"
+                value={newFlight.eta || ""}
+                onChange={(e) =>
+                  setNewFlight({
+                    ...newFlight,
+                    eta: formatTimeInput(e.target.value),
+                  })
+                }
+              />
+              <input
+                type="text"
+                maxLength={5}
+                placeholder="ETD"
+                className="w-1/2 p-3 md:p-4 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl font-black text-center text-xs text-slate-900 outline-none"
+                value={newFlight.etd || ""}
+                onChange={(e) =>
+                  setNewFlight({
+                    ...newFlight,
+                    etd: formatTimeInput(e.target.value),
+                  })
+                }
+              />
+            </div>
+          </div>
+          <div className="space-y-1 md:space-y-2">
+            <label className="block text-[7px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 text-center">
               Sector
             </label>
             <div className="flex gap-2">
@@ -395,9 +440,23 @@ export const FlightManager: React.FC<Props> = ({
                       </div>
 
                       <div className="mb-4 md:mb-6">
-                        <h5 className="text-xl md:text-3xl font-black italic text-slate-900 tracking-tighter uppercase mb-1">
-                          {flight.flightNumber}
-                        </h5>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h5 className="text-xl md:text-3xl font-black italic text-slate-900 tracking-tighter uppercase">
+                            {flight.flightNumber}
+                          </h5>
+                          {(() => {
+                            const airline = getAirlineForFlight(flight.flightNumber);
+                            if (airline) {
+                              return (
+                                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md text-[9px] md:text-xs font-black uppercase tracking-widest border border-blue-100/50">
+                                  <PlaneTakeoff size={12} className="opacity-70" />
+                                  {airline.name}
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         <div className="flex items-center gap-2 text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">
                           <MapPin size={10} className="text-slate-300" />
                           {flight.from}{" "}
@@ -413,6 +472,11 @@ export const FlightManager: React.FC<Props> = ({
                           <span className="text-sm md:text-lg font-black italic text-slate-900">
                             {flight.sta || "--:--"}
                           </span>
+                          {flight.eta && (
+                            <div className="text-[10px] font-bold text-rose-500">
+                              ETA {flight.eta}
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1">
                           <span className="text-[6px] md:text-[8px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1">
@@ -421,6 +485,11 @@ export const FlightManager: React.FC<Props> = ({
                           <span className="text-sm md:text-lg font-black italic text-slate-900">
                             {flight.std || "--:--"}
                           </span>
+                          {flight.etd && (
+                            <div className="text-[10px] font-bold text-rose-500">
+                              ETD {flight.etd}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -474,6 +543,78 @@ export const FlightManager: React.FC<Props> = ({
                       })
                     }
                   />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      STA
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.sta || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          sta: formatTimeInput(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      STD
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.std || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          std: formatTimeInput(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      ETA
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.eta || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          eta: formatTimeInput(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      ETD
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.etd || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          etd: formatTimeInput(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex gap-4 pt-4">

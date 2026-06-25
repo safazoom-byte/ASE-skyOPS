@@ -1414,6 +1414,26 @@ export const ProgramDisplay: React.FC<Props> = ({
                  cell.font = { bold: true, size: 10 };
              });
              
+             if (f.eta) {
+                const cell = sheet.getCell(`D${rt.number}`);
+                cell.value = {
+                  richText: [
+                    { text: (f.sta || "NS") + "\n" },
+                    { text: `ETA ${f.eta}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
+                  ]
+                };
+             }
+             
+             if (f.etd) {
+                const cell = sheet.getCell(`E${rt.number}`);
+                cell.value = {
+                  richText: [
+                    { text: (f.std || "---") + "\n" },
+                    { text: `ETD ${f.etd}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
+                  ]
+                };
+             }
+             
              if (fIndex === 0) {
                  const pickupCell = sheet.getCell(`G${rt.number}`);
                  pickupCell.font = { bold: true, size: 10 };
