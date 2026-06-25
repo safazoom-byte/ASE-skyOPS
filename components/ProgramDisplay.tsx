@@ -1293,10 +1293,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         dayRow.height = 24;
         
         const categories = {
-          "Day off": [] as string[],
-          "Annual": [] as string[],
-          "Lieu": [] as string[],
-          "Sick Leave": [] as string[]
+          "Day off": [] as { initials: string, isSecurity: boolean }[],
+          "Annual": [] as { initials: string, isSecurity: boolean }[],
+          "Lieu": [] as { initials: string, isSecurity: boolean }[],
+          "Sick Leave": [] as { initials: string, isSecurity: boolean }[]
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
@@ -1321,22 +1321,31 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
 
           if (mappedCat && (categories as any)[mappedCat]) {
-            (categories as any)[mappedCat].push(s.initials);
+            (categories as any)[mappedCat].push({ initials: s.initials, isSecurity: s.isSecurity });
           }
         });
 
-        const absenceRowsData: { category: string, label: string, initials: string[] }[] = [];
+        const formatInitials = (staffList: { initials: string, isSecurity: boolean }[]) => {
+          const regular = staffList.filter(s => !s.isSecurity).map(s => s.initials);
+          const security = staffList.filter(s => s.isSecurity).map(s => s.initials);
+          let parts = [];
+          if (regular.length > 0) parts.push(regular.join(" - "));
+          if (security.length > 0) parts.push(`SEC : ${security.join(" - ")}`);
+          return parts.join("\n");
+        };
+
+        const absenceRowsData: { category: string, label: string, formattedText: string }[] = [];
         if (categories["Day off"].length > 0) {
-          absenceRowsData.push({ category: "Day off", label: "DAY OFF", initials: categories["Day off"] });
+          absenceRowsData.push({ category: "Day off", label: "DAY OFF", formattedText: formatInitials(categories["Day off"]) });
         }
         if (categories["Annual"].length > 0) {
-          absenceRowsData.push({ category: "Annual", label: "ANNUAL LEAVE", initials: categories["Annual"] });
+          absenceRowsData.push({ category: "Annual", label: "ANNUAL LEAVE", formattedText: formatInitials(categories["Annual"]) });
         }
         if (categories["Lieu"].length > 0) {
-          absenceRowsData.push({ category: "Lieu", label: "ROSTER LEAVE", initials: categories["Lieu"] });
+          absenceRowsData.push({ category: "Lieu", label: "ROSTER LEAVE", formattedText: formatInitials(categories["Lieu"]) });
         }
         if (categories["Sick Leave"].length > 0) {
-          absenceRowsData.push({ category: "Sick Leave", label: "SICK LEAVE", initials: categories["Sick Leave"] });
+          absenceRowsData.push({ category: "Sick Leave", label: "SICK LEAVE", formattedText: formatInitials(categories["Sick Leave"]) });
         }
 
         const shiftsToday = shifts
@@ -1365,9 +1374,21 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (f?.std && f.std.trim() !== "" && f.std !== "---") {
                 return f.std;
               }
-              return "23:59";
+              return "";
             };
-            return getFlightTime(a).localeCompare(getFlightTime(b));
+            const getMinutes = (fTime: string) => {
+              if (!fTime || fTime.toUpperCase().includes("NS") || fTime.includes("---")) return 9999;
+              const parts = fTime.split(":");
+              const fh = parseInt(parts[0]) || 0;
+              const fm = parseInt(parts[1]) || 0;
+              const ph = parseInt(shift.pickupTime.split(":")[0]) || 0;
+              let totalMins = fh * 60 + fm;
+              if (ph >= 12 && fh < 12) {
+                totalMins += 24 * 60;
+              }
+              return totalMins;
+            };
+            return getMinutes(getFlightTime(a)) - getMinutes(getFlightTime(b));
           });
           if (fObjs.length === 0) fObjs = [{} as Flight];
           
@@ -1390,6 +1411,7 @@ export const ProgramDisplay: React.FC<Props> = ({
              rt.eachCell((cell) => {
                  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                  cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+                 cell.font = { bold: true, size: 10 };
              });
              
              if (fIndex === 0) {
@@ -1480,9 +1502,8 @@ export const ProgramDisplay: React.FC<Props> = ({
 
         // Add absence/leave rows right below the day's physical shifts (Option B - Beside Day Shift)
         absenceRowsData.forEach((absItem, idx) => {
-          const initialsText = absItem.initials.join(" - ");
           const note = prog.notes?.[`ABSENCE_${absItem.category}`];
-          const fullStaffText = `${initialsText}${note ? ` (${note})` : ""}`;
+          const fullStaffText = `${absItem.formattedText}${note ? `\n(${note})` : ""}`;
 
           const mergedLabel = idx === 0 ? `${dayName} ${dateFormatted}` : "";
           let actualLabel = "";
@@ -1518,7 +1539,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             } else if (colNumber === 2) {
               cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 10 };
             } else if (colNumber === 4 || colNumber === 5) {
-              cell.font = { color: { argb: 'FFB45309' }, size: 9 }; // amber-700
+              cell.font = { bold: true, color: { argb: 'FFB45309' }, size: 9 }; // amber-700
             } else if (colNumber === 7) {
               cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 };
               // Highlight the OFF-DUTY cell slightly darker amber
@@ -1526,7 +1547,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             } else if (colNumber === 8) {
               cell.font = { bold: true, color: { argb: 'FF78350F' }, size: 10 }; // amber-950
             } else {
-              cell.font = { color: { argb: 'FF92400E' }, size: 9 };
+              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 };
             }
           });
           
@@ -1592,11 +1613,11 @@ export const ProgramDisplay: React.FC<Props> = ({
 
         // Group absence data
         const categories = {
-          "Day off": [] as string[],
-          "Annual": [] as string[],
-          "Lieu": [] as string[],
-          "Sick Leave": [] as string[],
-          "SSH Support": [] as string[]
+          "Day off": [] as { initials: string, isSecurity: boolean }[],
+          "Annual": [] as { initials: string, isSecurity: boolean }[],
+          "Lieu": [] as { initials: string, isSecurity: boolean }[],
+          "Sick Leave": [] as { initials: string, isSecurity: boolean }[],
+          "SSH Support": [] as { initials: string, isSecurity: boolean }[]
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
@@ -1629,7 +1650,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
 
           if (mappedCat && (categories as any)[mappedCat]) {
-            (categories as any)[mappedCat].push(s.initials);
+            (categories as any)[mappedCat].push({ initials: s.initials, isSecurity: s.isSecurity });
           }
         });
 
@@ -1637,7 +1658,12 @@ export const ProgramDisplay: React.FC<Props> = ({
         Object.entries(categories).forEach(([k, v]) => {
            if (v.length > 0) {
               const note = prog.notes?.[`ABSENCE_${k}`];
-              absenceTextLines.push(`${k}: ${v.join(" - ")}${note ? ` (${note})` : ''}`);
+              const regular = v.filter(s => !s.isSecurity).map(s => s.initials);
+              const security = v.filter(s => s.isSecurity).map(s => s.initials);
+              let parts = [];
+              if (regular.length > 0) parts.push(regular.join(" - "));
+              if (security.length > 0) parts.push(`SEC : ${security.join(" - ")}`);
+              absenceTextLines.push(`${k}:\n${parts.join("\n")}${note ? `\n(${note})` : ''}`);
            }
         });
         
@@ -1694,7 +1720,30 @@ export const ProgramDisplay: React.FC<Props> = ({
              
              const flightIds = shift.flightIds || [];
              let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
-             fObjs.sort((a, b) => (a.sta || "23:59").localeCompare(b.sta || "23:59"));
+             fObjs.sort((a, b) => {
+               const getFlightTime = (f: any) => {
+                 if (f?.sta && f.sta.trim() !== "" && f.sta.toUpperCase() !== "NS") {
+                   return f.sta;
+                 }
+                 if (f?.std && f.std.trim() !== "" && f.std !== "---") {
+                   return f.std;
+                 }
+                 return "";
+               };
+               const getMinutes = (fTime: string) => {
+                 if (!fTime || fTime.toUpperCase().includes("NS") || fTime.includes("---")) return 9999;
+                 const parts = fTime.split(":");
+                 const fh = parseInt(parts[0]) || 0;
+                 const fm = parseInt(parts[1]) || 0;
+                 const ph = parseInt(shift.pickupTime.split(":")[0]) || 0;
+                 let totalMins = fh * 60 + fm;
+                 if (ph >= 12 && fh < 12) {
+                   totalMins += 24 * 60;
+                 }
+                 return totalMins;
+               };
+               return getMinutes(getFlightTime(a)) - getMinutes(getFlightTime(b));
+             });
              if (fObjs.length === 0) {
                  fObjs = [{ flightNumber: "", from: "", to: "", sta: "NS", std: "---" } as Flight];
              }
@@ -1745,7 +1794,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         theme: "grid",
         margin: { top: 2, right: 3, bottom: 2, left: 3 },
         headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold", halign: "center", lineColor: [0,0,0], lineWidth: 0.1, fontSize: 9 },
-        styles: { fontSize: 9, cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
+        styles: { fontSize: 9, fontStyle: "bold", cellPadding: 1, valign: "middle", halign: "center", lineColor: [150,150,150], lineWidth: 0.1, overflow: 'linebreak' },
         columnStyles: {
             0: { cellWidth: 15 },
             1: { cellWidth: 45 },

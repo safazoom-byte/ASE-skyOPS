@@ -19,14 +19,9 @@ export default defineConfig(({ mode }) => {
       target: "esnext",
       outDir: "dist",
       sourcemap: false,
+      minify: false,
       rollupOptions: {
         output: {
-          manualChunks: {
-            xlsx: ['xlsx'],
-            exceljs: ['exceljs'],
-            pdf: ['jspdf', 'jspdf-autotable'],
-            icons: ['lucide-react']
-          }
         }
       }
     },

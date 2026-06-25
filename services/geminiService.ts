@@ -871,7 +871,17 @@ export const modifyProgramWithAI = async (
       { responseMimeType: "application/json" }
     ),
   );
-  return safeParseJson(response.text);
+  const result = safeParseJson(response.text);
+  if (result && Array.isArray(result.programs)) {
+    const totalAssignments = result.programs.reduce((acc: number, p: any) => acc + (p.assignments?.length || 0), 0);
+    if (totalAssignments > 0) {
+      const newProgMap = new Map(result.programs.map((p: any) => [p.dateString, p]));
+      result.programs = data.programs.map(oldP => newProgMap.get(oldP.dateString) || oldP);
+    } else {
+      result.programs = data.programs; // Reject empty wipe
+    }
+  }
+  return result;
 };
 
 export const repairProgramWithAI = async (
@@ -886,11 +896,24 @@ export const repairProgramWithAI = async (
   const response = await withRetry<{ text: string }>(() =>
     aiFetch(
       "gemini-3.1-pro-preview",
-      prompt,
+      { parts: [{ text: prompt }] },
       { responseMimeType: "application/json" }
     ),
   );
+  
+  const result = safeParseJson(response.text);
+  let newPrograms = result?.programs || currentPrograms;
+  if (Array.isArray(newPrograms)) {
+    const totalAssignments = newPrograms.reduce((acc: number, p: any) => acc + (p.assignments?.length || 0), 0);
+    if (totalAssignments > 0) {
+      const newProgMap = new Map(newPrograms.map((p: any) => [p.dateString, p]));
+      newPrograms = currentPrograms.map(oldP => newProgMap.get(oldP.dateString) || oldP);
+    } else {
+      newPrograms = currentPrograms; // Reject empty wipe
+    }
+  }
+  
   return {
-    programs: safeParseJson(response.text)?.programs || currentPrograms,
+    programs: newPrograms,
   };
 };
