@@ -110,6 +110,7 @@ export interface DailyProgram {
   assignments: Assignment[];
   offDuty?: OffDutyRecord[];
   notes?: Record<string, string>;
+  shiftDrivers?: Record<string, string>;
 }
 
 export interface ProgramVersion {

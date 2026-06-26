@@ -400,6 +400,10 @@ export const generateAIProgram = async (
     const prevDayStr = prevDay.toISOString().split("T")[0];
 
     data.incomingDuties.forEach((d) => {
+      // Only consider incoming duties that actually match the day before the start date
+      if (d.date && d.date !== prevDayStr) {
+        return;
+      }
       staffLastEndTime.set(
         d.staffId,
         new Date(`${d.date || prevDayStr}T${d.shiftEndTime}`),

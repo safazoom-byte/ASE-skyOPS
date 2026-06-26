@@ -739,33 +739,37 @@ const App: React.FC = () => {
       if (assignment.shiftId) {
         const s = shifts.find((sh) => sh.id === assignment.shiftId);
         if (s) {
-          // Include ALL shifts from the previous day, regardless of start/end time.
-          // Any shift on Day 0 dictates the mandatory rest period for Day 1.
-          const alreadyExists = incomingDuties.some(
-            (d) =>
-              d.staffId === assignment.staffId &&
-              d.date === dateStr &&
-              d.shiftEndTime === s.endTime
-          );
-          if (
-            !alreadyExists &&
-            !newDuties.some(
-              (d) => d.staffId === assignment.staffId && d.shiftEndTime === s.endTime
-            )
-          ) {
-            newDuties.push({
-              id: Math.random().toString(36).substr(2, 9),
-              staffId: assignment.staffId,
-              date: dateStr,
-              shiftEndTime: s.endTime,
-            });
+          const endHr = parseInt(s.endTime.split(":")[0]) || 0;
+          const startHr = parseInt(s.pickupTime.split(":")[0]) || 0;
+          
+          // Only add late shifts or overnight shifts that might conflict with early shifts next day
+          if (startHr >= 15 || (endHr < 12 && startHr > 12) || endHr >= 22) {
+            const alreadyExists = incomingDuties.some(
+              (d) =>
+                d.staffId === assignment.staffId &&
+                d.date === dateStr &&
+                d.shiftEndTime === s.endTime
+            );
+            if (
+              !alreadyExists &&
+              !newDuties.some(
+                (d) => d.staffId === assignment.staffId && d.shiftEndTime === s.endTime
+              )
+            ) {
+              newDuties.push({
+                id: Math.random().toString(36).substr(2, 9),
+                staffId: assignment.staffId,
+                date: dateStr,
+                shiftEndTime: s.endTime,
+              });
+            }
           }
         }
       }
     }
 
     if (newDuties.length === 0) {
-      alert("No new shifts found on Day 0 of the previous program (or they are already added).");
+      alert("No new late shifts found on Day 0 of the previous program (or they are already added).");
       return;
     }
 
@@ -1178,9 +1182,29 @@ const App: React.FC = () => {
 
                     {/* Feedback List */}
                     <div className="pt-4 border-t border-slate-50">
-                      <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                        Registered for {incomingDate}
-                      </h5>
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                          Registered for {incomingDate}
+                        </h5>
+                        {incomingDuties.some(d => d.date === incomingDate) && (
+                          <button
+                            onClick={() => {
+                              if (confirm(`Clear all registered duties for ${incomingDate}?`)) {
+                                const newDuties = incomingDuties.filter(d => d.date !== incomingDate);
+                                setIncomingDuties(newDuties);
+                                if (supabase) {
+                                  newDuties.forEach(d => db.upsertIncomingDuty(d)); // Note: this upserts, to really delete from cloud we need to delete. But localstorage handles it for now, let's just do a sync if needed.
+                                  // Actually, we should delete them from DB.
+                                  incomingDuties.filter(d => d.date === incomingDate).forEach(d => db.deleteIncomingDuty(d.id));
+                                }
+                              }
+                            }}
+                            className="text-[9px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded"
+                          >
+                            CLEAR ALL
+                          </button>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {incomingDuties.filter((d) => d.date === incomingDate)
                           .length === 0 && (

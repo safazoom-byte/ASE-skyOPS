@@ -1526,6 +1526,15 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (richText.length > 0) richText.push({ text: "\n" });
               richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
           }
+
+          const shiftDriverId = prog.shiftDrivers?.[shift.id];
+          if (shiftDriverId) {
+              const dObj = staff.find(s => s.id === shiftDriverId);
+              if (dObj) {
+                  if (richText.length > 0) richText.push({ text: "\n" });
+                  richText.push({ text: dObj.initials, font: { color: { argb: 'FF15803D' }, bold: true } });
+              }
+          }
           
           if (richText.length > 0) {
               staffCell.value = { richText };
@@ -1774,6 +1783,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                  if (pureInitials) pureInitials += `\n`;
                  pureInitials += `${shiftNote}`;
              }
+
+             const shiftDriverId = prog.shiftDrivers?.[shift.id];
+             if (shiftDriverId) {
+                 const dObj = staff.find(s => s.id === shiftDriverId);
+                 if (dObj) {
+                     if (pureInitials) pureInitials += `\n`;
+                     pureInitials += `[${dObj.initials}]`;
+                     orderedStaffTokens.push({ text: `[${dObj.initials}]`, type: 'driverDropdown' });
+                 }
+             }
              
              const flightIds = shift.flightIds || [];
              let fObjs = flightIds.map(fid => getFlight(fid)).filter(Boolean) as Flight[];
@@ -1931,6 +1950,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     case 'driver': color = [21, 128, 61]; break; // Dark Green
                                     case 'labour': color = [185, 28, 28]; break; // Dark Red
                                     case 'sec': color = [126, 34, 206]; break; // Dark Purple
+                                    case 'driverDropdown': color = [21, 128, 61]; break; // Dark Green
                                     default: color = [0, 0, 0]; break;
                                 }
                             }
@@ -2012,6 +2032,30 @@ export const ProgramDisplay: React.FC<Props> = ({
       return p;
     });
 
+    onUpdatePrograms(newPrograms);
+  };
+
+  const handleUpdateDriver = (
+    dateString: string,
+    shiftId: string,
+    driverId: string
+  ) => {
+    if (!onUpdatePrograms) return;
+    const newPrograms = programs.map((p) => {
+      if (p.dateString === dateString) {
+        const newDrivers = { ...(p.shiftDrivers || {}) };
+        if (driverId) {
+          newDrivers[shiftId] = driverId;
+        } else {
+          delete newDrivers[shiftId];
+        }
+        return {
+          ...p,
+          shiftDrivers: newDrivers,
+        };
+      }
+      return p;
+    });
     onUpdatePrograms(newPrograms);
   };
 
@@ -3421,6 +3465,28 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             </span>
                                           )}
                                         </div>
+
+                                        {/* Driver Selection */}
+                                        {staff.filter(s => s.isDriver).length > 0 && (
+                                            <div className="mt-1">
+                                                <select
+                                                    value={prog.shiftDrivers?.[shift.id] || ""}
+                                                    onChange={(e) => handleUpdateDriver(prog.dateString!, shift.id, e.target.value)}
+                                                    className={`w-full text-[9px] p-1 border rounded outline-none cursor-pointer text-center font-bold ${
+                                                        prog.shiftDrivers?.[shift.id]
+                                                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                                            : "bg-slate-50 text-slate-400 border-slate-200 border-dashed hover:border-indigo-300 hover:text-indigo-600"
+                                                    }`}
+                                                >
+                                                    <option value="">{prog.shiftDrivers?.[shift.id] ? "Remove Driver" : "+ Add Driver"}</option>
+                                                    {staff.filter(s => s.isDriver).map(driver => (
+                                                        <option key={driver.id} value={driver.id}>
+                                                            {driver.initials} - {driver.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
 
                                         {Object.entries(
                                           shift.roleCounts || {},
