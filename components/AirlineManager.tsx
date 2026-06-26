@@ -49,7 +49,7 @@ export const AirlineManager: React.FC<Props> = ({ flights = [], shifts = [], sta
   const getFlightCount = (iata: string) => {
     if (!flights.length) return 0;
     return flights.filter(f => {
-      const matchIata = (f.flightNumber || "").toUpperCase().startsWith(iata.toUpperCase());
+      const matchIata = (f.flightNumber || "").toUpperCase().includes(iata.toUpperCase());
       if (!matchIata) return false;
       
       if (startDate && endDate) {
@@ -64,27 +64,25 @@ export const AirlineManager: React.FC<Props> = ({ flights = [], shifts = [], sta
   };
 
   const handleExportAirline = async (airline: Airline) => {
-    if (!flights || !flights.length || !shifts || !shifts.length) return;
+    if (!flights || !flights.length) return;
     
-    // Group flights by shift pickup date to match the staff program behavior
-    // We only consider shifts within the selected period
-    const flightsByDate = new Map<string, Flight[]>();
-    
-    shifts.forEach(shift => {
-      if (!startDate || !endDate || (shift.pickupDate >= startDate && shift.pickupDate <= endDate)) {
-        const shiftFlights = (shift.flightIds || [])
-          .map(fid => flights.find(f => f.id === fid))
-          .filter((f): f is Flight => !!f && (f.flightNumber || "").toUpperCase().startsWith((airline.iata_code || "").toUpperCase()));
-          
-        if (shiftFlights.length > 0) {
-          const existing = flightsByDate.get(shift.pickupDate) || [];
-          flightsByDate.set(shift.pickupDate, [...existing, ...shiftFlights]);
-        }
+    // Get all flights for this airline that fall within the selected period
+    const airlineFlights = flights.filter(f => {
+      const matchIata = (f.flightNumber || "").toUpperCase().includes((airline.iata_code || "").toUpperCase());
+      if (!matchIata) return false;
+      
+      if (startDate && endDate) {
+        if (!f.date) return false;
+        const fDate = new Date(f.date);
+        const sDate = new Date(startDate);
+        const eDate = new Date(endDate);
+        return fDate >= sDate && fDate <= eDate;
       }
+      return true;
     });
 
-    if (flightsByDate.size === 0) {
-      alert("No flights linked to shifts found for this airline in the selected period.");
+    if (airlineFlights.length === 0) {
+      alert("No flights found for this airline in the selected period.");
       return;
     }
     
@@ -179,17 +177,31 @@ export const AirlineManager: React.FC<Props> = ({ flights = [], shifts = [], sta
       rowIdx++;
     }
 
+    const activeDates: string[] = [];
+    const currDate = new Date(startDateObj);
+    while (currDate <= endDateObj) {
+      activeDates.push(currDate.toISOString().split('T')[0]);
+      currDate.setDate(currDate.getDate() + 1);
+    }
+    
+    const flightsByDate = new Map<string, any[]>();
+    activeDates.forEach(d => flightsByDate.set(d, []));
+
+    airlineFlights.forEach(f => {
+      const fDate = f.date || "";
+      if (flightsByDate.has(fDate)) {
+        // Check if there is any shift assigned to this flight that is cancelled
+        const linkedShifts = shifts?.filter(s => s.flightIds?.includes(f.id)) || [];
+        const isCancelled = linkedShifts.length > 0 && linkedShifts.every(s => (s.description || "").toUpperCase().includes("CANCEL"));
+        
+        flightsByDate.get(fDate)!.push({ ...f, isCancelled });
+      }
+    });
+
     const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     
-    // Sort dates
-    const sortedDates = Array.from(flightsByDate.keys()).sort();
-    
-    sortedDates.forEach(dateStr => {
-      const dayFlights = flightsByDate.get(dateStr) || [];
-      // Deduplicate flights just in case multiple shifts cover the same flight (rare but possible)
-      const uniqueFlightsMap = new Map<string, Flight>();
-      dayFlights.forEach(f => uniqueFlightsMap.set(f.id, f));
-      const uniqueFlights = Array.from(uniqueFlightsMap.values());
+    activeDates.forEach(dateStr => {
+      const uniqueFlights = flightsByDate.get(dateStr) || [];
       
       uniqueFlights.sort((a, b) => {
         const timeA = a.sta || a.std || "";
@@ -214,44 +226,58 @@ export const AirlineManager: React.FC<Props> = ({ flights = [], shifts = [], sta
       });
       rowIdx++;
 
-      let sn = 1;
-      uniqueFlights.forEach(f => {
-        let dataRow;
-        
-        // Format flight number to match staff version if it contains /
-        const formattedFlightNumber = f.flightNumber ? f.flightNumber.replace("/", " / ") : "";
+      if (uniqueFlights.length === 0) {
+         let nilRow;
+         if (isNesma) {
+           nilRow = sheet.addRow([1, "NIL", "NIL", "NIL", "NIL", "NIL", "NIL", "NIL", "NIL"]);
+         } else {
+           nilRow = sheet.addRow([1, "NIL", "NIL", "NIL", "NIL", "NIL"]);
+         }
+         nilRow.font = { bold: true, color: { argb: "FF000080" }, size: 10 };
+         nilRow.alignment = { horizontal: "center", vertical: "middle" };
+         nilRow.eachCell((c) => { 
+           c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: "FFFFFFFF" } }; 
+           c.border = commonBorderStyle; 
+         });
+         rowIdx++;
+      } else {
+        let sn = 1;
+        uniqueFlights.forEach(f => {
+          let dataRow;
+          const formattedFlightNumber = f.flightNumber ? f.flightNumber.replace("/", " / ") : "";
 
-        if (isNesma) {
-           dataRow = sheet.addRow([
-             sn++,
-             formattedFlightNumber,
-             "SUBUU",
-             f.from,
-             f.sta ? f.sta : "***",
-             f.eta || "",
-             f.std ? f.std : "***",
-             f.etd || "",
-             f.to
-           ]);
-        } else {
-           dataRow = sheet.addRow([
-             sn++,
-             formattedFlightNumber,
-             f.from,
-             f.sta || "",
-             f.std || "",
-             f.to
-           ]);
-        }
-        
-        dataRow.font = { bold: true, color: { argb: "FF000080" }, size: 10 };
-        dataRow.alignment = { horizontal: "center", vertical: "middle" };
-        dataRow.eachCell((c) => { 
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: "FFFFFFFF" } }; 
-          c.border = commonBorderStyle; 
+          if (isNesma) {
+             dataRow = sheet.addRow([
+               sn++,
+               formattedFlightNumber,
+               "SUBUU",
+               f.from,
+               f.isCancelled ? "CANCELLED" : (f.sta ? f.sta : "***"),
+               f.isCancelled ? "CANCELLED" : (f.eta || ""),
+               f.isCancelled ? "CANCELLED" : (f.std ? f.std : "***"),
+               f.isCancelled ? "CANCELLED" : (f.etd || ""),
+               f.to
+             ]);
+          } else {
+             dataRow = sheet.addRow([
+               sn++,
+               formattedFlightNumber,
+               f.from,
+               f.isCancelled ? "CANCELLED" : (f.sta || ""),
+               f.isCancelled ? "CANCELLED" : (f.std || ""),
+               f.to
+             ]);
+          }
+          
+          dataRow.font = { bold: true, color: { argb: "FF000080" }, size: 10 };
+          dataRow.alignment = { horizontal: "center", vertical: "middle" };
+          dataRow.eachCell((c) => { 
+            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f.isCancelled ? "FFFF0000" : "FFFFFFFF" } }; 
+            c.border = commonBorderStyle; 
+          });
+          rowIdx++;
         });
-        rowIdx++;
-      });
+      }
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
