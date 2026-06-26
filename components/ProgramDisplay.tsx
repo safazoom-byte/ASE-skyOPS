@@ -1408,10 +1408,47 @@ export const ProgramDisplay: React.FC<Props> = ({
              ]);
              addedRows.push(rt);
              
-             rt.eachCell((cell) => {
+             let flightBgColor = 'FFFFFFFF';
+             if (f.flightNumber) {
+                 const fnUpper = f.flightNumber.toUpperCase();
+                 if (fnUpper.includes("SM")) flightBgColor = 'FFC9DAF8'; // Light Blue (Aircairo)
+                 else if (fnUpper.includes("KNE") || fnUpper.includes("XY")) flightBgColor = 'FFD9EAD3'; // Light Green (Flynas)
+                 else if (fnUpper.includes("SV")) flightBgColor = 'FFFCE5CD'; // Soft Peach/Sand
+                 else if (fnUpper.includes("FZ")) flightBgColor = 'FFF4CCCC'; // Soft Orange
+                 else if (fnUpper.includes("J9") || fnUpper.includes("JZR")) flightBgColor = 'FFEFEFEF'; // Light Gray
+                 else if (fnUpper.includes("RB")) flightBgColor = 'FFEAD1DC'; // Soft Pink/Purple
+                 else if (fnUpper.includes("G9") || fnUpper.includes("ABY")) flightBgColor = 'FFD0E0E3'; // Soft Teal
+                 else {
+                     const match = fnUpper.match(/([A-Z]{2,3})\s*\d/);
+                     if (match) {
+                         const prefix = match[1];
+                         const hash = prefix.charCodeAt(0) + (prefix.charCodeAt(1) || 0) * 17;
+                         const colors = ['FFF2F2F2', 'FFFFF2CC', 'FFE6B8AF', 'FFD9D2E9', 'FFD0E0E3', 'FFC9DAF8'];
+                         flightBgColor = colors[hash % colors.length];
+                     }
+                 }
+             }
+
+             // Shift columns: If there's only 1 flight in this shift, inherit its color. 
+             // If multiple flights, use a soft neutral gray/beige to tie them together.
+             const shiftBgColor = fObjs.length === 1 ? flightBgColor : 'FFF2F2F2'; // Light Gray for multi-flight shifts
+
+             rt.eachCell((cell, colNumber) => {
                  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                  cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
                  cell.font = { bold: true, size: 10 };
+                 
+                 if (colNumber >= 2 && colNumber <= 6) {
+                     // Flight columns (2 to 6)
+                     if (flightBgColor !== 'FFFFFFFF') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: flightBgColor } };
+                     }
+                 } else {
+                     // Shift columns (1, 7, 8)
+                     if (shiftBgColor !== 'FFFFFFFF') {
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: shiftBgColor } };
+                     }
+                 }
              });
              
              if (f.eta) {

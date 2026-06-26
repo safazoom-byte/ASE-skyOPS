@@ -190,11 +190,14 @@ export const AirlineManager: React.FC<Props> = ({ flights = [], shifts = [], sta
     airlineFlights.forEach(f => {
       const fDate = f.date || "";
       if (flightsByDate.has(fDate)) {
-        // Check if there is any shift assigned to this flight that is cancelled
+        // Check if there is any shift assigned to this flight
         const linkedShifts = shifts?.filter(s => s.flightIds?.includes(f.id)) || [];
-        const isCancelled = linkedShifts.length > 0 && linkedShifts.every(s => (s.description || "").toUpperCase().includes("CANCEL"));
         
-        flightsByDate.get(fDate)!.push({ ...f, isCancelled });
+        // Only include flight if it is linked to a shift in the staff sheet
+        if (linkedShifts.length > 0) {
+          const isCancelled = linkedShifts.every(s => (s.description || "").toUpperCase().includes("CANCEL"));
+          flightsByDate.get(fDate)!.push({ ...f, isCancelled });
+        }
       }
     });
 

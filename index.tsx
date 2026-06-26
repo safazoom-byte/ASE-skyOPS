@@ -701,6 +701,89 @@ const App: React.FC = () => {
     setNotification(`${newDuties.length} Rest Log Entries Added`);
   };
 
+  const autoDetectDay0Staff = async () => {
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+
+    // Day 0 is strictly the day before the start date
+    const day0 = new Date(start);
+    day0.setDate(day0.getDate() - 1);
+    const day0DateString = day0.toISOString().split("T")[0];
+
+    // Find the DailyProgram exactly for day 0
+    let latestPrevProgram = programs.find((p) => p.dateString === day0DateString);
+
+    // Fallback: If not found exactly, find the most recent one before start date
+    if (!latestPrevProgram) {
+      let latestTime = 0;
+      for (const p of programs) {
+        if (!p.dateString) continue;
+        const pd = new Date(p.dateString);
+        pd.setHours(0, 0, 0, 0);
+        if (pd.getTime() < start.getTime() && pd.getTime() > latestTime) {
+          latestTime = pd.getTime();
+          latestPrevProgram = p;
+        }
+      }
+    }
+
+    if (!latestPrevProgram) {
+      alert("No previous week program found before the selected start date.");
+      return;
+    }
+
+    const newDuties: IncomingDuty[] = [];
+    const dateStr = latestPrevProgram.dateString!;
+
+    for (const assignment of latestPrevProgram.assignments) {
+      if (assignment.shiftId) {
+        const s = shifts.find((sh) => sh.id === assignment.shiftId);
+        if (s) {
+          // Include ALL shifts from the previous day, regardless of start/end time.
+          // Any shift on Day 0 dictates the mandatory rest period for Day 1.
+          const alreadyExists = incomingDuties.some(
+            (d) =>
+              d.staffId === assignment.staffId &&
+              d.date === dateStr &&
+              d.shiftEndTime === s.endTime
+          );
+          if (
+            !alreadyExists &&
+            !newDuties.some(
+              (d) => d.staffId === assignment.staffId && d.shiftEndTime === s.endTime
+            )
+          ) {
+            newDuties.push({
+              id: Math.random().toString(36).substr(2, 9),
+              staffId: assignment.staffId,
+              date: dateStr,
+              shiftEndTime: s.endTime,
+            });
+          }
+        }
+      }
+    }
+
+    if (newDuties.length === 0) {
+      alert("No new shifts found on Day 0 of the previous program (or they are already added).");
+      return;
+    }
+
+    setIncomingDuties((prev) => [...prev, ...newDuties]);
+    if (supabase) {
+      await db.upsertIncomingDuties(newDuties);
+      await db.logAction(
+        "CREATE",
+        "LEAVE",
+        "BULK",
+        `Auto-detected ${newDuties.length} rest log entries from ${dateStr}`,
+      );
+    }
+    
+    setIncomingDate(dateStr);
+    setNotification(`Auto-detected ${newDuties.length} shifts from Day 0 (${dateStr})`);
+  };
+
   const addQuickLeave = async () => {
     // Process input text on button click
     let finalIds = [...quickLeaveStaffIds];
@@ -869,27 +952,68 @@ const App: React.FC = () => {
         {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
           <CommandCenter currentUser={userProfile} flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
         )}
-        {activeTab === "dashboard" && (
+        {activeTab === "dashboard" && (() => {
+          const activeFlights = flights.filter(f => f.date && f.date >= startDate && f.date <= endDate);
+          const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
+          const eligibleStaff = staff.filter((s) => {
+            if (s.type === "Local") return true;
+            if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+              return s.rosterPeriods.some(p => p.start <= endDate && p.end >= startDate);
+            }
+            return (!s.workFromDate || !s.workToDate || (s.workFromDate <= endDate && s.workToDate >= startDate));
+          });
+          
+          return (
           <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
               {[
                 {
-                  label: "Air Traffic",
-                  val: flights.length,
+                  label: "Flights",
+                  val: activeFlights.length,
                   icon: Plane,
                   color: "text-blue-600",
                   bg: "bg-blue-50",
+                  breakdown: Object.entries(
+                    activeFlights.reduce((acc, f) => {
+                      const match = (f.flightNumber || "").toUpperCase().match(/([A-Z]{2,3})\s*\d/);
+                      const prefix = match ? match[1] : "OTHER";
+                      acc[prefix] = (acc[prefix] || 0) + 1;
+                      return acc;
+                    }, {} as Record<string, number>)
+                  ).sort((a, b) => b[1] - a[1]).slice(0, 4), // keep top 4
                 },
                 {
-                  label: "Personnel",
-                  val: staff.length,
+                  label: "Staff",
+                  val: eligibleStaff.length,
                   icon: Users,
                   color: "text-indigo-600",
                   bg: "bg-indigo-50",
+                  breakdown: (() => {
+                    let traffic = 0;
+                    let security = 0;
+                    let labour = 0;
+                    let driver = 0;
+                    let accountant = 0;
+                    eligibleStaff.forEach(s => {
+                      if (s.isSecurity) security++;
+                      else if (s.isLabour) labour++;
+                      else if (s.isDriver) driver++;
+                      else if (s.isAccountant) accountant++;
+                      else traffic++; // default others to Traffic
+                    });
+                    
+                    const res: [string, number][] = [];
+                    if (traffic > 0) res.push(["Traffic", traffic]);
+                    if (security > 0) res.push(["Security", security]);
+                    if (labour > 0) res.push(["Labour", labour]);
+                    if (driver > 0) res.push(["Driver", driver]);
+                    if (accountant > 0) res.push(["Accountant", accountant]);
+                    return res;
+                  })(),
                 },
                 {
-                  label: "Duty Slots",
-                  val: shifts.length,
+                  label: "Shifts",
+                  val: activeShifts.length,
                   icon: Clock,
                   color: "text-amber-500",
                   bg: "bg-amber-50",
@@ -904,14 +1028,25 @@ const App: React.FC = () => {
               ].map((stat, i) => (
                 <div
                   key={i}
-                  className={`bg-white p-4 md:p-8 rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 md:h-40 ${stat.bg === "bg-slate-900" ? "bg-slate-900 text-white" : ""}`}
+                  className={`bg-white p-4 md:p-8 rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 md:h-40 ${stat.bg === "bg-slate-900" ? "bg-slate-900 text-white" : "relative overflow-hidden"}`}
                 >
-                  <div
-                    className={`w-8 h-8 md:w-10 md:h-10 ${stat.bg} rounded-lg md:rounded-xl flex items-center justify-center ${stat.color}`}
-                  >
-                    <stat.icon size={16} />
+                  <div className="flex justify-between items-start">
+                    <div
+                      className={`w-8 h-8 md:w-10 md:h-10 ${stat.bg} rounded-lg md:rounded-xl flex items-center justify-center ${stat.color} z-10 relative`}
+                    >
+                      <stat.icon size={16} />
+                    </div>
+                    {stat.breakdown && (
+                      <div className="flex flex-col items-end z-10 relative mt-1">
+                        {stat.breakdown.map(([prefix, count]) => (
+                          <div key={prefix} className="text-[9px] md:text-xs font-bold text-slate-500">
+                            {prefix} <span className="text-slate-700">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div>
+                  <div className="z-10 relative">
                     <h2 className="text-xl md:text-3xl font-black italic leading-none">
                       {stat.val}
                     </h2>
@@ -989,6 +1124,14 @@ const App: React.FC = () => {
                           Warning: Register personnel in 'Staff' tab first.
                         </p>
                       )}
+                      {programs.length > 0 && (
+                        <button
+                          onClick={autoDetectDay0Staff}
+                          className="mt-3 text-[10px] font-bold text-blue-600 hover:text-blue-700 uppercase tracking-widest flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          <Zap size={12} /> Auto-detect Day 0 Staff from last week
+                        </button>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <input
@@ -1065,22 +1208,17 @@ const App: React.FC = () => {
                             return (
                               <div
                                 key={d.id}
-                                className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in group relative"
+                                className="px-3 py-1.5 bg-amber-50 border border-amber-100 rounded-xl flex items-center justify-between gap-3 animate-in fade-in zoom-in group relative"
                               >
-                                <span className="text-[10px] font-black text-amber-700 uppercase">
-                                  {
-                                    staff.find((s) => s.id === d.staffId)
-                                      ?.initials
-                                  }
-                                </span>
-                                <span className="text-[10px] font-bold text-amber-600">
-                                  {d.shiftEndTime}
-                                </span>
-                                <div className="flex items-center gap-1 pl-2 border-l border-amber-200">
-                                  <Zap size={8} className="text-amber-400" />
-                                  <span className="text-[8px] font-black text-amber-500">
-                                    {availStr}
-                                    {isNextDay ? "+1" : ""}
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-black text-amber-700 uppercase">
+                                    {
+                                      staff.find((s) => s.id === d.staffId)
+                                        ?.initials
+                                    }
+                                  </span>
+                                  <span className="text-[10px] font-bold text-amber-600">
+                                    ({d.shiftEndTime} - {availStr}{isNextDay ? "+1" : ""})
                                   </span>
                                 </div>
                                 <button
@@ -1339,7 +1477,8 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
         {activeTab === "flights" && (
           <FlightManager
             flights={flights}
