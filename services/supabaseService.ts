@@ -229,12 +229,13 @@ export const db = {
   async upsertFlight(f: Flight) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("flights").upsert({
         id: f.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         flight_number: f.flightNumber,
         origin: f.from,
         destination: f.to,
@@ -254,12 +255,13 @@ export const db = {
   async upsertStaff(s: Staff) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("staff").upsert({
         id: s.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         name: s.name,
         initials: s.initials,
         type: s.type,
@@ -290,12 +292,13 @@ export const db = {
   async upsertShift(s: ShiftConfig) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("shifts").upsert({
         id: s.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         day: s.day,
         pickup_date: s.pickupDate,
         pickup_time: s.pickupTime,
@@ -314,12 +317,13 @@ export const db = {
   async upsertLeave(l: LeaveRequest) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("leave_requests").upsert({
         id: l.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         staff_id: l.staffId,
         start_date: l.startDate,
         end_date: l.endDate,
@@ -333,13 +337,14 @@ export const db = {
   async upsertLeaves(leaves: LeaveRequest[]) {
     const client = supabase;
     if (!client || leaves.length === 0) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("leave_requests").upsert(
         leaves.map((l) => ({
           id: l.id,
-          user_id: session.user.id,
+          user_id: ctx.userId,
+        airport_id: ctx.airportId,
           staff_id: l.staffId,
           start_date: l.startDate,
           end_date: l.endDate,
@@ -354,12 +359,13 @@ export const db = {
   async upsertIncomingDuty(d: IncomingDuty) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("incoming_duties").upsert({
         id: d.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         staff_id: d.staffId,
         date: d.date,
         shift_end_time: d.shiftEndTime,
@@ -372,13 +378,14 @@ export const db = {
   async upsertIncomingDuties(duties: IncomingDuty[]) {
     const client = supabase;
     if (!client || duties.length === 0) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("incoming_duties").upsert(
         duties.map((d) => ({
           id: d.id,
-          user_id: session.user.id,
+          user_id: ctx.userId,
+        airport_id: ctx.airportId,
           staff_id: d.staffId,
           date: d.date,
           shift_end_time: d.shiftEndTime,
@@ -392,8 +399,8 @@ export const db = {
   async savePrograms(programs: DailyProgram[]) {
     const client = supabase;
     if (!client || programs.length === 0) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
 
     const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
 
@@ -402,7 +409,7 @@ export const db = {
         await client
           .from("programs")
           .delete()
-          .eq("user_id", session.user.id)
+          .eq(ctx.matchCol, ctx.matchVal)
           .in("date_string", datesToOverwrite);
       }
 
@@ -414,7 +421,8 @@ export const db = {
           ];
 
           return {
-            user_id: session.user.id,
+            user_id: ctx.userId,
+            airport_id: ctx.airportId,
             day: p.day,
             date_string: p.dateString || "",
             assignments: p.assignments || [],
@@ -429,14 +437,10 @@ export const db = {
 
   async deleteFlight(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
-        await client
-          .from("flights")
-          .delete()
-          .eq("id", id)
-          .eq("user_id", session.user.id);
+        await client.from("flights").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete flight:", e);
       }
@@ -444,14 +448,10 @@ export const db = {
   },
   async deleteStaff(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
-        await client
-          .from("staff")
-          .delete()
-          .eq("id", id)
-          .eq("user_id", session.user.id);
+        await client.from("staff").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete staff:", e);
       }
@@ -459,14 +459,10 @@ export const db = {
   },
   async deleteShift(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
-        await client
-          .from("shifts")
-          .delete()
-          .eq("id", id)
-          .eq("user_id", session.user.id);
+        await client.from("shifts").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete shift:", e);
       }
@@ -474,14 +470,10 @@ export const db = {
   },
   async deleteLeave(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
-        await client
-          .from("leave_requests")
-          .delete()
-          .eq("id", id)
-          .eq("user_id", session.user.id);
+        await client.from("leave_requests").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete leave:", e);
       }
@@ -489,14 +481,10 @@ export const db = {
   },
   async deleteIncomingDuty(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
-        await client
-          .from("incoming_duties")
-          .delete()
-          .eq("id", id)
-          .eq("user_id", session.user.id);
+        await client.from("incoming_duties").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete incoming duty:", e);
       }
@@ -506,12 +494,13 @@ export const db = {
   async saveProgramVersion(v: ProgramVersion) {
     const client = supabase;
     if (!client) return;
-    const session = await auth.getSession();
-    if (!session) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
     try {
       await client.from("program_versions").upsert({
         id: v.id,
-        user_id: session.user.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
         version_number: v.versionNumber,
         name: v.name,
         created_at: v.createdAt,
@@ -529,12 +518,12 @@ export const db = {
   async getProgramVersions(): Promise<ProgramVersion[]> {
     const client = supabase;
     if (!client) return [];
-    const session = await auth.getSession();
-    if (!session) return [];
+    const ctx = await this.getMutationContext();
+    if (!ctx) return [];
     const { data } = await client
       .from("program_versions")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq(ctx.matchCol, ctx.matchVal)
       .order("created_at", { ascending: false });
     if (!data) return [];
     return data.map((v: any) => ({
@@ -552,14 +541,14 @@ export const db = {
 
   async deleteProgramVersion(id: string) {
     const client = supabase;
-    const session = await auth.getSession();
-    if (client && session) {
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
       try {
         await client
           .from("program_versions")
           .delete()
           .eq("id", id)
-          .eq("user_id", session.user.id);
+          .eq(ctx.matchCol, ctx.matchVal);
       } catch (e) {
         console.warn("Failed to delete program version:", e);
       }
@@ -872,7 +861,7 @@ export const db = {
     const profile = await this.getUserProfile();
 
     const log: AuditLog = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       userId: session.user.id,
       userEmail: session.user.email,
       actionType,
@@ -1028,4 +1017,52 @@ export const db = {
         new Date(l.createdAt) >= startDate,
     ).length;
   },
+
+  async exportDatabase() {
+    const data = await this.fetchAll();
+    if (!data) return null;
+    const versions = await this.getProgramVersions();
+    
+    const exportData = {
+      ...data,
+      program_versions: versions,
+      exportDate: new Date().toISOString()
+    };
+    return exportData;
+  },
+
+  async importDatabase(jsonData: string) {
+    try {
+      const data = JSON.parse(jsonData);
+      
+      // If there are flights, shifts, etc. save them
+      if (data.flights && data.flights.length > 0) {
+        for (const f of data.flights) await this.upsertFlight(f);
+      }
+      if (data.staff && data.staff.length > 0) {
+        for (const s of data.staff) await this.upsertStaff(s);
+      }
+      if (data.shifts && data.shifts.length > 0) {
+        for (const s of data.shifts) await this.upsertShift(s);
+      }
+      if (data.leave_requests && data.leave_requests.length > 0) {
+        await this.upsertLeaves(data.leave_requests);
+      }
+      if (data.incoming_duties && data.incoming_duties.length > 0) {
+        await this.upsertIncomingDuties(data.incoming_duties);
+      }
+      if (data.programs && data.programs.length > 0) {
+        await this.savePrograms(data.programs);
+      }
+      if (data.program_versions && data.program_versions.length > 0) {
+        for (const v of data.program_versions) await this.saveProgramVersion(v);
+      }
+      
+      this.logAction("IMPORT", "DATABASE", "all", "Imported full database backup");
+      return true;
+    } catch (e) {
+      console.error("Failed to import database", e);
+      return false;
+    }
+  }
 };

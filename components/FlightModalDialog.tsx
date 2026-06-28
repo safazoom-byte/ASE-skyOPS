@@ -50,7 +50,7 @@ export function FlightModalDialog({
     if (!fData.flightNumber || !fData.from || !fData.to) return alert("Fill required fields");
     
     if (flightModal.isNew && onAddFlight) {
-      const newId = Math.random().toString(36).substr(2, 9);
+      const newId = crypto.randomUUID();
       const newFlight = { ...fData, id: newId } as Flight;
       onAddFlight(newFlight);
       if (shift) {
@@ -80,8 +80,8 @@ export function FlightModalDialog({
 
   const handleSplit = () => {
     if (!exFlight || !shift || exFlight.type !== "Turnaround") return;
-    const fArr: Flight = { ...exFlight, id: Math.random().toString(36).substr(2,9), type: "Arrival", std: "" };
-    const fDep: Flight = { ...exFlight, id: Math.random().toString(36).substr(2,9), type: "Departure", sta: "" };
+    const fArr: Flight = { ...exFlight, id: crypto.randomUUID(), type: "Arrival", std: "" };
+    const fDep: Flight = { ...exFlight, id: crypto.randomUUID(), type: "Departure", sta: "" };
     if (onAddFlight) {
       onAddFlight(fArr);
       onAddFlight(fDep);

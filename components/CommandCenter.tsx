@@ -777,6 +777,63 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                     </div>
                   </div>
                   
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Database Backup</h5>
+                      <p className="text-xs text-slate-400 mb-4">Export or import a full JSON backup of your current database.</p>
+                      <div className="flex gap-4">
+                        <button
+                          onClick={async () => {
+                            const data = await db.exportDatabase();
+                            if (!data) return;
+                            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `skyops_backup_${new Date().toISOString().split('T')[0]}.json`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-colors"
+                        >
+                          Export Backup
+                        </button>
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept=".json"
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = async (ev) => {
+                                  const text = ev.target?.result as string;
+                                  if (text) {
+                                    const success = await db.importDatabase(text);
+                                    if (success) {
+                                      alert("Database restored successfully! Please refresh the page.");
+                                      window.location.reload();
+                                    } else {
+                                      alert("Failed to restore database. Check console for details.");
+                                    }
+                                  }
+                                };
+                                reader.readAsText(file);
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                          <button className="px-4 py-2 bg-amber-50 text-amber-600 rounded-xl text-sm font-bold hover:bg-amber-100 transition-colors pointer-events-none">
+                            Restore Backup
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
                   <div className="mt-8 flex justify-end">
                     <button
                       onClick={async () => {

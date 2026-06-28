@@ -294,7 +294,7 @@ export const ProgramScanner: React.FC<Props> = ({
 
       if (flightNo && (pasteTarget === "all" || pasteTarget === "flights")) {
         flights.push({
-          id: `f-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+          id: crypto.randomUUID(),
           flightNumber: flightNo.toUpperCase(),
           from:
             map.from !== -1
@@ -323,7 +323,7 @@ export const ProgramScanner: React.FC<Props> = ({
         const isRoster =
           typeStr.includes("rost") || typeStr.includes("contract");
         staff.push({
-          id: `s-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+          id: crypto.randomUUID(),
           name: staffName,
           initials:
             map.initials !== -1
@@ -388,7 +388,7 @@ export const ProgramScanner: React.FC<Props> = ({
           roleCounts["Labour"] = parseInt(row[map.role_labour]) || 0;
 
         shifts.push({
-          id: `sh-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+          id: crypto.randomUUID(),
           pickupDate: pDate,
           pickupTime: pickupTime,
           endDate: eDate,
@@ -523,15 +523,15 @@ export const ProgramScanner: React.FC<Props> = ({
         setExtractedData({
           flights: (data.flights || []).map((f: any) => ({
             ...f,
-            id: f.id || Math.random().toString(36).substr(2, 9),
+            id: f.id || crypto.randomUUID(),
           })),
           staff: (data.staff || []).map((s: any) => ({
             ...s,
-            id: s.id || Math.random().toString(36).substr(2, 9),
+            id: s.id || crypto.randomUUID(),
           })),
           shifts: (data.shifts || []).map((sh: any) => ({
             ...sh,
-            id: sh.id || Math.random().toString(36).substr(2, 9),
+            id: sh.id || crypto.randomUUID(),
           })),
           programs: [],
           leaveRequests: data.leaveRequests || [],

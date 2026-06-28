@@ -537,7 +537,7 @@ export const generateAIProgram = async (
             );
             if (!alreadyAssigned) {
               program.assignments.push({
-                id: Math.random().toString(36).substr(2, 9),
+                id: crypto.randomUUID(),
                 staffId: ma.staffId,
                 shiftId: ma.shiftId,
                 role: ma.roles.length > 0 ? ma.roles.join("+") : "AGT",
@@ -618,7 +618,7 @@ export const generateAIProgram = async (
             if (available.length > 0) {
               const chosen = available[0];
               program.assignments.push({
-                id: Math.random().toString(36).substr(2, 9),
+                id: crypto.randomUUID(),
                 staffId: chosen.id,
                 shiftId: shift.id,
                 role: roleKey,
@@ -650,7 +650,7 @@ export const generateAIProgram = async (
           if (available.length > 0) {
             const chosen = available[0];
             program.assignments.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               staffId: chosen.id,
               shiftId: shift.id,
               role: "AGT",
@@ -683,7 +683,7 @@ export const generateAIProgram = async (
           if (available.length > 0) {
             const chosen = available[0];
             program.assignments.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               staffId: chosen.id,
               shiftId: shift.id,
               role: "AGT",
@@ -756,9 +756,26 @@ YOUR TASK:
    - "deletedIds": IDs of flights that are in the CURRENT list but are MISSING from the new schedule.
 
 RULES:
-- When matching, use "flightNumber" and "date" as primary keys. Sometimes flight numbers have slight formatting differences.
-- Generate a new random 9-character ID for any "added" flights.
-- Ensure the types are correct (Flight). "added" and "updated" items must follow the properties of the Flight interface.
+- Read tabular data carefully. The headers in the image are likely: 'Arr Flight', 'Arr Date', 'STA', 'Arr From', 'Station', 'Dep To', 'Dep Flight', 'Dep Date', 'STD'.
+- Extract 'flightNumber': If both 'Arr Flight' and 'Dep Flight' exist (e.g. 'SM 0324' and 'AVL0405'), combine them as 'SM 0324/AVL0405'. If only one exists, use that.
+- Extract 'date': Use 'Arr Date' or 'Dep Date'. Format strictly as 'YYYY-MM-DD'.
+- Extract 'from': Use 'Arr From'. If empty, use a placeholder or guess.
+- Extract 'to': Use 'Dep To'.
+- Extract 'sta' (arrival time) from 'STA' column.
+- Extract 'std' (departure time) from 'STD' column.
+- Set 'type' to "Turnaround" if both STA and STD exist. Otherwise "Arrival" or "Departure".
+- Ensure the types are correct. "added" and "updated" items MUST exactly match this JSON schema:
+  {
+    "flightNumber": "SM 0324/AVL0405",
+    "from": "AJF",
+    "to": "KWI",
+    "sta": "01:10",
+    "std": "03:00",
+    "date": "2026-07-04",
+    "type": "Turnaround"
+  }
+- Omit 'id', the system will generate it automatically.
+- Compare these extracted flights against the CURRENT flights using "flightNumber" and "date" as primary matching keys.
 
 Provide the result purely as a JSON object containing { "added": [], "updated": [], "deletedIds": [] }. Return ONLY JSON.`;
 
@@ -784,7 +801,7 @@ Provide the result purely as a JSON object containing { "added": [], "updated": 
   }
 
   return {
-    added: Array.isArray(result.added) ? result.added : [],
+    added: Array.isArray(result.added) ? result.added.map((f: any) => ({ ...f, id: f.id || crypto.randomUUID() })) : [],
     updated: Array.isArray(result.updated) ? result.updated : [],
     deletedIds: Array.isArray(result.deletedIds) ? result.deletedIds : []
   };
@@ -804,7 +821,15 @@ export const extractDataFromContent = async (params: {
     );
   const prompt = `Extract ${params.targetType} from the provided document or text. 
 Target Start Date: ${params.startDate || "Current"}. 
-If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. CRITICAL: For 'date', you MUST return a strict ISO string YYYY-MM-DD (e.g. '24APR2026' MUST become '2026-04-24'). For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure'). If a time is clearly missing or shows '***', do not map it or leave it empty.
+If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. 
+CRITICAL RULES FOR FLIGHTS:
+1. Combine 'Arr Flight' and 'Dep Flight' into a single "flightNumber" if it is a turnaround (e.g., "SM 0324/0405").
+2. Extract the date strictly as "YYYY-MM-DD". Use 'Arr Date' or 'Dep Date' (e.g. '24APR2026' MUST become '2026-04-24').
+3. Extract origin ('Arr From') as "from" and destination ('Dep To') as "to".
+4. Extract arrival time ('STA') as "sta" and departure time ('STD') as "std".
+5. For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure').
+If a time is clearly missing or shows '***', do not map it or leave it empty.
+
 Return valid JSON ONLY in this format:
 {
   "flights": [

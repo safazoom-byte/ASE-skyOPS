@@ -138,7 +138,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (!name) return;
 
     const newVersion: ProgramVersion = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       versionNumber: versions.length + 1,
       name,
       createdAt: new Date().toISOString(),
@@ -2122,7 +2122,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (!exists) {
         const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
         prog.assignments.push({
-          id: Math.random().toString(36).substr(2, 9),
+          id: crypto.randomUUID(),
           staffId,
           shiftId: targetShiftId,
           flightId: "",
@@ -2145,7 +2145,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
       
       if (type) {
-        const newLeaveId = Math.random().toString(36).substr(2, 9);
+        const newLeaveId = crypto.randomUUID();
         const req = {
           id: newLeaveId,
           staffId,
@@ -3823,7 +3823,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
           const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
           newProg.assignments.push({
-            id: Math.random().toString(36).substr(2, 9),
+            id: crypto.randomUUID(),
             staffId,
             shiftId: shift.id,
             flightId: "",
@@ -3863,7 +3863,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           const maxSort = Math.max(0, ...newProg.assignments.map(a => a.manualSortIndex || 0));
           matchedStaffIds.forEach((staffId, i) => {
             newProg.assignments.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               staffId,
               shiftId: shift.id,
               flightId: "",

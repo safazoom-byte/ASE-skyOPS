@@ -74,6 +74,8 @@ import {
   IncomingDuty,
   ProgramVersion,
   UserProfile,
+  normalizeFlightNumber,
+  Assignment,
 } from "./types";
 import { FlightManager } from "./components/FlightManager";
 import { StaffManager } from "./components/StaffManager";
@@ -145,51 +147,15 @@ const App: React.FC = () => {
   );
 
   // Initialize data from LocalStorage to ensure persistence
-  const [flights, setFlights] = useState<Flight[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.FLIGHTS) || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [staff, setStaff] = useState<Staff[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.STAFF) || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [shifts, setShifts] = useState<ShiftConfig[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.SHIFTS) || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [programs, setPrograms] = useState<DailyProgram[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.PROGRAMS) || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [flights, setFlights] = useState<Flight[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [shifts, setShifts] = useState<ShiftConfig[]>([]);
+  const [programs, setPrograms] = useState<DailyProgram[]>([]);
   const [manualAssignments, setManualAssignments] = useState<
     ManualAssignment[]
   >([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.LEAVES) || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(DATA_KEYS.INCOMING) || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>([]);
 
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<
@@ -213,6 +179,7 @@ const App: React.FC = () => {
     () => new Date().toISOString().split("T")[0],
   );
   const [incomingSearchTerm, setIncomingSearchTerm] = useState("");
+  const [showIncomingShifts, setShowIncomingShifts] = useState(false);
 
   // Leave Registry Logic (Off-Duty)
   const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
@@ -226,31 +193,7 @@ const App: React.FC = () => {
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
 
   // --- DATA PERSISTENCE EFFECTS ---
-  useEffect(
-    () => localStorage.setItem(DATA_KEYS.FLIGHTS, JSON.stringify(flights)),
-    [flights],
-  );
-  useEffect(
-    () => localStorage.setItem(DATA_KEYS.STAFF, JSON.stringify(staff)),
-    [staff],
-  );
-  useEffect(
-    () => localStorage.setItem(DATA_KEYS.SHIFTS, JSON.stringify(shifts)),
-    [shifts],
-  );
-  useEffect(
-    () => localStorage.setItem(DATA_KEYS.PROGRAMS, JSON.stringify(programs)),
-    [programs],
-  );
-  useEffect(
-    () => localStorage.setItem(DATA_KEYS.LEAVES, JSON.stringify(leaveRequests)),
-    [leaveRequests],
-  );
-  useEffect(
-    () =>
-      localStorage.setItem(DATA_KEYS.INCOMING, JSON.stringify(incomingDuties)),
-    [incomingDuties],
-  );
+  // Local storage cache removed for these to favor real DB persistence.
 
   // --- PREFERENCE PERSISTENCE EFFECTS ---
   useEffect(() => {
@@ -477,7 +420,7 @@ const App: React.FC = () => {
           ? JSON.parse(savedVersions)
           : [];
         const newVersion: ProgramVersion = {
-          id: Math.random().toString(36).substr(2, 9),
+          id: crypto.randomUUID(),
           versionNumber: versions.length + 1,
           name: `Auto-Save before AI Gen (${new Date().toLocaleTimeString()})`,
           createdAt: new Date().toISOString(),
@@ -680,7 +623,7 @@ const App: React.FC = () => {
     if (finalIds.length === 0) return;
 
     const newDuties: IncomingDuty[] = finalIds.map((sid) => ({
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       staffId: sid,
       date: incomingDate,
       shiftEndTime: finalTime,
@@ -701,91 +644,76 @@ const App: React.FC = () => {
     setNotification(`${newDuties.length} Rest Log Entries Added`);
   };
 
-  const autoDetectDay0Staff = async () => {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
+  const getShiftsForIncomingDate = () => {
+    const programForDate = programs.find((p) => p.dateString === incomingDate);
+    if (!programForDate) return [];
 
-    // Day 0 is strictly the day before the start date
-    const day0 = new Date(start);
-    day0.setDate(day0.getDate() - 1);
-    const day0DateString = day0.toISOString().split("T")[0];
+    const shiftIds = Array.from(
+      new Set(programForDate.assignments.map((a) => a.shiftId).filter(Boolean))
+    ) as string[];
 
-    // Find the DailyProgram exactly for day 0
-    let latestPrevProgram = programs.find((p) => p.dateString === day0DateString);
+    return shiftIds
+      .map((shiftId) => {
+        const shift = shifts.find((s) => s.id === shiftId);
+        if (!shift) return null;
+        const assignments = programForDate.assignments.filter(
+          (a) => a.shiftId === shiftId
+        );
+        const staffInitials = assignments
+          .map((a) => staff.find((s) => s.id === a.staffId)?.initials)
+          .filter(Boolean);
+        return {
+          shiftId,
+          shift,
+          staffInitials,
+          assignments,
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+  };
 
-    // Fallback: If not found exactly, find the most recent one before start date
-    if (!latestPrevProgram) {
-      let latestTime = 0;
-      for (const p of programs) {
-        if (!p.dateString) continue;
-        const pd = new Date(p.dateString);
-        pd.setHours(0, 0, 0, 0);
-        if (pd.getTime() < start.getTime() && pd.getTime() > latestTime) {
-          latestTime = pd.getTime();
-          latestPrevProgram = p;
+  const handleAddShiftStaff = (assignments: Assignment[], shift: ShiftConfig) => {
+    const idsToAdd = assignments.map((a) => a.staffId).filter(Boolean);
+    if (idsToAdd.length > 0) {
+      const newDuties: IncomingDuty[] = [];
+      const startHr = parseInt(shift.pickupTime.split(":")[0]) || 0;
+      const endHr = parseInt(shift.endTime.split(":")[0]) || 0;
+      let endDateStr = incomingDate;
+      if (endHr < startHr || (endHr < 12 && startHr > 12)) {
+         // Overnight shift
+         const dateObj = new Date(incomingDate);
+         dateObj.setDate(dateObj.getDate() + 1);
+         endDateStr = dateObj.toISOString().split("T")[0];
+      }
+
+      for (const sid of idsToAdd) {
+        const alreadyExists = incomingDuties.some(d => d.staffId === sid && d.date === endDateStr && d.shiftEndTime === shift.endTime);
+        if (!alreadyExists && !newDuties.some(d => d.staffId === sid && d.date === endDateStr && d.shiftEndTime === shift.endTime)) {
+          newDuties.push({
+            id: crypto.randomUUID(),
+            staffId: sid,
+            date: endDateStr,
+            shiftEndTime: shift.endTime,
+          });
         }
       }
-    }
 
-    if (!latestPrevProgram) {
-      alert("No previous week program found before the selected start date.");
-      return;
-    }
-
-    const newDuties: IncomingDuty[] = [];
-    const dateStr = latestPrevProgram.dateString!;
-
-    for (const assignment of latestPrevProgram.assignments) {
-      if (assignment.shiftId) {
-        const s = shifts.find((sh) => sh.id === assignment.shiftId);
-        if (s) {
-          const endHr = parseInt(s.endTime.split(":")[0]) || 0;
-          const startHr = parseInt(s.pickupTime.split(":")[0]) || 0;
-          
-          // Only add late shifts or overnight shifts that might conflict with early shifts next day
-          if (startHr >= 15 || (endHr < 12 && startHr > 12) || endHr >= 22) {
-            const alreadyExists = incomingDuties.some(
-              (d) =>
-                d.staffId === assignment.staffId &&
-                d.date === dateStr &&
-                d.shiftEndTime === s.endTime
-            );
-            if (
-              !alreadyExists &&
-              !newDuties.some(
-                (d) => d.staffId === assignment.staffId && d.shiftEndTime === s.endTime
-              )
-            ) {
-              newDuties.push({
-                id: Math.random().toString(36).substr(2, 9),
-                staffId: assignment.staffId,
-                date: dateStr,
-                shiftEndTime: s.endTime,
-              });
-            }
-          }
+      if (newDuties.length > 0) {
+        setIncomingDuties((prev) => [...prev, ...newDuties]);
+        if (supabase) {
+          db.upsertIncomingDuties(newDuties);
+          db.logAction(
+            "CREATE",
+            "LEAVE",
+            "BULK",
+            `Auto-added ${newDuties.length} rest log entries`
+          );
         }
+        setNotification(`${newDuties.length} Rest Log Entries Auto-Added`);
+      } else {
+        alert("These staff members are already registered for this shift.");
       }
     }
-
-    if (newDuties.length === 0) {
-      alert("No new late shifts found on Day 0 of the previous program (or they are already added).");
-      return;
-    }
-
-    setIncomingDuties((prev) => [...prev, ...newDuties]);
-    if (supabase) {
-      await db.upsertIncomingDuties(newDuties);
-      await db.logAction(
-        "CREATE",
-        "LEAVE",
-        "BULK",
-        `Auto-detected ${newDuties.length} rest log entries from ${dateStr}`,
-      );
-    }
-    
-    setIncomingDate(dateStr);
-    setNotification(`Auto-detected ${newDuties.length} shifts from Day 0 (${dateStr})`);
   };
 
   const addQuickLeave = async () => {
@@ -831,7 +759,7 @@ const App: React.FC = () => {
     }
 
     const newLeaves: LeaveRequest[] = finalIds.map((sid) => ({
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       staffId: sid,
       startDate: quickLeaveStartDate,
       endDate: quickLeaveEndDate,
@@ -1130,13 +1058,47 @@ const App: React.FC = () => {
                       )}
                       {programs.length > 0 && (
                         <button
-                          onClick={autoDetectDay0Staff}
+                          onClick={() => setShowIncomingShifts(!showIncomingShifts)}
                           className="mt-3 text-[10px] font-bold text-blue-600 hover:text-blue-700 uppercase tracking-widest flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
                         >
-                          <Zap size={12} /> Auto-detect Day 0 Staff from last week
+                          <Zap size={12} /> Load Past Shifts from Date
                         </button>
                       )}
                     </div>
+                    
+                    {showIncomingShifts && (
+                      <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h5 className="text-[10px] font-black text-blue-600 uppercase tracking-widest">
+                            Shifts on {incomingDate}
+                          </h5>
+                          <button onClick={() => setShowIncomingShifts(false)} className="text-blue-400 hover:text-blue-600"><X size={14} /></button>
+                        </div>
+                        {getShiftsForIncomingDate().length === 0 ? (
+                          <p className="text-xs text-slate-500 italic font-medium">No shifts found in saved programs for this date.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {getShiftsForIncomingDate().map((s) => (
+                              <div key={s.shiftId} className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm flex flex-col gap-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-black text-slate-800">{s.shift.pickupTime} - {s.shift.endTime}</span>
+                                  <button
+                                    onClick={() => handleAddShiftStaff(s.assignments, s.shift)}
+                                    className="text-[9px] font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
+                                  >
+                                    ADD ALL
+                                  </button>
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-tight">
+                                  {s.staffInitials.join(", ")}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <input
                         type="date"
@@ -1513,6 +1475,17 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
+              const normFNum = normalizeFlightNumber(f.flightNumber);
+              const isDuplicate = flights.some(
+                (existing) =>
+                  existing.date === f.date &&
+                  normalizeFlightNumber(existing.flightNumber) === normFNum
+              );
+              if (isDuplicate) {
+                alert(`Flight ${f.flightNumber} already exists on ${f.date}. Duplicates are not allowed.`);
+                return;
+              }
+              
               setFlights((p) => [...p, f]);
               db.upsertFlight(f);
               db.logAction(
@@ -1527,6 +1500,18 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
+              const normFNum = normalizeFlightNumber(f.flightNumber);
+              const isDuplicate = flights.some(
+                (existing) =>
+                  existing.id !== f.id &&
+                  existing.date === f.date &&
+                  normalizeFlightNumber(existing.flightNumber) === normFNum
+              );
+              if (isDuplicate) {
+                alert(`Flight ${f.flightNumber} already exists on ${f.date}. Duplicates are not allowed.`);
+                return;
+              }
+
               setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
               db.upsertFlight(f);
               db.logAction(

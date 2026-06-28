@@ -155,7 +155,7 @@ export const StaffManager: React.FC<Props> = ({
       return;
     }
 
-    const id = Math.random().toString(36).substring(2, 11);
+    const id = crypto.randomUUID();
     const isRoster = newStaff.type === "Roster";
 
     // Validate dates if Roster

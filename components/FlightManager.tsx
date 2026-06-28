@@ -116,7 +116,7 @@ export const FlightManager: React.FC<Props> = ({
       flightNumber: (newFlight.flightNumber || "").toUpperCase(),
       from: (newFlight.from || "").toUpperCase(),
       to: (newFlight.to || "").toUpperCase(),
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       priority: "Standard",
     };
     onAdd(flightData);
@@ -418,7 +418,7 @@ export const FlightManager: React.FC<Props> = ({
                           </button>
                           <button
                             onClick={() => {
-                               const duplicate: Flight = { ...flight, id: Math.random().toString(36).substr(2, 9) };
+                               const duplicate: Flight = { ...flight, id: crypto.randomUUID() };
                                onAdd(duplicate);
                             }}
                             className="p-2 text-slate-300 hover:text-emerald-600 transition-colors"
@@ -543,6 +543,40 @@ export const FlightManager: React.FC<Props> = ({
                       })
                     }
                   />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      From
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.from || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          from: e.target.value?.toUpperCase(),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 ml-1">
+                      To
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full p-3 md:p-4 bg-slate-50 border rounded-xl font-black uppercase text-xs text-slate-900 outline-none text-center"
+                      value={inlineFormData.to || ""}
+                      onChange={(e) =>
+                        setInlineFormData({
+                          ...inlineFormData,
+                          to: e.target.value?.toUpperCase(),
+                        })
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <div className="flex-1">

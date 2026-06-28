@@ -19,6 +19,10 @@ export type LeaveType =
   | "Roster leave"
   | "NIL";
 
+export const normalizeFlightNumber = (fNum: string) => {
+  return fNum.toUpperCase().replace(/\s/g, '').replace(/^([A-Z]+)0+/, '$1');
+};
+
 export interface Flight {
   id: string;
   flightNumber: string;
@@ -164,14 +168,15 @@ export interface AuditLog {
   id: string;
   userId: string;
   userEmail: string;
-  actionType: "CREATE" | "UPDATE" | "DELETE" | "GENERATE_AI";
+  actionType: "CREATE" | "UPDATE" | "DELETE" | "GENERATE_AI" | "IMPORT";
   entityType:
     | "FLIGHT"
     | "STAFF"
     | "SHIFT"
     | "PROGRAM"
     | "LEAVE"
-    | "USER_PROFILE";
+    | "USER_PROFILE"
+    | "DATABASE";
   entityId: string;
   details: string;
   createdAt: string;

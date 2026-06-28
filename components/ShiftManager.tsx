@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   X,
   Users,
+  PlaneTakeoff,
 } from "lucide-react";
 
 interface Props {
@@ -134,15 +135,20 @@ export const ShiftManager: React.FC<Props> = ({
       return;
     }
 
-    const sourceShift = shifts.find(s => s.id === sourceShiftId);
     const targetShift = shifts.find(s => s.id === targetShiftId);
-    if (!sourceShift || !targetShift) return;
+    if (!targetShift) return;
 
-    const newSourceFlights = (sourceShift.flightIds || []).filter(f => f !== flightId);
+    // Remove the flight from ALL other shifts to enforce 1-to-1 relationship
+    shifts.forEach(shift => {
+      if (shift.id !== targetShiftId && shift.flightIds?.includes(flightId)) {
+        const newSourceFlights = shift.flightIds.filter(f => f !== flightId);
+        onUpdate({ ...shift, flightIds: newSourceFlights });
+      }
+    });
+
     const newTargetFlights = [...(targetShift.flightIds || []), flightId];
     // make it unique
     const uniqueTargetFlights = Array.from(new Set(newTargetFlights));
-    onUpdate({ ...sourceShift, flightIds: newSourceFlights });
     onUpdate({ ...targetShift, flightIds: uniqueTargetFlights });
     setSelectedFlightInfo(null);
   };
@@ -223,7 +229,7 @@ export const ShiftManager: React.FC<Props> = ({
         const newPlan: DailyPlan[] = [];
         let previousTemplates: BulkShiftTemplate[] = [
           {
-            id: Math.random().toString(36).substr(2, 9),
+            id: crypto.randomUUID(),
             pickupTime: "06:00",
             endTime: "14:00",
             minStaff: 2,
@@ -246,7 +252,7 @@ export const ShiftManager: React.FC<Props> = ({
             // Copy previous day's template structure as default for new day
             const newDayTemplates = previousTemplates.map((t) => ({
               ...t,
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
             }));
             newPlan.push({ dateStr: dStr, templates: newDayTemplates });
           }
@@ -269,7 +275,7 @@ export const ShiftManager: React.FC<Props> = ({
         }
 
         newShifts.push({
-          id: Math.random().toString(36).substr(2, 9),
+          id: crypto.randomUUID(),
           day: getDayOffset(dayPlan.dateStr),
           pickupDate: dayPlan.dateStr,
           pickupTime: template.pickupTime,
@@ -397,7 +403,7 @@ export const ShiftManager: React.FC<Props> = ({
     const finalData = {
       ...(formData as ShiftConfig),
       day: getDayOffset(formData.pickupDate!),
-      id: editingId || Math.random().toString(36).substr(2, 9),
+      id: editingId || crypto.randomUUID(),
     };
     if (editingId) onUpdate(finalData);
     else onAdd(finalData);
@@ -613,6 +619,14 @@ export const ShiftManager: React.FC<Props> = ({
       });
     return groups;
   }, [filteredShifts]);
+
+  const unlinkedFlights = useMemo(() => {
+    const allLinkedIds = new Set<string>();
+    shifts.forEach(s => {
+      s.flightIds?.forEach(fid => allLinkedIds.add(fid));
+    });
+    return flights.filter(f => !allLinkedIds.has(f.id)).sort((a, b) => (a.date + "T" + (a.sta || a.std)).localeCompare(b.date + "T" + (b.sta || b.std)));
+  }, [shifts, flights]);
 
   const durationText = calculateDuration();
 
@@ -1094,7 +1108,7 @@ export const ShiftManager: React.FC<Props> = ({
                       newFlightIds = s.flightIds.map(fid => {
                         const existingFlight = flights.find(f => f.id === fid);
                         if (!existingFlight) return fid;
-                        const newId = Math.random().toString(36).substr(2,9);
+                        const newId = crypto.randomUUID();
                         const fd = new Date(existingFlight.date);
                         fd.setUTCDate(fd.getUTCDate() + diffDays);
                         
@@ -1111,7 +1125,7 @@ export const ShiftManager: React.FC<Props> = ({
 
                     onAdd({
                       ...s,
-                      id: Math.random().toString(36).substr(2, 9),
+                      id: crypto.randomUUID(),
                       pickupDate: pd.toISOString().split("T")[0],
                       endDate: ed.toISOString().split("T")[0],
                       day: getDayOffset(pd.toISOString().split("T")[0]),
@@ -1124,6 +1138,30 @@ export const ShiftManager: React.FC<Props> = ({
                 <Calendar size={14} /> Duplicate Period
               </button>
             </h4>
+
+            {unlinkedFlights.length > 0 && (
+              <div className="mb-12 bg-rose-50/50 border border-rose-100 rounded-3xl p-6">
+                <h5 className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-4 flex items-center gap-2">
+                  <AlertTriangle size={14} /> Unlinked Flights ({unlinkedFlights.length})
+                </h5>
+                <div className="flex flex-wrap gap-2">
+                  {unlinkedFlights.map((f) => (
+                    <div
+                      key={f.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, "UNLINKED", f.id)}
+                      onDragEnd={handleDragEnd}
+                      onClick={() => setFlightModal({ shiftId: "UNLINKED", flightId: f.id, isNew: false })}
+                      className="bg-white border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 shadow-sm cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform flex items-center gap-2"
+                    >
+                      <PlaneTakeoff size={12} className={f.type === "Arrival" ? "text-blue-500 rotate-90" : f.type === "Departure" ? "text-amber-500 -rotate-45" : "text-emerald-500"} />
+                      <span>{f.flightNumber}</span>
+                      <span className="text-[9px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{f.date.substring(5)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-12 relative z-10">
               {Object.keys(groupedShifts).length === 0 ? (
@@ -1519,9 +1557,7 @@ export const ShiftManager: React.FC<Props> = ({
                                       templates: [
                                         ...p.templates,
                                         {
-                                          id: Math.random()
-                                            .toString(36)
-                                            .substr(2, 9),
+                                          id: crypto.randomUUID(),
                                           pickupTime: "06:00",
                                           endTime: "14:00",
                                           minStaff: 2,
