@@ -819,14 +819,14 @@ export const extractDataFromContent = async (params: {
     params.media.forEach((m) =>
       parts.push({ inlineData: { data: m.data, mimeType: m.mimeType } }),
     );
-  const prompt = `Extract ${params.targetType} from the provided document or text. 
+    const prompt = `Extract ${params.targetType} from the provided document or text. 
 Target Start Date: ${params.startDate || "Current"}. 
-If extracting flights, make sure to read tabular flight data carefully including Flight Number, Origin (from), Destination (to), STA, STD, and Date/Day. 
+If extracting flights, read tabular data carefully. You may encounter columns like "Flight Date", "Arrival", "Departure", "From", "To", "STA", "STD", "Status".
 CRITICAL RULES FOR FLIGHTS:
-1. Combine 'Arr Flight' and 'Dep Flight' into a single "flightNumber" if it is a turnaround (e.g., "SM 0324/0405").
-2. Extract the date strictly as "YYYY-MM-DD". Use 'Arr Date' or 'Dep Date' (e.g. '24APR2026' MUST become '2026-04-24').
-3. Extract origin ('Arr From') as "from" and destination ('Dep To') as "to".
-4. Extract arrival time ('STA') as "sta" and departure time ('STD') as "std".
+1. Combine 'Arr Flight' and 'Dep Flight' (or 'Arrival' and 'Departure') into a single "flightNumber" if it is a turnaround (e.g., "SM 0324/0405" or "XY 279/280"). If only one flight number exists, use it.
+2. Extract the date strictly as "YYYY-MM-DD". If the date includes a time (e.g. "2026-07-10T00:00:00"), extract only the date part. If it's "24APR2026", convert it to "2026-04-24".
+3. Extract origin ('Arr From' or 'From') as "from" and destination ('Dep To' or 'To') as "to".
+4. Extract arrival time ('STA') as "sta" and departure time ('STD') as "std". Format as "HH:mm" (remove trailing seconds if present, e.g. "07:55:00" -> "07:55").
 5. For 'type', if both STA and STD are present, return 'Turnaround'. Otherwise, guess based on from/to (e.g. 'Arrival', 'Departure').
 If a time is clearly missing or shows '***', do not map it or leave it empty.
 

@@ -625,8 +625,13 @@ export const ShiftManager: React.FC<Props> = ({
     shifts.forEach(s => {
       s.flightIds?.forEach(fid => allLinkedIds.add(fid));
     });
-    return flights.filter(f => !allLinkedIds.has(f.id)).sort((a, b) => (a.date + "T" + (a.sta || a.std)).localeCompare(b.date + "T" + (b.sta || b.std)));
-  }, [shifts, flights]);
+    return flights.filter(f => {
+      if (allLinkedIds.has(f.id)) return false;
+      if (startDate && f.date < startDate) return false;
+      if (endDate && f.date > endDate) return false;
+      return true;
+    }).sort((a, b) => (a.date + "T" + (a.sta || a.std)).localeCompare(b.date + "T" + (b.sta || b.std)));
+  }, [shifts, flights, startDate, endDate]);
 
   const durationText = calculateDuration();
 
