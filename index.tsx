@@ -711,7 +711,7 @@ const App: React.FC = () => {
         }
         setNotification(`${newDuties.length} Rest Log Entries Auto-Added`);
       } else {
-        alert("These staff members are already registered for this shift.");
+        setNotification("Staff already in Rest Log for this shift.");
       }
     }
   };
@@ -1414,38 +1414,30 @@ const App: React.FC = () => {
                     <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block">
                       Period Duration
                     </label>
-                    <input
-                      type="range"
-                      min="1"
-                      max="31"
+                    <select
                       value={programDuration}
-                      onChange={(e) =>
-                        setProgramDuration(parseInt(e.target.value))
-                      }
-                      className="w-full accent-blue-600 h-1.5"
-                    />
-                    <p className="text-center font-black mt-3 text-blue-600 text-sm italic tracking-widest">
-                      {programDuration} DAYS
-                    </p>
+                      onChange={(e) => setProgramDuration(parseInt(e.target.value))}
+                      className="w-full h-[48px] px-4 bg-white border border-slate-200 rounded-xl font-black text-sm text-blue-600 outline-none text-center cursor-pointer"
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                        <option key={day} value={day}>{day} DAYS</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                     <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4 block flex items-center gap-2">
                       <Timer size={14} className="text-indigo-500" /> Rest
                       Threshold
                     </label>
-                    <input
-                      type="range"
-                      min="8"
-                      max="24"
+                    <select
                       value={minRestHours}
-                      onChange={(e) =>
-                        setMinRestHours(parseInt(e.target.value))
-                      }
-                      className="w-full accent-indigo-600 h-1.5"
-                    />
-                    <p className="text-center font-black mt-3 text-indigo-600 text-sm italic tracking-widest">
-                      {minRestHours}H
-                    </p>
+                      onChange={(e) => setMinRestHours(parseInt(e.target.value))}
+                      className="w-full h-[48px] px-4 bg-white border border-slate-200 rounded-xl font-black text-sm text-indigo-600 outline-none text-center cursor-pointer"
+                    >
+                      {Array.from({ length: 17 }, (_, i) => i + 8).map(hour => (
+                        <option key={hour} value={hour}>{hour} HOURS</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <button
