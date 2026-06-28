@@ -602,6 +602,13 @@ const App: React.FC = () => {
 
   const addIncomingDuties = async () => {
     const finalTime = `${incomingHour}:${incomingMin}`;
+    const hr = parseInt(incomingHour);
+    let endDateStr = incomingDate;
+    if (hr < 12) {
+      const dateObj = new Date(incomingDate);
+      dateObj.setDate(dateObj.getDate() + 1);
+      endDateStr = dateObj.toISOString().split("T")[0];
+    }
 
     // Process input text on button click
     let finalIds = [...incomingSelectedStaffIds];
@@ -625,7 +632,7 @@ const App: React.FC = () => {
     const newDuties: IncomingDuty[] = finalIds.map((sid) => ({
       id: crypto.randomUUID(),
       staffId: sid,
-      date: incomingDate,
+      date: endDateStr,
       shiftEndTime: finalTime,
     }));
 
@@ -1148,35 +1155,59 @@ const App: React.FC = () => {
                         <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                           Registered for {incomingDate}
                         </h5>
-                        {incomingDuties.some(d => d.date === incomingDate) && (
-                          <button
-                            onClick={() => {
-                              if (confirm(`Clear all registered duties for ${incomingDate}?`)) {
-                                const newDuties = incomingDuties.filter(d => d.date !== incomingDate);
-                                setIncomingDuties(newDuties);
-                                if (supabase) {
-                                  newDuties.forEach(d => db.upsertIncomingDuty(d)); // Note: this upserts, to really delete from cloud we need to delete. But localstorage handles it for now, let's just do a sync if needed.
-                                  // Actually, we should delete them from DB.
-                                  incomingDuties.filter(d => d.date === incomingDate).forEach(d => db.deleteIncomingDuty(d.id));
-                                }
-                              }
-                            }}
-                            className="text-[9px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded"
-                          >
-                            CLEAR ALL
-                          </button>
-                        )}
+                        {(() => {
+                          const nextDate = new Date(incomingDate);
+                          nextDate.setDate(nextDate.getDate() + 1);
+                          const nextDateStr = nextDate.toISOString().split("T")[0];
+                          const visibleDuties = incomingDuties.filter((d) => {
+                            const hr = parseInt(d.shiftEndTime.split(":")[0]) || 0;
+                            if (hr < 12) return d.date === nextDateStr;
+                            return d.date === incomingDate;
+                          });
+
+                          return (
+                            <>
+                              {visibleDuties.length > 0 && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Clear all registered duties for ${incomingDate}?`)) {
+                                      const idsToDelete = visibleDuties.map(d => d.id);
+                                      const newDuties = incomingDuties.filter(d => !idsToDelete.includes(d.id));
+                                      setIncomingDuties(newDuties);
+                                      if (supabase) {
+                                        visibleDuties.forEach(d => db.deleteIncomingDuty(d.id));
+                                      }
+                                    }
+                                  }}
+                                  className="text-[9px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded"
+                                >
+                                  CLEAR ALL
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {incomingDuties.filter((d) => d.date === incomingDate)
-                          .length === 0 && (
-                          <span className="text-[9px] italic text-slate-300">
-                            No entries yet.
-                          </span>
-                        )}
-                        {incomingDuties
-                          .filter((d) => d.date === incomingDate)
-                          .map((d) => {
+                        {(() => {
+                          const nextDate = new Date(incomingDate);
+                          nextDate.setDate(nextDate.getDate() + 1);
+                          const nextDateStr = nextDate.toISOString().split("T")[0];
+                          const visibleDuties = incomingDuties.filter((d) => {
+                            const hr = parseInt(d.shiftEndTime.split(":")[0]) || 0;
+                            if (hr < 12) return d.date === nextDateStr;
+                            return d.date === incomingDate;
+                          });
+
+                          if (visibleDuties.length === 0) {
+                            return (
+                              <span className="text-[9px] italic text-slate-300">
+                                No entries yet.
+                              </span>
+                            );
+                          }
+
+                          return visibleDuties.map((d) => {
                             const availDate = new Date(
                               `${d.date}T${d.shiftEndTime}`,
                             );
@@ -1215,7 +1246,8 @@ const App: React.FC = () => {
                                 </button>
                               </div>
                             );
-                          })}
+                          });
+                        })()}
                       </div>
                     </div>
                   </div>
