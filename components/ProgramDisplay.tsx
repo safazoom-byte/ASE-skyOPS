@@ -1423,7 +1423,7 @@ export const ProgramDisplay: React.FC<Props> = ({
              const s = getStaff(a.staffId);
              if (s) {
                  const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : s.isAccountant ? 'acc' : 'reg';
-                 staffTokens.push({ text: s.initials, type });
+                 staffTokens.push({ text: a.note ? `${s.initials} (${a.note})` : s.initials, type });
              }
           });
           
@@ -3490,7 +3490,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                 }}
                                                 className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
                                               >
-                                                <span>{st.initials}</span>
+                                                <span>{st.initials}{a.note ? ` (${a.note})` : ""}</span>
                                                 {manualAssignments &&
                                                 manualAssignments.some(
                                                   (ma) =>
@@ -4124,6 +4124,30 @@ export const ProgramDisplay: React.FC<Props> = ({
                     </p>
                   </div>
                 </div>
+
+                {!staffActionModal.currentShiftId.startsWith("ABSENCE_") && (
+                  <div className="mb-4">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Note (Appears in Excel)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. LL" 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                      value={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
+                      onChange={(e) => {
+                        if (onUpdatePrograms) {
+                          const newProgs = [...programs];
+                          const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                          const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                          if (aIdx !== -1) {
+                            currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
+                            newProgs[progIdx] = currentProg;
+                            onUpdatePrograms(newProgs);
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                )}
 
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Move To</label>
                 <select

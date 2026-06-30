@@ -101,6 +101,7 @@ export interface Assignment {
   role: string; // Changed from Skill to string to support combined roles like 'SL+LC'
   shiftId?: string;
   manualSortIndex?: number;
+  note?: string;
 }
 
 export interface OffDutyRecord {
