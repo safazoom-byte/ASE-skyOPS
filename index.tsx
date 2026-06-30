@@ -273,7 +273,7 @@ const App: React.FC = () => {
         if (mounted) {
           setCloudStatus("error");
           if (e.message && e.message.includes("Failed to fetch")) {
-            setCloudError("Network Sync Error");
+            setCloudError("Network Error: Adblocker/VPN blocking connection");
           } else {
             setCloudError(e.message || "Unknown error");
           }
@@ -332,9 +332,10 @@ const App: React.FC = () => {
       });
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && supabase && session) {
-        syncCloudData();
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible" && supabase) {
+        const s = await auth.getSession();
+        if (s) syncCloudData();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -344,7 +345,7 @@ const App: React.FC = () => {
       unsubscribe();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [session]);
+  }, []);
 
   const confirmGenerateProgram = async (
     manualAssignments: ManualAssignment[] = [],
