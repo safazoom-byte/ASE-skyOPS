@@ -329,11 +329,19 @@ const App: React.FC = () => {
       });
     }
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && supabase && session) {
+        syncCloudData();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       mounted = false;
       unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [session]);
 
   const confirmGenerateProgram = async (
     manualAssignments: ManualAssignment[] = [],
@@ -434,24 +442,33 @@ const App: React.FC = () => {
         if (updatedVersions.length > 10) {
           updatedVersions = updatedVersions.slice(0, 10);
         }
-        try {
-          localStorage.setItem(
-            "skyops_program_versions",
-            JSON.stringify(updatedVersions),
-          );
-        } catch (e) {
-          console.warn("Storage quota exceeded, keeping fewer versions");
-          updatedVersions = updatedVersions.slice(0, 3);
-          try {
-            localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
-          } catch (err) {}
-        }
         if (supabase) {
           await db.saveProgramVersion(newVersion);
+        } else {
+          try {
+            localStorage.setItem(
+              "skyops_program_versions",
+              JSON.stringify(updatedVersions),
+            );
+          } catch (e) {
+            console.warn("Storage quota exceeded, keeping fewer versions");
+            updatedVersions = updatedVersions.slice(0, 3);
+            try {
+              localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
+            } catch (err) {}
+          }
         }
       }
 
-      setPrograms(result.programs);
+      setPrograms(prev => {
+        const merged = [...prev];
+        result.programs.forEach((newP: any) => {
+           const idx = merged.findIndex(p => p.dateString === newP.dateString);
+           if (idx !== -1) merged[idx] = newP;
+           else merged.push(newP);
+        });
+        return merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+      });
       setStationHealth(result.stationHealth);
       setAlerts(result.alerts || []);
       if (supabase) {
@@ -1742,19 +1759,39 @@ const App: React.FC = () => {
             alerts={alerts}
             minRestHours={minRestHours}
             onUpdatePrograms={async (updated) => {
+              // Find which programs actually changed
+              const changedPrograms = updated.filter(u => {
+                const prev = programs.find(p => p.dateString === u.dateString);
+                if (!prev) return true;
+                return JSON.stringify(prev) !== JSON.stringify(u);
+              });
+
               setPrograms(updated);
-              if (supabase) await db.savePrograms(updated);
+              if (supabase && changedPrograms.length > 0) {
+                 await db.savePrograms(changedPrograms);
+              }
             }}
             onRestoreVersion={(v) => {
-              setPrograms(v.programs);
+              setPrograms(prev => {
+                const merged = [...prev];
+                v.programs.forEach(newP => {
+                   const idx = merged.findIndex(p => p.dateString === newP.dateString);
+                   if (idx !== -1) merged[idx] = newP;
+                   else merged.push(newP);
+                });
+                return merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+              });
               setStartDate(v.periodStart);
               setEndDate(v.periodEnd);
               setStationHealth(v.stationHealth);
               setNotification(`Restored version: ${v.name}`);
               if (supabase) db.savePrograms(v.programs);
             }}
-            onUpdateLeaves={(l: LeaveRequest[]) => {
+            onUpdateLeaves={async (l: LeaveRequest[]) => {
               setLeaveRequests(l);
+              if (supabase) {
+                await db.upsertLeaves(l);
+              }
             }}
           />
         )}

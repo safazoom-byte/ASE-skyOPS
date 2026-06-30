@@ -89,6 +89,8 @@ export const auth = {
   },
 };
 
+let saveProgramsQueue: Promise<void> | null = null;
+
 export const db = {
   async getMutationContext() {
     const session = await auth.getSession();
@@ -191,11 +193,17 @@ export const db = {
         programs: (pRes.data || []).map((p: any) => {
           const rawOffDuty = p.off_duty || [];
           const notesHacks = rawOffDuty.filter((od: any) => od.staffId === "NOTES_HACK");
-          const actualOffDuty = rawOffDuty.filter((od: any) => od.staffId !== "NOTES_HACK");
+          const driversHacks = rawOffDuty.filter((od: any) => od.staffId === "DRIVERS_HACK");
+          const actualOffDuty = rawOffDuty.filter((od: any) => od.staffId !== "NOTES_HACK" && od.staffId !== "DRIVERS_HACK");
           
           let notes = p.notes || {};
           if (notesHacks.length > 0) {
              notes = notesHacks[0].data || notes;
+          }
+
+          let shiftDrivers = {};
+          if (driversHacks.length > 0) {
+             shiftDrivers = driversHacks[0].data || {};
           }
 
           return {
@@ -204,6 +212,7 @@ export const db = {
             assignments: p.assignments || [],
             offDuty: actualOffDuty,
             notes: notes,
+            shiftDrivers: shiftDrivers,
           };
         }),
         leaveRequests: (lRes.data || []).map((l: any) => ({
@@ -397,42 +406,59 @@ export const db = {
   },
 
   async savePrograms(programs: DailyProgram[]) {
-    const client = supabase;
-    if (!client || programs.length === 0) return;
-    const ctx = await this.getMutationContext();
-    if (!ctx) return;
+    const execute = async () => {
+      const client = supabase;
+      if (!client || programs.length === 0) return;
+      const ctx = await this.getMutationContext();
+      if (!ctx) return;
 
-    const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
+      const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
 
-    try {
-      if (datesToOverwrite.length > 0) {
-        await client
-          .from("programs")
-          .delete()
-          .eq(ctx.matchCol, ctx.matchVal)
-          .in("date_string", datesToOverwrite);
+      try {
+        if (datesToOverwrite.length > 0) {
+          const { error: delError } = await client
+            .from("programs")
+            .delete()
+            .eq(ctx.matchCol, ctx.matchVal)
+            .in("date_string", datesToOverwrite);
+          if (delError) {
+             console.error("Failed to delete old programs:", delError);
+             return;
+          }
+        }
+
+        const { error: insError } = await client.from("programs").insert(
+          programs.map((p) => {
+            const offDutyToSave = [
+                ...(p.offDuty || []),
+                { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} },
+                { staffId: "DRIVERS_HACK", type: "NIL", data: p.shiftDrivers || {} }
+            ];
+
+            return {
+              user_id: ctx.userId,
+              airport_id: ctx.airportId,
+              day: p.day,
+              date_string: p.dateString || "",
+              assignments: p.assignments || [],
+              off_duty: offDutyToSave,
+            };
+          }),
+        );
+        if (insError) {
+           console.error("Failed to insert programs:", insError);
+        }
+      } catch (e) {
+        console.warn("Failed to save programs:", e);
       }
+    };
 
-      await client.from("programs").insert(
-        programs.map((p) => {
-          const offDutyToSave = [
-              ...(p.offDuty || []),
-              { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} }
-          ];
-
-          return {
-            user_id: ctx.userId,
-            airport_id: ctx.airportId,
-            day: p.day,
-            date_string: p.dateString || "",
-            assignments: p.assignments || [],
-            off_duty: offDutyToSave,
-          };
-        }),
-      );
-    } catch (e) {
-      console.warn("Failed to save programs:", e);
+    if (saveProgramsQueue) {
+       saveProgramsQueue = saveProgramsQueue.then(() => execute()).catch(() => execute());
+    } else {
+       saveProgramsQueue = execute();
     }
+    await saveProgramsQueue;
   },
 
   async deleteFlight(id: string) {
@@ -497,7 +523,7 @@ export const db = {
     const ctx = await this.getMutationContext();
     if (!ctx) return;
     try {
-      await client.from("program_versions").upsert({
+      const { error } = await client.from("program_versions").upsert({
         id: v.id,
         user_id: ctx.userId,
         airport_id: ctx.airportId,
@@ -510,6 +536,9 @@ export const db = {
         station_health: v.stationHealth,
         is_auto_save: v.isAutoSave || false,
       });
+      if (error) {
+         console.error("Failed to save program version:", error);
+      }
     } catch (e) {
       console.warn("Failed to save program version:", e);
     }
@@ -771,12 +800,6 @@ export const db = {
       localProfiles.push(profile);
     }
     
-    try {
-        localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
-    } catch (e) {
-        console.warn("Could not save to localStorage (quota exceeded?), still trying DB...");
-    }
-
     if (supabase) {
       try {
         const { error } = await supabase.from("user_profiles").upsert({
@@ -799,6 +822,12 @@ export const db = {
       } catch (e) {
         console.warn("Could not update profile in DB", e);
       }
+    } else {
+      try {
+          localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
+      } catch (e) {
+          console.warn("Could not save to localStorage (quota exceeded?)");
+      }
     }
   },
 
@@ -807,13 +836,17 @@ export const db = {
       localStorage.getItem("skyops_user_profiles") || "[]",
     );
     const updated = localProfiles.filter((p: UserProfile) => p.id !== id);
-    localStorage.setItem("skyops_user_profiles", JSON.stringify(updated));
-
     if (supabase) {
       try {
         await supabase.from("user_profiles").delete().eq("id", id);
       } catch (e) {
         console.warn("Could not delete profile from DB");
+      }
+    } else {
+      try {
+        localStorage.setItem("skyops_user_profiles", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Could not save user profiles to localStorage");
       }
     }
   },
@@ -823,8 +856,6 @@ export const db = {
       localStorage.getItem("skyops_user_profiles") || "[]",
     );
     localProfiles.push(profile);
-    localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
-
     if (supabase) {
       try {
         const { error } = await supabase.from("user_profiles").insert({
@@ -846,6 +877,12 @@ export const db = {
         if (error) console.error("Supabase insert error:", error);
       } catch (e) {
         console.warn("Could not insert profile to DB", e);
+      }
+    } else {
+      try {
+        localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
+      } catch (e) {
+        console.warn("Could not save user profiles to localStorage");
       }
     }
   },
@@ -871,15 +908,6 @@ export const db = {
       createdAt: new Date().toISOString(),
     };
 
-    const localLogs = JSON.parse(
-      localStorage.getItem("skyops_audit_logs") || "[]",
-    );
-    localLogs.unshift(log);
-    localStorage.setItem(
-      "skyops_audit_logs",
-      JSON.stringify(localLogs.slice(0, 1000)),
-    ); // keep last 1000
-
     if (supabase) {
       try {
         await supabase.from("audit_logs").insert({
@@ -895,6 +923,19 @@ export const db = {
         });
       } catch (e) {
         console.warn("Could not insert audit log to DB");
+      }
+    } else {
+      const localLogs = JSON.parse(
+        localStorage.getItem("skyops_audit_logs") || "[]",
+      );
+      localLogs.unshift(log);
+      try {
+        localStorage.setItem(
+          "skyops_audit_logs",
+          JSON.stringify(localLogs.slice(0, 1000)),
+        ); // keep last 1000
+      } catch (e) {
+        console.warn("Could not save audit logs to localStorage");
       }
     }
   },

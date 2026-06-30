@@ -97,16 +97,24 @@ export const ProgramDisplay: React.FC<Props> = ({
   useEffect(() => {
     if (referencePrograms.length === 0 && programs.length > 0) {
       setReferencePrograms(programs);
-      localStorage.setItem(
-        "skyops_reference_programs",
-        JSON.stringify(programs),
-      );
+      try {
+        localStorage.setItem(
+          "skyops_reference_programs",
+          JSON.stringify(programs),
+        );
+      } catch (e) {
+        console.warn("Could not save reference programs to localStorage:", e);
+      }
     }
   }, [programs, referencePrograms]);
 
   const handleMarkAllCopied = () => {
     setReferencePrograms(programs);
-    localStorage.setItem("skyops_reference_programs", JSON.stringify(programs));
+    try {
+      localStorage.setItem("skyops_reference_programs", JSON.stringify(programs));
+    } catch (e) {
+      console.warn("Could not save reference programs to localStorage:", e);
+    }
   };
 
   const latestProgramsRef = useRef(programs);
@@ -127,7 +135,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   }, [stationHealth]);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    const doAutoSave = async () => {
       const currentPrograms = latestProgramsRef.current;
       const currentVersions = latestVersionsRef.current;
       
@@ -158,52 +166,87 @@ export const ProgramDisplay: React.FC<Props> = ({
       const autoSaves = updatedVersions.filter(v => v.isAutoSave);
       const manualSaves = updatedVersions.filter(v => !v.isAutoSave);
       
-      // Keep max 15 autosaves
-      if (autoSaves.length > 15) {
-        autoSaves.splice(15);
+      // Keep max 5 autosaves
+      if (autoSaves.length > 5) {
+        autoSaves.splice(5);
       }
-      // Keep max 10 manual saves
-      if (manualSaves.length > 10) {
-        manualSaves.splice(10);
+      // Keep max 5 manual saves
+      if (manualSaves.length > 5) {
+        manualSaves.splice(5);
       }
       
-      const finalVersions = [...autoSaves, ...manualSaves].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      let finalVersions = [...autoSaves, ...manualSaves].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       setVersions(finalVersions);
-      try {
-        localStorage.setItem(
-          "skyops_program_versions",
-          JSON.stringify(finalVersions),
-        );
-      } catch (e) {
-        console.warn("Storage quota exceeded for auto-saves");
-      }
+      
       if (supabase) {
         await db.saveProgramVersion(newVersion);
+      } else {
+        // Try to save to local storage as fallback, shrink if quota exceeded
+        let saved = false;
+        while (!saved && finalVersions.length > 0) {
+          try {
+            localStorage.setItem(
+              "skyops_program_versions",
+              JSON.stringify(finalVersions),
+            );
+            saved = true;
+          } catch (e) {
+            console.warn("Storage quota exceeded for auto-saves, reducing versions");
+            finalVersions.pop(); // Remove oldest
+          }
+        }
       }
       
       lastSavedStringifiedRef.current = currentStringified;
-    }, 5 * 60 * 1000); // 5 minutes
+    };
 
-    return () => clearInterval(interval);
+    const interval = setInterval(doAutoSave, 1 * 60 * 1000); // 1 minute
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        doAutoSave();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+       clearInterval(interval);
+       document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [startDate, endDate]);
 
   useEffect(() => {
     const loadVersions = async () => {
-      if (supabase) {
-        const dbVersions = await db.getProgramVersions();
-        if (dbVersions.length > 0) {
-          setVersions(dbVersions);
-          return;
-        }
-      }
+      let allVersions: ProgramVersion[] = [];
+      let localVersions: ProgramVersion[] = [];
+      
       const saved = localStorage.getItem("skyops_program_versions");
       if (saved) {
         try {
-          setVersions(JSON.parse(saved));
+          localVersions = JSON.parse(saved);
+          allVersions = [...localVersions];
         } catch (e) {
           console.error("Failed to load versions", e);
         }
+      }
+
+      if (supabase) {
+        const dbVersions = await db.getProgramVersions();
+        if (dbVersions.length > 0) {
+          // Merge and deduplicate by ID
+          const merged = [...dbVersions];
+          localVersions.forEach(lv => {
+             if (!merged.find(v => v.id === lv.id)) {
+                merged.push(lv);
+             }
+          });
+          allVersions = merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        }
+      }
+      
+      if (allVersions.length > 0) {
+        setVersions(allVersions);
       }
     };
     loadVersions();
@@ -233,20 +276,23 @@ export const ProgramDisplay: React.FC<Props> = ({
       updatedVersions = updatedVersions.slice(0, 10);
     }
     setVersions(updatedVersions);
-    try {
-      localStorage.setItem(
-        "skyops_program_versions",
-        JSON.stringify(updatedVersions),
-      );
-    } catch (e) {
-      console.warn("Storage quota exceeded, keeping fewer versions");
-      updatedVersions = updatedVersions.slice(0, 3);
-      try {
-        localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
-      } catch (err) {}
-    }
+    
     if (supabase) {
       await db.saveProgramVersion(newVersion);
+    } else {
+      let saved = false;
+      while (!saved && updatedVersions.length > 0) {
+        try {
+          localStorage.setItem(
+            "skyops_program_versions",
+            JSON.stringify(updatedVersions),
+          );
+          saved = true;
+        } catch (e) {
+          console.warn("Storage quota exceeded, keeping fewer versions");
+          updatedVersions.pop();
+        }
+      }
     }
   };
 
@@ -254,9 +300,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (!confirm("Are you sure you want to delete this version?")) return;
     const updated = versions.filter((v) => v.id !== id);
     setVersions(updated);
-    localStorage.setItem("skyops_program_versions", JSON.stringify(updated));
     if (supabase) {
       await db.deleteProgramVersion(id);
+    } else {
+      localStorage.setItem("skyops_program_versions", JSON.stringify(updated));
     }
   };
 
