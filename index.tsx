@@ -430,11 +430,22 @@ const App: React.FC = () => {
           stationHealth,
           isAutoSave: true,
         };
-        const updatedVersions = [newVersion, ...versions];
-        localStorage.setItem(
-          "skyops_program_versions",
-          JSON.stringify(updatedVersions),
-        );
+        let updatedVersions = [newVersion, ...versions];
+        if (updatedVersions.length > 10) {
+          updatedVersions = updatedVersions.slice(0, 10);
+        }
+        try {
+          localStorage.setItem(
+            "skyops_program_versions",
+            JSON.stringify(updatedVersions),
+          );
+        } catch (e) {
+          console.warn("Storage quota exceeded, keeping fewer versions");
+          updatedVersions = updatedVersions.slice(0, 3);
+          try {
+            localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
+          } catch (err) {}
+        }
         if (supabase) {
           await db.saveProgramVersion(newVersion);
         }

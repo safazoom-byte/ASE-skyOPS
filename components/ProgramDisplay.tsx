@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   DailyProgram,
   Flight,
@@ -109,6 +109,85 @@ export const ProgramDisplay: React.FC<Props> = ({
     localStorage.setItem("skyops_reference_programs", JSON.stringify(programs));
   };
 
+  const latestProgramsRef = useRef(programs);
+  const latestVersionsRef = useRef(versions);
+  const latestStationHealthRef = useRef(stationHealth);
+  const lastSavedStringifiedRef = useRef<string>("");
+
+  useEffect(() => {
+    latestProgramsRef.current = programs;
+  }, [programs]);
+
+  useEffect(() => {
+    latestVersionsRef.current = versions;
+  }, [versions]);
+  
+  useEffect(() => {
+    latestStationHealthRef.current = stationHealth;
+  }, [stationHealth]);
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const currentPrograms = latestProgramsRef.current;
+      const currentVersions = latestVersionsRef.current;
+      
+      if (currentPrograms.length === 0) return;
+      const totalAssignments = currentPrograms.reduce(
+        (acc, p) => acc + p.assignments.length,
+        0,
+      );
+      if (totalAssignments === 0) return;
+
+      const currentStringified = JSON.stringify(currentPrograms);
+      if (currentStringified === lastSavedStringifiedRef.current) return;
+
+      const versionNumber = currentVersions.length > 0 ? Math.max(...currentVersions.map(v => v.versionNumber || 0)) + 1 : 1;
+      const newVersion: ProgramVersion = {
+        id: crypto.randomUUID(),
+        versionNumber,
+        name: `Auto-save ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        createdAt: new Date().toISOString(),
+        periodStart: startDate,
+        periodEnd: endDate,
+        programs: JSON.parse(currentStringified),
+        stationHealth: latestStationHealthRef.current,
+        isAutoSave: true,
+      };
+
+      const updatedVersions = [newVersion, ...currentVersions];
+      const autoSaves = updatedVersions.filter(v => v.isAutoSave);
+      const manualSaves = updatedVersions.filter(v => !v.isAutoSave);
+      
+      // Keep max 15 autosaves
+      if (autoSaves.length > 15) {
+        autoSaves.splice(15);
+      }
+      // Keep max 10 manual saves
+      if (manualSaves.length > 10) {
+        manualSaves.splice(10);
+      }
+      
+      const finalVersions = [...autoSaves, ...manualSaves].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setVersions(finalVersions);
+      try {
+        localStorage.setItem(
+          "skyops_program_versions",
+          JSON.stringify(finalVersions),
+        );
+      } catch (e) {
+        console.warn("Storage quota exceeded for auto-saves");
+      }
+      if (supabase) {
+        await db.saveProgramVersion(newVersion);
+      }
+      
+      lastSavedStringifiedRef.current = currentStringified;
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [startDate, endDate]);
+
   useEffect(() => {
     const loadVersions = async () => {
       if (supabase) {
@@ -149,12 +228,23 @@ export const ProgramDisplay: React.FC<Props> = ({
       isAutoSave: false,
     };
 
-    const updatedVersions = [newVersion, ...versions];
+    let updatedVersions = [newVersion, ...versions];
+    if (updatedVersions.length > 10) {
+      updatedVersions = updatedVersions.slice(0, 10);
+    }
     setVersions(updatedVersions);
-    localStorage.setItem(
-      "skyops_program_versions",
-      JSON.stringify(updatedVersions),
-    );
+    try {
+      localStorage.setItem(
+        "skyops_program_versions",
+        JSON.stringify(updatedVersions),
+      );
+    } catch (e) {
+      console.warn("Storage quota exceeded, keeping fewer versions");
+      updatedVersions = updatedVersions.slice(0, 3);
+      try {
+        localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
+      } catch (err) {}
+    }
     if (supabase) {
       await db.saveProgramVersion(newVersion);
     }
@@ -366,8 +456,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     (acc, p) => acc + p.assignments.length,
     0,
   );
-  const isFailedGeneration =
-    activePrograms.length > 0 && totalAssignments === 0;
+  const isFailedGeneration = false; // We no longer block on empty assignments
 
   const incomingDutiesByStaff = React.useMemo(() => {
     const map: Record<string, IncomingDuty[]> = {};
@@ -2120,13 +2209,25 @@ export const ProgramDisplay: React.FC<Props> = ({
         (a) => a.staffId === staffId && a.shiftId === targetShiftId,
       );
       if (!exists) {
+        const staffObj = activeStaff.find(s => s.id === staffId);
+        let assignedRole = role || "AGT";
+        if (!role && staffObj) {
+          if (staffObj.isShiftLeader || staffObj.initials.toUpperCase() === "SK-ATZ") assignedRole = "SL";
+          else if (staffObj.isLoadControl) assignedRole = "LC";
+          else if (staffObj.isRamp) assignedRole = "RMP";
+          else if (staffObj.isLostFound) assignedRole = "LF";
+          else if (staffObj.isLabour) assignedRole = "LBR";
+          else if (staffObj.isSecurity) assignedRole = "SEC";
+          else if (staffObj.isDriver) assignedRole = "DRV";
+          else if (staffObj.isOps) assignedRole = "OPS";
+        }
         const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
         prog.assignments.push({
           id: crypto.randomUUID(),
           staffId,
           shiftId: targetShiftId,
           flightId: "",
-          role: role || "OPS",
+          role: assignedRole,
           manualSortIndex: maxSort + 1
         });
       }
@@ -2946,31 +3047,18 @@ export const ProgramDisplay: React.FC<Props> = ({
         </div>
       )}
 
-      {(isFailedGeneration || stationHealth === 0) && (
-        <div className="bg-rose-50 border-2 border-rose-200 rounded-[2.5rem] p-8 md:p-12 text-center animate-in zoom-in-95 shadow-xl">
-          <AlertTriangle size={64} className="mx-auto text-rose-500 mb-6" />
-          <h3 className="text-2xl font-black uppercase italic text-rose-900 tracking-tighter mb-2">
-            AI Generation Failed
+      {totalAssignments === 0 && activePrograms.length > 0 && (
+        <div className="bg-indigo-50 border-2 border-indigo-200 rounded-[2.5rem] p-8 md:p-12 text-center animate-in zoom-in-95 shadow-xl mb-12">
+          <h3 className="text-2xl font-black uppercase italic text-indigo-900 tracking-tighter mb-2">
+            Empty Roster
           </h3>
-          <p className="text-rose-700 font-bold max-w-lg mx-auto">
-            The Artificial Intelligence engine encountered a strategic conflict
-            or returned invalid data structure.
-          </p>
-          <div className="mt-6 flex justify-center gap-4">
-            <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
-              Code: JSON_PARSE_ERROR
-            </div>
-            <div className="px-6 py-3 bg-white rounded-xl border border-rose-100 shadow-sm text-xs font-black uppercase text-slate-600">
-              Health: {stationHealth}%
-            </div>
-          </div>
-          <p className="text-[10px] uppercase font-black tracking-widest text-rose-400 mt-8">
-            Recommendation: Check Shift/Staff Inputs and Retry
+          <p className="text-indigo-700 font-bold max-w-lg mx-auto">
+            No shifts are currently assigned for this period. You can build the roster manually below or use the AI to generate it.
           </p>
         </div>
       )}
 
-      {!isFailedGeneration && stationHealth > 0 && (
+      {true && (
         <div className="space-y-12">
           {activePrograms.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full py-20 text-slate-300 gap-4 bg-white rounded-[2.5rem] border border-slate-100">
@@ -3466,25 +3554,46 @@ export const ProgramDisplay: React.FC<Props> = ({
                                           )}
                                         </div>
 
-                                        {/* Driver Selection */}
-                                        {staff.filter(s => s.isDriver).length > 0 && (
-                                            <div className="mt-1">
-                                                <select
-                                                    value={prog.shiftDrivers?.[shift.id] || ""}
-                                                    onChange={(e) => handleUpdateDriver(prog.dateString!, shift.id, e.target.value)}
-                                                    className={`w-full text-[9px] p-1 border rounded outline-none cursor-pointer text-center font-bold ${
-                                                        prog.shiftDrivers?.[shift.id]
-                                                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                                            : "bg-slate-50 text-slate-400 border-slate-200 border-dashed hover:border-indigo-300 hover:text-indigo-600"
-                                                    }`}
-                                                >
-                                                    <option value="">{prog.shiftDrivers?.[shift.id] ? "Remove Driver" : "+ Add Driver"}</option>
-                                                    {staff.filter(s => s.isDriver).map(driver => (
-                                                        <option key={driver.id} value={driver.id}>
-                                                            {driver.initials} - {driver.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                        <div className="mt-1 flex gap-1">
+                                          {/* Driver Selection */}
+                                          {staff.filter(s => s.isDriver).length > 0 && (
+                                              <select
+                                                  value={prog.shiftDrivers?.[shift.id] || ""}
+                                                  onChange={(e) => handleUpdateDriver(prog.dateString!, shift.id, e.target.value)}
+                                                  className={`flex-1 min-w-0 text-[9px] p-1 border rounded outline-none cursor-pointer text-center font-bold ${
+                                                      prog.shiftDrivers?.[shift.id]
+                                                          ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                                          : "bg-slate-50 text-slate-400 border-slate-200 border-dashed hover:border-indigo-300 hover:text-indigo-600"
+                                                  }`}
+                                                  title="Driver"
+                                              >
+                                                  <option value="">{prog.shiftDrivers?.[shift.id] ? "No Drv" : "+ Drv"}</option>
+                                                  {staff.filter(s => s.isDriver).map(driver => (
+                                                      <option key={driver.id} value={driver.id}>
+                                                          {driver.initials}
+                                                      </option>
+                                                  ))}
+                                              </select>
+                                          )}
+
+                                          {/* Note Button */}
+                                          <button 
+                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
+                                              className={`flex-1 min-w-0 flex items-center justify-center gap-1 text-[9px] p-1 border rounded transition-colors font-bold ${
+                                                  prog.notes?.[shift.id] 
+                                                  ? "bg-indigo-100 text-indigo-800 border-indigo-300" 
+                                                  : "bg-slate-50 border-slate-200 border-dashed text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200"
+                                              }`}
+                                              title={prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
+                                          >
+                                              <MessageSquare size={10} />
+                                              Note
+                                          </button>
+                                        </div>
+
+                                        {prog.notes?.[shift.id] && (
+                                            <div className="mt-1 text-[9px] text-red-600 font-bold p-1 bg-red-50 border border-red-100 rounded break-words whitespace-pre-wrap leading-tight">
+                                                {prog.notes[shift.id]}
                                             </div>
                                         )}
 
@@ -3591,21 +3700,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               })}
                                           </div>
                                         )}
-                                        
-                                        <div className="mt-1 flex flex-col gap-1">
-                                          <button 
-                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
-                                              className="w-full flex items-center justify-center gap-1.5 text-[10px] p-1.5 bg-slate-50 border border-slate-200 border-dashed rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-colors font-semibold"
-                                          >
-                                              <MessageSquare size={12} />
-                                              {prog.notes?.[shift.id] ? "Edit Note" : "Add Note"}
-                                          </button>
-                                          {prog.notes?.[shift.id] && (
-                                              <div className="text-[10px] text-red-600 font-bold p-1.5 bg-red-50 border border-red-100 rounded break-words whitespace-pre-wrap">
-                                                  <strong>Note: </strong> {prog.notes[shift.id]}
-                                              </div>
-                                          )}
-                                        </div>
                                       </div>
                                     </td>
                                   </tr>
@@ -3753,7 +3847,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     s.isLabour ? "LBR" :
                                                     s.isSecurity ? "SEC" :
                                                     s.isDriver ? "DRV" :
-                                                    "OPS"
+                                                    s.isOps ? "OPS" :
+                                                    "AGT"
                                                   );
                                                 }}
                                                 onClick={(e) => {
@@ -3765,7 +3860,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     s.isLabour ? "LBR" :
                                                     s.isSecurity ? "SEC" :
                                                     s.isDriver ? "DRV" :
-                                                    "OPS"
+                                                    s.isOps ? "OPS" :
+                                                    "AGT"
                                                   );
                                                 }}
                                                 className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
@@ -3822,12 +3918,25 @@ export const ProgramDisplay: React.FC<Props> = ({
           const newPrograms = [...programs];
           const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
           const newProg = { ...newPrograms[progIdx], assignments: [...newPrograms[progIdx].assignments] };
+          const staffObj = activeStaff.find(s => s.id === staffId);
+          let assignedRole = "AGT";
+          if (staffObj) {
+            if (staffObj.isShiftLeader || staffObj.initials.toUpperCase() === "SK-ATZ") assignedRole = "SL";
+            else if (staffObj.isLoadControl) assignedRole = "LC";
+            else if (staffObj.isRamp) assignedRole = "RMP";
+            else if (staffObj.isLostFound) assignedRole = "LF";
+            else if (staffObj.isLabour) assignedRole = "LBR";
+            else if (staffObj.isSecurity) assignedRole = "SEC";
+            else if (staffObj.isDriver) assignedRole = "DRV";
+            else if (staffObj.isOps) assignedRole = "OPS";
+          }
+
           newProg.assignments.push({
             id: crypto.randomUUID(),
             staffId,
             shiftId: shift.id,
             flightId: "",
-            role: "OPS",
+            role: assignedRole,
             manualSortIndex: maxSort + 1
           });
           newPrograms[progIdx] = newProg;
@@ -3862,12 +3971,24 @@ export const ProgramDisplay: React.FC<Props> = ({
           
           const maxSort = Math.max(0, ...newProg.assignments.map(a => a.manualSortIndex || 0));
           matchedStaffIds.forEach((staffId, i) => {
+            const staffObj = activeStaff.find(s => s.id === staffId);
+            let assignedRole = "AGT";
+            if (staffObj) {
+              if (staffObj.isShiftLeader || staffObj.initials.toUpperCase() === "SK-ATZ") assignedRole = "SL";
+              else if (staffObj.isLoadControl) assignedRole = "LC";
+              else if (staffObj.isRamp) assignedRole = "RMP";
+              else if (staffObj.isLostFound) assignedRole = "LF";
+              else if (staffObj.isLabour) assignedRole = "LBR";
+              else if (staffObj.isSecurity) assignedRole = "SEC";
+              else if (staffObj.isDriver) assignedRole = "DRV";
+              else if (staffObj.isOps) assignedRole = "OPS";
+            }
             newProg.assignments.push({
               id: crypto.randomUUID(),
               staffId,
               shiftId: shift.id,
               flightId: "",
-              role: "OPS",
+              role: assignedRole,
               manualSortIndex: maxSort + 1 + i
             });
           });
