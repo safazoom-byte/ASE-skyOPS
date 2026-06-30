@@ -3536,6 +3536,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               <select
                                                   value={prog.shiftDrivers?.[shift.id] || ""}
                                                   onChange={(e) => handleUpdateDriver(prog.dateString!, shift.id, e.target.value)}
+                                                  onClick={(e) => e.stopPropagation()}
                                                   className={`flex-1 min-w-0 text-[9px] p-1 border rounded outline-none cursor-pointer text-center font-bold ${
                                                       prog.shiftDrivers?.[shift.id]
                                                           ? "bg-emerald-100 text-emerald-800 border-emerald-300"
@@ -3554,7 +3555,10 @@ export const ProgramDisplay: React.FC<Props> = ({
 
                                           {/* Note Button */}
                                           <button 
-                                              onClick={() => setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' })}
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setNoteModal({ dateString: prog.dateString!, shiftId: shift.id, currentNote: prog.notes?.[shift.id] || '' });
+                                              }}
                                               className={`flex-1 min-w-0 flex items-center justify-center gap-1 text-[9px] p-1 border rounded transition-colors font-bold ${
                                                   prog.notes?.[shift.id] 
                                                   ? "bg-indigo-100 text-indigo-800 border-indigo-300" 
