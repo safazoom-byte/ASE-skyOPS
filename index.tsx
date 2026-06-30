@@ -343,7 +343,7 @@ const App: React.FC = () => {
         if (mounted) {
           if (e.message && e.message.includes("Failed to fetch")) {
             setCloudStatus("offline");
-            setCloudError("");
+            setCloudError("Network Sync Error");
           } else {
             setCloudStatus("error");
             setCloudError(e.message || "Unknown error");
@@ -373,11 +373,10 @@ const App: React.FC = () => {
         }
       } catch (e: any) {
         if (mounted) {
+          setCloudStatus("error");
           if (e.message && e.message.includes("Failed to fetch")) {
-            setCloudStatus("offline");
-            setCloudError("");
+            setCloudError("Network Error: Could not connect to Supabase. This is usually caused by an Adblocker (like Brave Shields), VPN, or your network blocking access. Please disable your adblocker or try a different network.");
           } else {
-            setCloudStatus("error");
             setCloudError(e.message || "Session fetch failed");
           }
           setIsInitializing(false);
@@ -921,7 +920,7 @@ const App: React.FC = () => {
         <Loader2 className="text-blue-500 animate-spin" size={64} />
       </div>
     );
-  if (!session && supabase && cloudStatus !== "offline") return <Auth onOfflineBypass={() => setCloudStatus("offline")} />;
+  if (!session && supabase && cloudStatus !== "offline") return <Auth onOfflineBypass={() => setCloudStatus("offline")} error={cloudError} />;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">

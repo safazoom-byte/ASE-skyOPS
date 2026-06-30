@@ -12,8 +12,12 @@ import {
   Airport,
 } from "../types";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL ||
+  "https://hldvxfurkstqhmmktxsz.supabase.co";
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  "sb_publishable_E9StxaACROyElt3UQ8qVYw_C0zsUQzy";
 
 const isConfigured =
   SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 5;

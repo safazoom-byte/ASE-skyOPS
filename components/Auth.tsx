@@ -11,25 +11,27 @@ import {
 } from "lucide-react";
 import { SkyOpsLogo } from "./Logo";
 
-export const Auth: React.FC<{ onOfflineBypass?: () => void }> = ({ onOfflineBypass }) => {
+export const Auth: React.FC<{ onOfflineBypass?: () => void; error?: string }> = ({ onOfflineBypass, error: propError }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const displayError = localError || propError;
 
   const isConfigured = !!supabase;
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConfigured) {
-      setError(
+      setLocalError(
         "Cloud configuration missing. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables in Vercel.",
       );
       return;
     }
     setLoading(true);
-    setError(null);
+    setLocalError(null);
 
     try {
       const { error: authError } = isLogin
@@ -53,7 +55,7 @@ export const Auth: React.FC<{ onOfflineBypass?: () => void }> = ({ onOfflineBypa
         window.location.reload();
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed");
+      setLocalError(err.message || "Authentication failed");
     } finally {
       setLoading(false);
     }
@@ -139,10 +141,10 @@ export const Auth: React.FC<{ onOfflineBypass?: () => void }> = ({ onOfflineBypa
               </div>
             </div>
 
-            {error && (
+            {displayError && (
               <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-3 text-rose-500 text-[10px] font-black uppercase italic animate-in fade-in slide-in-from-top-2">
                 <AlertCircle size={14} className="shrink-0" />{" "}
-                <span className="flex-1">{error}</span>
+                <span className="flex-1">{displayError}</span>
               </div>
             )}
 
