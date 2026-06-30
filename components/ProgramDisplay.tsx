@@ -1418,12 +1418,12 @@ export const ProgramDisplay: React.FC<Props> = ({
         shiftsToday.forEach((shift, idx) => {
           const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
           
-          let staffTokens: {text: string, type: string}[] = [];
+          let staffTokens: {text: string, type: string, hasNote?: boolean}[] = [];
           assignments.forEach(a => {
              const s = getStaff(a.staffId);
              if (s) {
                  const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : s.isAccountant ? 'acc' : 'reg';
-                 staffTokens.push({ text: a.note ? `${s.initials} (${a.note})` : s.initials, type });
+                 staffTokens.push({ text: a.note ? `${s.initials} (${a.note})` : s.initials, type, hasNote: !!a.note });
              }
           });
           
@@ -1568,6 +1568,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                   if (t.type === 'labour') color = 'FFB91C1C';
                   if (t.type === 'sec') color = 'FF7E22CE';
                   if (t.type === 'acc') color = 'FF1D4ED8';
+                  
+                  if (t.hasNote) color = 'FFEA580C'; // Orange for notes
                   
                   if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
                   richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
