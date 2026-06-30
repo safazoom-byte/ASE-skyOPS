@@ -206,7 +206,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
     return (a.email || "").localeCompare(b.email || "");
   });
 
-  if (currentUser.role === "planner") {
+  if (currentUser.role === "planner" && currentUser.email !== "safazoom@gmail.com") {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
         <Lock size={48} className="mb-4 text-slate-300" />
