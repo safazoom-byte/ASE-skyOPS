@@ -586,25 +586,12 @@ export const db = {
 
   async getUserProfile(): Promise<UserProfile | null> {
     const session = await auth.getSession();
-    if (!session) return null;
+    if (!session || !supabase) return null;
 
-    // Fallback to local storage if no DB
-    let localProfiles = [];
+    let profile: UserProfile | null = null;
     try {
-      localProfiles = JSON.parse(
-        localStorage.getItem("skyops_user_profiles") || "[]",
-      );
-    } catch (e) {
-      console.warn("Could not parse local profiles", e);
-    }
-    let profile = localProfiles.find(
-      (p: UserProfile) => p.id === session.user.id,
-    );
-
-    if (supabase) {
-      try {
-        const { data } = await supabase
-          .from("user_profiles")
+      const { data } = await supabase
+        .from("user_profiles")
           .select("*")
           .eq("id", session.user.id)
           .single();
@@ -661,17 +648,15 @@ export const db = {
           }
         }
       } catch (e) {
-        console.warn("Could not fetch profile from DB, using local");
+        console.warn("Could not fetch profile from DB", e);
       }
-    }
 
-    // If no profile exists, create a default one (first user is master)
+    // If no profile exists, create a default one
     if (!profile) {
-      const isFirstUser = localProfiles.length === 0;
       profile = {
         id: session.user.id,
         email: session.user.email,
-        role: isFirstUser ? "master" : "planner",
+        role: "planner",
         aiDailyLimit: 5,
         aiWeeklyLimit: 20,
         aiMonthlyLimit: 50,
@@ -683,47 +668,32 @@ export const db = {
         preparedBy: "Operation Control Center",
         revisedBy: "",
       };
-      localProfiles.push(profile);
-      try {
-        localStorage.setItem(
-          "skyops_user_profiles",
-          JSON.stringify(localProfiles),
-        );
-      } catch (e) {}
 
-      if (supabase) {
-        try {
-          const { error } = await supabase.from("user_profiles").insert({
-            id: profile.id,
-            email: profile.email,
-            role: profile.role,
-            ai_daily_limit: profile.aiDailyLimit,
-            ai_weekly_limit: profile.aiWeeklyLimit,
-            ai_monthly_limit: profile.aiMonthlyLimit,
-            max_staff: profile.maxStaff,
-            max_shifts: profile.maxShifts,
-            is_active: profile.isActive,
-            company_logo: profile.companyLogo,
-            skyops_logo: profile.skyopsLogo,
-            prepared_by: profile.preparedBy,
-            revised_by: profile.revisedBy,
-          });
-          if (error) console.error("Could not insert profile to DB:", error);
-        } catch (e) {
-          console.warn("Could not insert profile to DB", e);
-        }
+      try {
+        const { error } = await supabase.from("user_profiles").insert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
+        });
+        if (error) console.error("Could not insert profile to DB:", error);
+      } catch (e) {
+        console.warn("Could not insert profile to DB", e);
       }
     }
     return profile;
   },
 
   async getAllUserProfiles(): Promise<UserProfile[]> {
-    let localProfiles: any[] = [];
-    try {
-      localProfiles = JSON.parse(
-        localStorage.getItem("skyops_user_profiles") || "[]",
-      );
-    } catch (e) {}
     if (supabase) {
       try {
         const profile = await this.getUserProfile();
@@ -737,7 +707,7 @@ export const db = {
           console.error("Supabase select error:", error);
         }
         if (data) {
-          const dbProfiles = data.map((d: any) => ({
+          return data.map((d: any) => ({
             id: d.id,
             email: d.email,
             role: d.role,
@@ -753,64 +723,15 @@ export const db = {
             preparedBy: d.prepared_by ?? "",
             revisedBy: d.revised_by ?? "",
           }));
-
-          // Merge local profiles that aren't in the DB yet
-          const missingInDb = localProfiles.filter(
-            (lp: UserProfile) =>
-              !dbProfiles.some((dp: UserProfile) => dp.email === lp.email),
-          );
-
-          // Auto-sync missing legacy users to DB
-          if (missingInDb.length > 0) {
-            for (const lp of missingInDb) {
-              try {
-                await supabase.from("user_profiles").upsert({
-                  id: lp.id,
-                  email: lp.email,
-                  role: lp.role,
-                  airport_id: lp.airport_id,
-                  ai_daily_limit: lp.aiDailyLimit,
-                  ai_weekly_limit: lp.aiWeeklyLimit,
-                  ai_monthly_limit: lp.aiMonthlyLimit,
-                  max_staff: lp.maxStaff,
-                  max_shifts: lp.maxShifts,
-                  is_active: lp.isActive,
-                  company_logo: lp.companyLogo,
-                  skyops_logo: lp.skyopsLogo,
-                  prepared_by: lp.preparedBy,
-                  revised_by: lp.revisedBy,
-                });
-              } catch (e) {
-                console.warn("Auto-sync failed for user", lp.email, e);
-              }
-            }
-          }
-
-          return [...dbProfiles, ...missingInDb];
         }
       } catch (e) {
         console.warn("Could not fetch profiles from DB", e);
       }
     }
-    return localProfiles;
+    return [];
   },
 
   async updateUserProfile(profile: UserProfile) {
-    let localProfiles: any[] = [];
-    try {
-      localProfiles = JSON.parse(
-        localStorage.getItem("skyops_user_profiles") || "[]",
-      );
-    } catch (e) {}
-    const index = localProfiles.findIndex(
-      (p: UserProfile) => p.id === profile.id,
-    );
-    if (index >= 0) {
-      localProfiles[index] = profile;
-    } else {
-      localProfiles.push(profile);
-    }
-    
     if (supabase) {
       try {
         const { error } = await supabase.from("user_profiles").upsert({
@@ -833,46 +754,20 @@ export const db = {
       } catch (e) {
         console.warn("Could not update profile in DB", e);
       }
-    } else {
-      try {
-          localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
-      } catch (e) {
-          console.warn("Could not save to localStorage (quota exceeded?)");
-      }
     }
   },
 
   async deleteUserProfile(id: string) {
-    let localProfiles: any[] = [];
-    try {
-      localProfiles = JSON.parse(
-        localStorage.getItem("skyops_user_profiles") || "[]",
-      );
-    } catch (e) {}
-    const updated = localProfiles.filter((p: UserProfile) => p.id !== id);
     if (supabase) {
       try {
         await supabase.from("user_profiles").delete().eq("id", id);
       } catch (e) {
         console.warn("Could not delete profile from DB");
       }
-    } else {
-      try {
-        localStorage.setItem("skyops_user_profiles", JSON.stringify(updated));
-      } catch (e) {
-        console.warn("Could not save user profiles to localStorage");
-      }
     }
   },
 
   async createUserProfile(profile: UserProfile) {
-    let localProfiles: any[] = [];
-    try {
-      localProfiles = JSON.parse(
-        localStorage.getItem("skyops_user_profiles") || "[]",
-      );
-    } catch (e) {}
-    localProfiles.push(profile);
     if (supabase) {
       try {
         const { error } = await supabase.from("user_profiles").insert({
@@ -894,12 +789,6 @@ export const db = {
         if (error) console.error("Supabase insert error:", error);
       } catch (e) {
         console.warn("Could not insert profile to DB", e);
-      }
-    } else {
-      try {
-        localStorage.setItem("skyops_user_profiles", JSON.stringify(localProfiles));
-      } catch (e) {
-        console.warn("Could not save user profiles to localStorage");
       }
     }
   },
@@ -940,22 +829,6 @@ export const db = {
         });
       } catch (e) {
         console.warn("Could not insert audit log to DB");
-      }
-    } else {
-    let localLogs: any[] = [];
-    try {
-      localLogs = JSON.parse(
-        localStorage.getItem("skyops_audit_logs") || "[]",
-      );
-    } catch (e) {}
-      localLogs.unshift(log);
-      try {
-        localStorage.setItem(
-          "skyops_audit_logs",
-          JSON.stringify(localLogs.slice(0, 1000)),
-        ); // keep last 1000
-      } catch (e) {
-        console.warn("Could not save audit logs to localStorage");
       }
     }
   },
@@ -1048,11 +921,7 @@ export const db = {
         console.warn("Could not fetch audit logs from DB");
       }
     }
-    try {
-      return JSON.parse(localStorage.getItem("skyops_audit_logs") || "[]");
-    } catch (e) {
-      return [];
-    }
+    return [];
   },
 
   async getAIGenerationCount(

@@ -341,11 +341,10 @@ const App: React.FC = () => {
         }
       } catch (e: any) {
         if (mounted) {
+          setCloudStatus("error");
           if (e.message && e.message.includes("Failed to fetch")) {
-            setCloudStatus("offline");
             setCloudError("Network Sync Error");
           } else {
-            setCloudStatus("error");
             setCloudError(e.message || "Unknown error");
           }
         }
@@ -920,7 +919,7 @@ const App: React.FC = () => {
         <Loader2 className="text-blue-500 animate-spin" size={64} />
       </div>
     );
-  if (!session && supabase && cloudStatus !== "offline") return <Auth onOfflineBypass={() => setCloudStatus("offline")} error={cloudError} />;
+  if (!session && supabase) return <Auth error={cloudError} />;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -949,7 +948,7 @@ const App: React.FC = () => {
                   ? "AI Sync Active"
                   : cloudError
                     ? `Error: ${cloudError}`
-                    : "Offline Mode"}
+                    : "Not Connected"}
               </span>
             </div>
           </div>
