@@ -422,7 +422,7 @@ export const db = {
             .eq(ctx.matchCol, ctx.matchVal)
             .in("date_string", datesToOverwrite);
           if (delError) {
-             console.error("Failed to delete old programs:", delError);
+             console.warn("Failed to delete old programs:", delError);
              return;
           }
         }
@@ -446,7 +446,7 @@ export const db = {
           }),
         );
         if (insError) {
-           console.error("Failed to insert programs:", insError);
+           console.warn("Failed to insert programs:", insError);
         }
       } catch (e) {
         console.warn("Failed to save programs:", e);
@@ -537,7 +537,7 @@ export const db = {
         is_auto_save: v.isAutoSave || false,
       });
       if (error) {
-         console.error("Failed to save program version:", error);
+         console.warn("Failed to save program version:", error);
       }
     } catch (e) {
       console.warn("Failed to save program version:", e);
@@ -590,11 +590,12 @@ export const db = {
 
     let profile: UserProfile | null = null;
     try {
-      const { data } = await supabase
+      const { data, error: selectError } = await supabase
         .from("user_profiles")
           .select("*")
           .eq("id", session.user.id)
           .single();
+        if (selectError) console.warn("Fetch profile error:", JSON.stringify(selectError));
         if (data) {
           profile = {
             id: data.id,
@@ -685,9 +686,15 @@ export const db = {
           prepared_by: profile.preparedBy,
           revised_by: profile.revisedBy,
         });
-        if (error) console.error("Could not insert profile to DB:", error);
+        if (error) {
+          if (error.code === '23505') {
+            console.warn("Profile already exists (concurrent insert)");
+          } else {
+            console.warn("Could not insert profile to DB:", JSON.stringify(error));
+          }
+        }
       } catch (e) {
-        console.warn("Could not insert profile to DB", e);
+        console.warn("Exception during default profile creation:", e);
       }
     }
     return profile;
@@ -704,7 +711,7 @@ export const db = {
         
         const { data, error } = await query;
         if (error) {
-          console.error("Supabase select error:", error);
+          console.warn("Supabase select error:", error);
         }
         if (data) {
           return data.map((d: any) => ({
@@ -750,7 +757,7 @@ export const db = {
           prepared_by: profile.preparedBy,
           revised_by: profile.revisedBy,
         });
-        if (error) console.error("Could not update profile in DB:", error);
+        if (error) console.warn("Could not update profile in DB:", error);
       } catch (e) {
         console.warn("Could not update profile in DB", e);
       }
@@ -786,9 +793,15 @@ export const db = {
           prepared_by: profile.preparedBy,
           revised_by: profile.revisedBy,
         });
-        if (error) console.error("Supabase insert error:", error);
+        if (error) {
+          if (error.code === '23505') {
+            console.warn("Profile already exists (concurrent insert in createUserProfile)");
+          } else {
+            console.warn("Could not create user profile in DB:", JSON.stringify(error));
+          }
+        }
       } catch (e) {
-        console.warn("Could not insert profile to DB", e);
+        console.warn("Exception during create profile:", e);
       }
     }
   },
@@ -995,7 +1008,7 @@ export const db = {
       this.logAction("IMPORT", "DATABASE", "all", "Imported full database backup");
       return true;
     } catch (e) {
-      console.error("Failed to import database", e);
+      console.warn("Failed to import database", e);
       return false;
     }
   }

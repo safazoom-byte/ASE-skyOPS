@@ -92,7 +92,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       setUsers(fetchedUsers);
       setAirports(fetchedAirports);
     } catch (e) {
-      console.error("Failed to load command center data", e);
+      console.warn("Failed to load command center data", e);
     } finally {
       setIsLoading(false);
     }

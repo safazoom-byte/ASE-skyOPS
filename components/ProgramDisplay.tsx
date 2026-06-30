@@ -81,40 +81,16 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [unlockAbsences, setUnlockAbsences] = useState(false);
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
 
-  const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(
-    () => {
-      try {
-        const stored = localStorage.getItem("skyops_reference_programs");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch {}
-      return programs;
-    },
-  );
+  const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(programs);
 
   useEffect(() => {
     if (referencePrograms.length === 0 && programs.length > 0) {
       setReferencePrograms(programs);
-      try {
-        localStorage.setItem(
-          "skyops_reference_programs",
-          JSON.stringify(programs),
-        );
-      } catch (e) {
-        console.warn("Could not save reference programs to localStorage:", e);
-      }
     }
   }, [programs, referencePrograms]);
 
   const handleMarkAllCopied = () => {
     setReferencePrograms(programs);
-    try {
-      localStorage.setItem("skyops_reference_programs", JSON.stringify(programs));
-    } catch (e) {
-      console.warn("Could not save reference programs to localStorage:", e);
-    }
   };
 
   const latestProgramsRef = useRef(programs);
@@ -181,21 +157,6 @@ export const ProgramDisplay: React.FC<Props> = ({
       
       if (supabase) {
         await db.saveProgramVersion(newVersion);
-      } else {
-        // Try to save to local storage as fallback, shrink if quota exceeded
-        let saved = false;
-        while (!saved && finalVersions.length > 0) {
-          try {
-            localStorage.setItem(
-              "skyops_program_versions",
-              JSON.stringify(finalVersions),
-            );
-            saved = true;
-          } catch (e) {
-            console.warn("Storage quota exceeded for auto-saves, reducing versions");
-            finalVersions.pop(); // Remove oldest
-          }
-        }
       }
       
       lastSavedStringifiedRef.current = currentStringified;
@@ -219,29 +180,11 @@ export const ProgramDisplay: React.FC<Props> = ({
   useEffect(() => {
     const loadVersions = async () => {
       let allVersions: ProgramVersion[] = [];
-      let localVersions: ProgramVersion[] = [];
       
-      const saved = localStorage.getItem("skyops_program_versions");
-      if (saved) {
-        try {
-          localVersions = JSON.parse(saved);
-          allVersions = [...localVersions];
-        } catch (e) {
-          console.error("Failed to load versions", e);
-        }
-      }
-
       if (supabase) {
         const dbVersions = await db.getProgramVersions();
         if (dbVersions.length > 0) {
-          // Merge and deduplicate by ID
-          const merged = [...dbVersions];
-          localVersions.forEach(lv => {
-             if (!merged.find(v => v.id === lv.id)) {
-                merged.push(lv);
-             }
-          });
-          allVersions = merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          allVersions = dbVersions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         }
       }
       
@@ -279,20 +222,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     
     if (supabase) {
       await db.saveProgramVersion(newVersion);
-    } else {
-      let saved = false;
-      while (!saved && updatedVersions.length > 0) {
-        try {
-          localStorage.setItem(
-            "skyops_program_versions",
-            JSON.stringify(updatedVersions),
-          );
-          saved = true;
-        } catch (e) {
-          console.warn("Storage quota exceeded, keeping fewer versions");
-          updatedVersions.pop();
-        }
-      }
     }
   };
 
@@ -302,8 +231,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     setVersions(updated);
     if (supabase) {
       await db.deleteProgramVersion(id);
-    } else {
-      localStorage.setItem("skyops_program_versions", JSON.stringify(updated));
     }
   };
 

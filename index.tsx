@@ -103,15 +103,6 @@ const UI_PREF_KEYS = {
   DURATION: "skyops_pref_duration",
 };
 
-const DATA_KEYS = {
-  FLIGHTS: "skyops_data_flights",
-  STAFF: "skyops_data_staff",
-  SHIFTS: "skyops_data_shifts",
-  PROGRAMS: "skyops_data_programs",
-  LEAVES: "skyops_data_leaves",
-  INCOMING: "skyops_data_incoming",
-};
-
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -147,52 +138,16 @@ const App: React.FC = () => {
     parseInt(localStorage.getItem(UI_PREF_KEYS.REST_HOURS) || "12"),
   );
 
-  // Initialize data from LocalStorage to ensure persistence
-  const [flights, setFlights] = useState<Flight[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.FLIGHTS);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
-  const [staff, setStaff] = useState<Staff[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.STAFF);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
-  const [shifts, setShifts] = useState<ShiftConfig[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.SHIFTS);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
-  const [programs, setPrograms] = useState<DailyProgram[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.PROGRAMS);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
+  // Initialize data
+  const [flights, setFlights] = useState<Flight[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [shifts, setShifts] = useState<ShiftConfig[]>([]);
+  const [programs, setPrograms] = useState<DailyProgram[]>([]);
   const [manualAssignments, setManualAssignments] = useState<
     ManualAssignment[]
   >([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.LEAVES);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
-  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>(() => {
-    try {
-      const stored = localStorage.getItem(DATA_KEYS.INCOMING);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return [];
-  });
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>([]);
 
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<
@@ -228,31 +183,6 @@ const App: React.FC = () => {
   );
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>("Day off");
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
-
-  // --- DATA PERSISTENCE EFFECTS ---
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.FLIGHTS, JSON.stringify(flights));
-  }, [flights]);
-
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.STAFF, JSON.stringify(staff));
-  }, [staff]);
-
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.SHIFTS, JSON.stringify(shifts));
-  }, [shifts]);
-
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.PROGRAMS, JSON.stringify(programs));
-  }, [programs]);
-
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.LEAVES, JSON.stringify(leaveRequests));
-  }, [leaveRequests]);
-
-  useEffect(() => {
-    localStorage.setItem(DATA_KEYS.INCOMING, JSON.stringify(incomingDuties));
-  }, [incomingDuties]);
 
   // --- PREFERENCE PERSISTENCE EFFECTS ---
   useEffect(() => {
@@ -496,10 +426,13 @@ const App: React.FC = () => {
 
       // Save current program as a version before overwriting if it has assignments
       if (programs.some((p) => p.assignments.length > 0)) {
-        const savedVersions = localStorage.getItem("skyops_program_versions");
-        let versions: ProgramVersion[] = savedVersions
-          ? JSON.parse(savedVersions)
-          : [];
+        let versions: ProgramVersion[] = [];
+        if (supabase) {
+          try {
+             versions = await db.getProgramVersions() || [];
+          } catch(e) {}
+        }
+        
         const newVersion: ProgramVersion = {
           id: crypto.randomUUID(),
           versionNumber: versions.length + 1,
@@ -517,19 +450,6 @@ const App: React.FC = () => {
         }
         if (supabase) {
           await db.saveProgramVersion(newVersion);
-        } else {
-          try {
-            localStorage.setItem(
-              "skyops_program_versions",
-              JSON.stringify(updatedVersions),
-            );
-          } catch (e) {
-            console.warn("Storage quota exceeded, keeping fewer versions");
-            updatedVersions = updatedVersions.slice(0, 3);
-            try {
-              localStorage.setItem("skyops_program_versions", JSON.stringify(updatedVersions));
-            } catch (err) {}
-          }
         }
       }
 
@@ -555,7 +475,7 @@ const App: React.FC = () => {
       }
       setActiveTab("program");
     } catch (err: any) {
-      console.error("Generation Error:", err);
+      console.warn("Generation Error:", err);
       let msg = err.message || "Engine failure.";
       if (msg.includes("NetworkError") || msg.includes("Failed to fetch")) {
         msg =
