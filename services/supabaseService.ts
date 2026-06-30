@@ -12,16 +12,8 @@ import {
   Airport,
 } from "../types";
 
-const SUPABASE_URL =
-  (import.meta as any).env.VITE_SUPABASE_URL ||
-  process.env.VITE_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  "";
-const SUPABASE_ANON_KEY =
-  (import.meta as any).env.VITE_SUPABASE_ANON_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  "";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 const isConfigured =
   SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 5;
@@ -130,6 +122,11 @@ export const db = {
           .eq(matchCol, matchVal),
       ]);
 
+      const errs = [fRes.error, sRes.error, shRes.error, pRes.error, lRes.error, iRes.error].filter(Boolean);
+      if (errs.length > 0) {
+        throw new Error(errs[0]?.message || "Failed to fetch one or more tables");
+      }
+
       return {
         flights: (fRes.data || []).map((f: any) => ({
           id: f.id,
@@ -229,9 +226,8 @@ export const db = {
           shiftEndTime: i.shift_end_time,
         })),
       };
-    } catch (e) {
-      console.error("Database fetch failure:", e);
-      return null;
+    } catch (e: any) {
+      throw e;
     }
   },
 
@@ -589,9 +585,14 @@ export const db = {
     if (!session) return null;
 
     // Fallback to local storage if no DB
-    const localProfiles = JSON.parse(
-      localStorage.getItem("skyops_user_profiles") || "[]",
-    );
+    let localProfiles = [];
+    try {
+      localProfiles = JSON.parse(
+        localStorage.getItem("skyops_user_profiles") || "[]",
+      );
+    } catch (e) {
+      console.warn("Could not parse local profiles", e);
+    }
     let profile = localProfiles.find(
       (p: UserProfile) => p.id === session.user.id,
     );
@@ -713,9 +714,12 @@ export const db = {
   },
 
   async getAllUserProfiles(): Promise<UserProfile[]> {
-    const localProfiles = JSON.parse(
-      localStorage.getItem("skyops_user_profiles") || "[]",
-    );
+    let localProfiles: any[] = [];
+    try {
+      localProfiles = JSON.parse(
+        localStorage.getItem("skyops_user_profiles") || "[]",
+      );
+    } catch (e) {}
     if (supabase) {
       try {
         const profile = await this.getUserProfile();
@@ -788,9 +792,12 @@ export const db = {
   },
 
   async updateUserProfile(profile: UserProfile) {
-    const localProfiles = JSON.parse(
-      localStorage.getItem("skyops_user_profiles") || "[]",
-    );
+    let localProfiles: any[] = [];
+    try {
+      localProfiles = JSON.parse(
+        localStorage.getItem("skyops_user_profiles") || "[]",
+      );
+    } catch (e) {}
     const index = localProfiles.findIndex(
       (p: UserProfile) => p.id === profile.id,
     );
@@ -832,9 +839,12 @@ export const db = {
   },
 
   async deleteUserProfile(id: string) {
-    const localProfiles = JSON.parse(
-      localStorage.getItem("skyops_user_profiles") || "[]",
-    );
+    let localProfiles: any[] = [];
+    try {
+      localProfiles = JSON.parse(
+        localStorage.getItem("skyops_user_profiles") || "[]",
+      );
+    } catch (e) {}
     const updated = localProfiles.filter((p: UserProfile) => p.id !== id);
     if (supabase) {
       try {
@@ -852,9 +862,12 @@ export const db = {
   },
 
   async createUserProfile(profile: UserProfile) {
-    const localProfiles = JSON.parse(
-      localStorage.getItem("skyops_user_profiles") || "[]",
-    );
+    let localProfiles: any[] = [];
+    try {
+      localProfiles = JSON.parse(
+        localStorage.getItem("skyops_user_profiles") || "[]",
+      );
+    } catch (e) {}
     localProfiles.push(profile);
     if (supabase) {
       try {
@@ -925,9 +938,12 @@ export const db = {
         console.warn("Could not insert audit log to DB");
       }
     } else {
-      const localLogs = JSON.parse(
+    let localLogs: any[] = [];
+    try {
+      localLogs = JSON.parse(
         localStorage.getItem("skyops_audit_logs") || "[]",
       );
+    } catch (e) {}
       localLogs.unshift(log);
       try {
         localStorage.setItem(
@@ -1028,7 +1044,11 @@ export const db = {
         console.warn("Could not fetch audit logs from DB");
       }
     }
-    return JSON.parse(localStorage.getItem("skyops_audit_logs") || "[]");
+    try {
+      return JSON.parse(localStorage.getItem("skyops_audit_logs") || "[]");
+    } catch (e) {
+      return [];
+    }
   },
 
   async getAIGenerationCount(

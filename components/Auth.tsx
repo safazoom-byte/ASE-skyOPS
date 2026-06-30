@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { SkyOpsLogo } from "./Logo";
 
-export const Auth: React.FC = () => {
+export const Auth: React.FC<{ onOfflineBypass?: () => void }> = ({ onOfflineBypass }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -163,7 +163,7 @@ export const Auth: React.FC = () => {
             </button>
           </form>
 
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center space-y-4 flex flex-col">
             <button
               type="button"
               onClick={() => setIsLogin(!isLogin)}
@@ -173,6 +173,15 @@ export const Auth: React.FC = () => {
                 ? "Need Access? Register Terminal"
                 : "Have Access? Initialize Uplink"}
             </button>
+            {onOfflineBypass && (
+              <button
+                type="button"
+                onClick={onOfflineBypass}
+                className="text-[9px] font-black text-rose-500/70 hover:text-rose-400 uppercase tracking-widest transition-colors"
+              >
+                Database Down? Work Offline
+              </button>
+            )}
           </div>
         </div>
 

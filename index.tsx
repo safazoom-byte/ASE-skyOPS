@@ -128,6 +128,7 @@ const App: React.FC = () => {
   const [cloudStatus, setCloudStatus] = useState<
     "connected" | "offline" | "unconfigured" | "error"
   >("unconfigured");
+  const [cloudError, setCloudError] = useState<string>("");
 
   const [startDate, setStartDate] = useState<string>(
     () =>
@@ -147,15 +148,51 @@ const App: React.FC = () => {
   );
 
   // Initialize data from LocalStorage to ensure persistence
-  const [flights, setFlights] = useState<Flight[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [shifts, setShifts] = useState<ShiftConfig[]>([]);
-  const [programs, setPrograms] = useState<DailyProgram[]>([]);
+  const [flights, setFlights] = useState<Flight[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.FLIGHTS);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+  const [staff, setStaff] = useState<Staff[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.STAFF);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+  const [shifts, setShifts] = useState<ShiftConfig[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.SHIFTS);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+  const [programs, setPrograms] = useState<DailyProgram[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.PROGRAMS);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
   const [manualAssignments, setManualAssignments] = useState<
     ManualAssignment[]
   >([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.LEAVES);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+  const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>(() => {
+    try {
+      const stored = localStorage.getItem(DATA_KEYS.INCOMING);
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
 
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<
@@ -193,7 +230,29 @@ const App: React.FC = () => {
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
 
   // --- DATA PERSISTENCE EFFECTS ---
-  // Local storage cache removed for these to favor real DB persistence.
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.FLIGHTS, JSON.stringify(flights));
+  }, [flights]);
+
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.STAFF, JSON.stringify(staff));
+  }, [staff]);
+
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.SHIFTS, JSON.stringify(shifts));
+  }, [shifts]);
+
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.PROGRAMS, JSON.stringify(programs));
+  }, [programs]);
+
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.LEAVES, JSON.stringify(leaveRequests));
+  }, [leaveRequests]);
+
+  useEffect(() => {
+    localStorage.setItem(DATA_KEYS.INCOMING, JSON.stringify(incomingDuties));
+  }, [incomingDuties]);
 
   // --- PREFERENCE PERSISTENCE EFFECTS ---
   useEffect(() => {
@@ -281,7 +340,15 @@ const App: React.FC = () => {
           setCloudStatus("connected");
         }
       } catch (e: any) {
-        if (mounted) setCloudStatus("error");
+        if (mounted) {
+          if (e.message && e.message.includes("Failed to fetch")) {
+            setCloudStatus("offline");
+            setCloudError("");
+          } else {
+            setCloudStatus("error");
+            setCloudError(e.message || "Unknown error");
+          }
+        }
       }
     };
     const checkAuth = async () => {
@@ -299,12 +366,20 @@ const App: React.FC = () => {
               if (mounted) setUserProfile(profile);
             });
             syncCloudData(); // Run in background without blocking initialization
-          } else setCloudStatus("offline");
+          } else {
+            setCloudStatus("unconfigured"); // Default to unconfigured instead of offline if logged out
+          }
           setIsInitializing(false);
         }
       } catch (e: any) {
         if (mounted) {
-          setCloudStatus("error");
+          if (e.message && e.message.includes("Failed to fetch")) {
+            setCloudStatus("offline");
+            setCloudError("");
+          } else {
+            setCloudStatus("error");
+            setCloudError(e.message || "Session fetch failed");
+          }
           setIsInitializing(false);
         }
       }
@@ -323,7 +398,7 @@ const App: React.FC = () => {
             syncCloudData();
           } else {
             setUserProfile(null);
-            setCloudStatus("offline");
+            setCloudStatus("unconfigured");
           }
         }
       });
@@ -846,7 +921,7 @@ const App: React.FC = () => {
         <Loader2 className="text-blue-500 animate-spin" size={64} />
       </div>
     );
-  if (!session && supabase) return <Auth />;
+  if (!session && supabase && cloudStatus !== "offline") return <Auth onOfflineBypass={() => setCloudStatus("offline")} />;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -873,7 +948,9 @@ const App: React.FC = () => {
               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">
                 {cloudStatus === "connected"
                   ? "AI Sync Active"
-                  : "Offline Mode"}
+                  : cloudError
+                    ? `Error: ${cloudError}`
+                    : "Offline Mode"}
               </span>
             </div>
           </div>
