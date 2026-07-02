@@ -46,7 +46,14 @@ export const auth = {
     const client = supabase;
     if (!client) return null;
     try {
-      const { data, error } = await client.auth.getSession();
+      const fetchSession = client.auth.getSession();
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout fetching session")), 5000)
+      );
+      const { data, error } = (await Promise.race([
+        fetchSession,
+        timeout,
+      ])) as any;
       if (error) {
         console.warn("Session fetch error:", error.message);
         if (error.message.toLowerCase().includes("refresh token")) {

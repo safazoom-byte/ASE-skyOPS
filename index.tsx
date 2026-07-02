@@ -314,6 +314,14 @@ const App: React.FC = () => {
     };
     checkAuth();
 
+    // Safety fallback: if auth takes too long or hangs, force initialization to finish
+    const fallbackTimer = setTimeout(() => {
+      if (mounted && isInitializing) {
+        console.warn("Initialization timed out, forcing render.");
+        setIsInitializing(false);
+      }
+    }, 8000);
+
     let unsubscribe = () => {};
     if (supabase) {
       unsubscribe = auth.onAuthStateChange(async (s) => {
@@ -342,6 +350,7 @@ const App: React.FC = () => {
 
     return () => {
       mounted = false;
+      clearTimeout(fallbackTimer);
       unsubscribe();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
